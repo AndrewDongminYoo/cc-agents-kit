@@ -5,9 +5,13 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-08-18
+
 First distribution snapshot. Ships one plugin:
 
 - `guard-hooks` — five defensive hooks. Three `PreToolUse` guards block a recursive `rm` aimed at the home directory or a filesystem root, download-and-execute pipelines, access to live secrets files, and the two zsh quoting mistakes that fail silently. Two `PostToolUse` hooks warn without blocking: a stale lockfile after a manifest edit, and `shellcheck` findings after a shell-script edit.
 
-Each hook carries a regression suite beside it, and every suite is mutation-verified — it fails when the logic it covers is removed.
-Each hook can be disabled individually through its own `CC_GUARD_DISABLE_*` environment variable.
+Each hook carries a regression suite beside it: 117 cases, 49 of which fail when the logic they cover is deleted.
+Each hook can be disabled individually through its own `CC_GUARD_DISABLE_*` environment variable, checked after stdin is drained so a disabled hook cannot break a large `Write`.
+
+Verified on macOS (`/bin/bash` 3.2) and on Linux through CI, and confirmed to load and fire as an installed plugin via `${CLAUDE_PLUGIN_ROOT}`.
