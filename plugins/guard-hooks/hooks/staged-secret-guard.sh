@@ -30,7 +30,11 @@ if [[ "$COMMAND" =~ git[[:space:]]+-C[[:space:]]+([^[:space:]]+) ]]; then
   REPO_ARGS=(-C "${BASH_REMATCH[1]//\"/}")
 fi
 
-DIFF=$(git "${REPO_ARGS[@]}" diff --cached 2>/dev/null || true)
+# `${a[@]+"${a[@]}"}` not `"${a[@]}"`: under `set -u`, bash 3.2 — the version at
+# /bin/bash on macOS — treats an empty array expansion as an unbound variable and
+# aborts. With the `|| true` below that would swallow the abort and leave DIFF
+# empty, silently turning the guard off on exactly the machines it targets.
+DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --cached 2>/dev/null || true)
 [[ -n "$DIFF" ]] || exit 0
 
 # Added lines only — an existing secret being deleted must not block its removal.

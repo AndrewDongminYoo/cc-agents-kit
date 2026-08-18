@@ -34,7 +34,7 @@ def repo(files, stage=True):
 def check_hook(command, cwd):
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
     proc = subprocess.run(
-        ["bash", HOOK], input=payload, capture_output=True, text=True, cwd=cwd
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True, cwd=cwd
     )
     return proc.returncode, proc.stderr
 
@@ -107,7 +107,7 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
     check(f"fail-open: {label}", proc.returncode == 0, f"exit={proc.returncode}")
 
 # --- not a git repository at all --------------------------------------------
@@ -136,7 +136,7 @@ def run_piped(payload, disabled, cwd):
         tmp = fh.name
     try:
         proc = subprocess.run(
-            ["bash", "-c", WRAP, "_", tmp, HOOK, cwd], capture_output=True, text=True, env=env
+            ["/bin/bash", "-c", WRAP, "_", tmp, HOOK, cwd], capture_output=True, text=True, env=env
         )
     finally:
         os.unlink(tmp)

@@ -33,7 +33,9 @@ Before claiming a suite covers the logic, remove that logic and confirm the suit
 Mutate in a way that still parses — `bash` exits `2` on a syntax error, which is indistinguishable from a block, so a broken mutant produces a vacuous pass.
 Run `bash -n` on the mutant first.
 
-Hooks must parse under macOS's system `/bin/bash` 3.2, not just your shell's newer bash: `/bin/bash -n <script>`.
+Hooks must **run**, not merely parse, under macOS's system `/bin/bash` 3.2 — a stock Mac has no newer bash, so that is what the hook is invoked with there.
+The suites therefore call `/bin/bash` rather than `bash`, and CI runs on `macos-latest` alongside Linux for the same reason.
+Testing through a newer bash on `PATH` hides whole classes of fault: `"${arr[@]}"` on an empty array aborts under `set -u` in 3.2 but not in 4.4+, and paired with a `|| true` that abort is swallowed, leaving the guard silently disabled on exactly the machines it targets.
 
 ## Commits
 

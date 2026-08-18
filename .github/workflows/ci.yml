@@ -7,12 +7,27 @@ on:
 
 jobs:
   hooks:
-    runs-on: ubuntu-latest
+    # macOS is not redundant: its /bin/bash is 3.2, the oldest bash the hooks
+    # claim to support, and the suites invoke the hooks through /bin/bash. A
+    # 3.2-only fault (an empty array under `set -u`, for one) passes on Linux.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install shellcheck
+          else
+            sudo apt-get update && sudo apt-get install -y shellcheck
+          fi
+
+      - name: Report the bash under test
+        run: /bin/bash -c 'echo "/bin/bash is $BASH_VERSION"'
 
       - name: Validate manifests
         run: |
@@ -31,8 +46,30 @@ jobs:
           print(f'{len(m["plugins"])} plugin source(s) present')
           PY
 
+      - name: Every wired hook exists
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path("plugins/guard-hooks")
+          wired, missing = 0, []
+          for groups in json.load(open(root / "hooks/hooks.json"))["hooks"].values():
+              for group in groups:
+                  for hook in group["hooks"]:
+                      name = hook["command"].split("/hooks/")[-1].rstrip('"')
+                      wired += 1
+                      if not (root / "hooks" / name).is_file():
+                          missing.append(name)
+          if missing:
+              sys.exit(f"hooks.json wires missing scripts: {missing}")
+          print(f"{wired} wired hook(s) present")
+          PY
+
       - name: Shellcheck
         run: shellcheck plugins/*/hooks/*.sh
+
+      - name: Parse under /bin/bash
+        run: |
+          for f in plugins/*/hooks/*.sh; do /bin/bash -n "$f" || exit 1; done
 
       - name: Hook regression suites
         run: |

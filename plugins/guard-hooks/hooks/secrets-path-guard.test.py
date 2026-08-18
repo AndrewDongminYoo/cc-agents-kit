@@ -45,7 +45,7 @@ CASES = [
 fails = 0
 for expected, label, tool_input in CASES:
     payload = json.dumps({"tool_name": "Read", "tool_input": tool_input})
-    proc = subprocess.run(["bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
     ok = proc.returncode == expected
     fails += not ok
     print(
@@ -61,7 +61,7 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
     ok = proc.returncode == 0
     fails += not ok
     print(
@@ -97,7 +97,7 @@ def run_piped(payload, disabled):
         tmp = fh.name
     try:
         proc = subprocess.run(
-            ["bash", "-c", WRAP, "_", tmp, HOOK], capture_output=True, text=True, env=env
+            ["/bin/bash", "-c", WRAP, "_", tmp, HOOK], capture_output=True, text=True, env=env
         )
     finally:
         os.unlink(tmp)

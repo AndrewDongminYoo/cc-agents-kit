@@ -15,7 +15,7 @@ OLD, NEW = 1_700_000_000, 1_700_000_100
 def run(file_path):
     """Return (exit_code, additionalContext or None)."""
     payload = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": file_path}})
-    proc = subprocess.run(["bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
     out = proc.stdout.strip()
     if not out:
         return proc.returncode, None
@@ -108,7 +108,7 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
     check(
         f"fail-open: {label}",
         proc.returncode == 0 and not proc.stdout.strip(),
@@ -140,7 +140,7 @@ def run_piped(payload, disabled):
         tmp = fh.name
     try:
         proc = subprocess.run(
-            ["bash", "-c", WRAP, "_", tmp, HOOK], capture_output=True, text=True, env=env
+            ["/bin/bash", "-c", WRAP, "_", tmp, HOOK], capture_output=True, text=True, env=env
         )
     finally:
         os.unlink(tmp)
