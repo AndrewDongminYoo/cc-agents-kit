@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "cc-agents-kit",
+  "version": "0.1.0",
+  "description": "Guardrails and workflow tooling for Claude Code, packaged as installable plugins.",
+  "owner": {
+    "name": "Dongmin Yu"
+  },
+  "plugins": [
+    {
+      "name": "guard-hooks",
+      "source": "./plugins/guard-hooks",
+      "description": "Five defensive hooks: blocks recursive rm on $HOME, download-and-execute pipelines, secrets-file access, and the two zsh quoting mistakes that fail silently; warns on stale lockfiles and shellcheck findings.",
+      "category": "productivity"
+    }
+  ]
+}
