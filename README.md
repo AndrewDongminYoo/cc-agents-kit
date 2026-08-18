@@ -5,6 +5,8 @@
 A Claude Code plugin marketplace.
 Each plugin is scoped to one pain, so you install the part you want and nothing else.
 
+![A search that silently returns the wrong answer, then the same search blocked before it runs](docs/guard-hooks.gif)
+
 ```bash
 /plugin marketplace add AndrewDongminYoo/cc-agents-kit
 /plugin install guard-hooks@cc-agents-kit
@@ -33,13 +35,23 @@ git commit -m "fix: cancel `players` subscription"
 ```
 
 **An unquoted glob in an option value.**
-zsh expands it against the current directory before the tool is invoked.
-Under `nomatch` an unmatched glob aborts the whole command, so empty output means *never ran*, not *found nothing*; when it does match, the tool receives one arbitrary filename instead of the pattern.
+zsh expands it against the current directory before the tool is ever invoked, so what the tool receives depends on what happens to sit next to you.
+Which of three outcomes you get is decided by the count of matches in the working directory, and only one of them is loud enough to notice on its own:
 
 ```bash
 grep -rn "AudioPool" lib/ --include=*.dart
-# zsh: no matches found: --include=*.dart   ← nothing ran, and the search looks clean
+# no .dart in the CWD → zsh: no matches found   ← the command never ran, and
+#                                                 empty output reads as "no hits"
+
+find . -name *.md
+# several .md in the CWD → find: CLAUDE.md: unknown primary or operator, exit 1
+
+find . -name *.md
+# exactly one .md in the CWD → ./README.md, exit 0   ← the dangerous one: it ran
+#   as `find . -name README.md`, so every nested .md is missing and nothing said so
 ```
+
+The middle case is loud. The other two are not: a zero-match abort leaves empty output that reads as *found nothing* rather than *never ran*, and a single match returns a short, plausible, wrong answer with a success exit code.
 
 Neither produces a wrong-looking result, which is what makes them expensive.
 The guard blocks both shapes before the command runs.
