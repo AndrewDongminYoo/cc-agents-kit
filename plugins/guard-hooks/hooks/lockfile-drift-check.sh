@@ -6,10 +6,11 @@
 
 set -euo pipefail
 
-# Opt-out: set CC_GUARD_DISABLE_LOCKFILE_DRIFT=1 to disable this hook.
-[[ -n "${CC_GUARD_DISABLE_LOCKFILE_DRIFT:-}" ]] && exit 0
-
 HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
+
+# Opt-out: set CC_GUARD_DISABLE_LOCKFILE_DRIFT=1 to disable this hook. Checked after stdin is
+# drained so a disabled hook never leaves the harness writing to a closed pipe.
+[[ -n "${CC_GUARD_DISABLE_LOCKFILE_DRIFT:-}" ]] && exit 0
 FILE_PATH=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
 [[ -n "$FILE_PATH" && -f "$FILE_PATH" ]] || exit 0
 

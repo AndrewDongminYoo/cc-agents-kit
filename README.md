@@ -88,17 +88,18 @@ Silently does nothing when `shellcheck` is not installed.
 
 ### Turning hooks off
 
-Every hook honours its own environment variable from the table above, checked before it reads any input.
-Set it wherever Claude Code picks up your environment — for a single session:
+Every hook honours its own environment variable from the table above.
+A disabled hook still drains its input and exits `0` silently, so nothing else in the chain changes.
+Set the variable wherever Claude Code inherits your environment — for a single session:
 
 ```bash
 CC_GUARD_DISABLE_ZSH_QUOTING=1 claude
 ```
 
-Or persist it in `settings.json`:
+Or persist it by exporting it from your shell profile:
 
-```json
-{ "env": { "CC_GUARD_DISABLE_ZSH_QUOTING": "1" } }
+```bash
+export CC_GUARD_DISABLE_ZSH_QUOTING=1
 ```
 
 To turn the whole bundle off, use `/plugin` and disable `guard-hooks`.

@@ -17,7 +17,7 @@ An entry pointing at a missing directory breaks installation for everyone, so ad
 ## Adding a hook
 
 1. Read the hook JSON from stdin and **fail open** — empty, malformed, or key-less input must exit `0` with no output. A guard that errors on unrelated tool calls gets uninstalled.
-2. Give it an opt-out: `CC_GUARD_DISABLE_<NAME>=1`, checked before any input is read, and add it to the README table.
+2. Give it an opt-out: `CC_GUARD_DISABLE_<NAME>=1`, and add it to the README table. Check it *after* stdin is drained, never before — a `Write` payload carries the whole file content, so exiting early leaves the harness writing to a closed pipe and surfaces a hook error exactly when the user asked for the hook to be off.
 3. `PreToolUse` guards exit `2` to block. `PostToolUse` hooks must never block — emit `hookSpecificOutput.additionalContext` and exit `0`.
 4. Write the regression suite next to the script. It resolves the hook via `Path(__file__).resolve().with_name(...)`, so the two files stay in the same directory.
 

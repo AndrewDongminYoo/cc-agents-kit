@@ -9,10 +9,11 @@
 
 set -euo pipefail
 
-# Opt-out: set CC_GUARD_DISABLE_DANGEROUS_COMMAND=1 to disable this hook.
-[[ -n "${CC_GUARD_DISABLE_DANGEROUS_COMMAND:-}" ]] && exit 0
-
 HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
+
+# Opt-out: set CC_GUARD_DISABLE_DANGEROUS_COMMAND=1 to disable this hook. Checked after stdin is
+# drained so a disabled hook never leaves the harness writing to a closed pipe.
+[[ -n "${CC_GUARD_DISABLE_DANGEROUS_COMMAND:-}" ]] && exit 0
 COMMAND=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 [[ -z "$COMMAND" ]] && exit 0
 
