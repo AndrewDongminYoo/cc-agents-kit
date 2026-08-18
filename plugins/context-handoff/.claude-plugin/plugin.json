@@ -1,0 +1,19 @@
+{
+  "name": "context-handoff",
+  "version": "0.1.0",
+  "description": "Carry work across sessions and keep the context that carries it lean: hand off a session, export or log what it found, chart an effort too big for one sitting, and audit or garbage-collect your Claude Code config.",
+  "author": {
+    "name": "Dongmin Yu"
+  },
+  "homepage": "https://github.com/AndrewDongminYoo/cc-agents-kit",
+  "repository": "https://github.com/AndrewDongminYoo/cc-agents-kit",
+  "license": "Apache-2.0",
+  "keywords": [
+    "handoff",
+    "context",
+    "session",
+    "planning",
+    "claude-config"
+  ],
+  "skills": "./skills"
+}

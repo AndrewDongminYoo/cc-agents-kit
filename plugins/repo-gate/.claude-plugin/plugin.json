@@ -1,0 +1,19 @@
+{
+  "name": "repo-gate",
+  "version": "0.1.0",
+  "description": "What runs between \"the code works\" and \"it is pushed\": trunk setup, conventional-commit splitting, dependency vulnerability triage, spell-check triage, and babysitting CI until it is green.",
+  "author": {
+    "name": "Dongmin Yu"
+  },
+  "homepage": "https://github.com/AndrewDongminYoo/cc-agents-kit",
+  "repository": "https://github.com/AndrewDongminYoo/cc-agents-kit",
+  "license": "Apache-2.0",
+  "keywords": [
+    "ci",
+    "commits",
+    "linting",
+    "security",
+    "trunk"
+  ],
+  "skills": "./skills"
+}

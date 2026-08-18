@@ -12,6 +12,18 @@
       "source": "./plugins/guard-hooks",
       "description": "Seven defensive hooks: blocks recursive rm on $HOME, download-and-execute pipelines, secrets-file access, path-less formatter runs, credentials in the staged diff, and the two zsh quoting mistakes that fail silently; warns on stale lockfiles and shellcheck findings.",
       "category": "productivity"
+    },
+    {
+      "name": "context-handoff",
+      "source": "./plugins/context-handoff",
+      "description": "Carry work across sessions and keep the context that carries it lean: hand off a session, export or log what it found, chart an effort too big for one sitting, and audit or garbage-collect your Claude Code config.",
+      "category": "productivity"
+    },
+    {
+      "name": "repo-gate",
+      "source": "./plugins/repo-gate",
+      "description": "What runs between \"the code works\" and \"it is pushed\": trunk setup, conventional-commit splitting, dependency vulnerability triage, spell-check triage, and babysitting CI until it is green.",
+      "category": "productivity"
     }
   ]
 }

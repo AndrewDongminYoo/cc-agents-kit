@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Prints public repositories whose default branch contains .trunk/trunk.yaml.
+#
+# Requirements:
+#   - GitHub CLI must be installed and authenticated with `gh auth login`.
+#
+# Usage:
+#   ./find-trunk-repos.sh
+#
+# Output format:
+#   <owner/repo>    <default-branch>    <file-web-url>
+set -u
+
+FILE=".trunk/trunk.yaml"
+OWNER="$(gh api user -q .login)"
+
+# list public repositories with their default branches
+gh repo list "$OWNER" --limit 1000 --visibility public --json nameWithOwner,defaultBranchRef --jq '.[] | [.nameWithOwner, .defaultBranchRef.name] | @tsv' |
+while IFS=$'\t' read -r repo branch; do
+  if [ -z "$branch" ] || [ "$branch" = "null" ]; then
+    continue
+  fi
+
+  # print the GitHub web URL only when the target file exists
+  if url="$(
+    gh api --method GET "repos/$repo/contents/$FILE" \
+      -f ref="$branch" \
+      --jq '.html_url' 2>/dev/null
+  )"; then
+    printf '%s\t%s\t%s\n' "$repo" "$branch" "$url"
+  fi
+done

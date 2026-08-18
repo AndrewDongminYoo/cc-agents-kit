@@ -1,0 +1,153 @@
+---
+name: semantic-commit
+description: Use when staged/unstaged changes mix multiple unrelated concerns and need splitting into clean conventional commits, or when asked for "semantic commits", "logical commits", or "커밋 분리". Works in any language or ecosystem.
+allowed-tools: Bash, Read, Glob
+metadata:
+  category: commits-ci-release
+---
+
+# Semantic Commit
+
+Split work-in-progress changes into clean, reviewable conventional commits, verifying before each commit.
+
+## Applicability
+
+Use when:
+
+- Multiple unrelated changes are unstaged/staged together
+- User asks for "semantic commits", "logical commits", or "커밋 분리"
+- After a multi-item implementation session before pushing
+
+Skip when:
+
+- There is only one logical change (just commit it directly)
+- User explicitly asks for a single combined commit
+
+## Steps
+
+### 1. Understand the Full Diff
+
+Run in parallel:
+
+```bash
+git status
+git diff HEAD
+```
+
+Read each changed file if the diff alone is insufficient to determine intent.
+
+### 2. Group by Concern
+
+Assign each changed file to exactly one group:
+
+| Type              | When                                        |
+| ----------------- | ------------------------------------------- |
+| `feat(scope)`     | New user-facing behavior                    |
+| `fix(scope)`      | Bug correction                              |
+| `perf(scope)`     | Performance improvement, no behavior change |
+| `refactor(scope)` | Code restructure, no behavior change        |
+| `test(scope)`     | Test additions or changes only              |
+| `build(scope)`    | Build system, deps, bundler, packaging      |
+| `ci(scope)`       | CI/CD config and pipelines                  |
+| `chore(scope)`    | Tooling, version bump, misc maintenance     |
+| `docs(scope)`     | Documentation only                          |
+| `style(scope)`    | Formatting, import order, no logic change   |
+
+Rules:
+
+- One file → one group.
+  If a file spans two concerns, lean toward the dominant intent.
+- Test files travel with their production file when both change together.
+- Never mix `feat` and `fix` in the same commit.
+- Pick `scope` from the affected module/package/feature area (see Scopes below).
+
+### 3. Present the Plan
+
+Show the proposed commit sequence **before executing**:
+
+```markdown
+Proposed commits:
+
+1. feat(auth): add refresh-token rotation
+   Files: src/auth/..., src/api/...
+2. test(auth): cover refresh-token rotation edge cases
+   Files: tests/auth/...
+3. build(deps): bump jsonwebtoken to 9.0.2
+   Files: package.json, package-lock.json
+```
+
+Wait for user confirmation ("go" / "네" / "좋습니다") before committing.
+
+### 4. Commit Each Group
+
+For each group in order:
+
+1. Stage only the files in this group: `git add <files>`
+2. Run the project's verification commands (see Verification below)
+3. Fix any issues before committing (do not skip verification)
+4. Commit with the message on the subject line:
+
+   ```bash
+   git commit -m "type(scope): description"
+   ```
+
+   For a body, use a heredoc:
+
+   ```bash
+   git commit -m "$(cat <<'EOF'
+   type(scope): description
+
+   Optional body explaining the why.
+   EOF
+   )"
+   ```
+
+No `Co-authored-by: Claude` or similar AI trailer.
+
+### 5. Report
+
+After all commits, output:
+
+```log
+Committed:
+  abc1234  feat(auth): add refresh-token rotation
+  def5678  test(auth): cover refresh-token rotation edge cases
+  ghi9012  build(deps): bump jsonwebtoken to 9.0.2
+```
+
+## Verification
+
+Detect the verify commands from the project — **do not assume any single stack.**
+Prefer the project's own declared scripts (npm `package.json` scripts, `Makefile`/`justfile` targets, `CONTRIBUTING.md`, CI config) over the defaults below.
+
+| Manifest / signal                     | Format / fix                | Lint / typecheck                         | Test                         |
+| ------------------------------------- | --------------------------- | ---------------------------------------- | ---------------------------- |
+| `package.json`                        | `npm run format` / prettier | `npm run lint` / eslint / `tsc --noEmit` | `npm test`                   |
+| `pubspec.yaml`                        | `dart format .`             | `flutter analyze` or `dart analyze`      | `flutter test` / `dart test` |
+| `Cargo.toml`                          | `cargo fmt`                 | `cargo clippy -- -D warnings`            | `cargo test`                 |
+| `pyproject.toml` / `requirements.txt` | `ruff format` / black       | `ruff check` / mypy                      | `pytest`                     |
+| `go.mod`                              | `gofmt -w` / `go fmt`       | `go vet` / golangci-lint                 | `go test ./...`              |
+| `*.csproj` / `*.sln`                  | `dotnet format`             | `dotnet build -warnaserror`              | `dotnet test`                |
+| shell scripts                         | `shfmt -w`                  | `shellcheck`                             | bats / project test script   |
+
+For **JS/TS**, detect the package manager from the lockfile — `pnpm-lock.yaml` → `pnpm`, `yarn.lock` → `yarn`, `bun.lockb` → `bun`, else `npm` — and substitute it for `npm` above (e.g. `pnpm test`).
+In a workspace/monorepo, scope to the changed package (`pnpm --filter <pkg> test`).
+
+Format commands rewrite files — after formatting a staged group, re-run `git add` on the affected files (or use the formatter's `--check` mode purely as the gate).
+Scale verification to the commit: a `docs`-only or `style`-only commit needs format/lint, not the full test suite.
+Run the full test suite at least after the final commit.
+If the project has **no** test or lint setup, say so rather than inventing commands.
+
+## Scopes
+
+Use a short scope naming the affected area.
+Derive scopes from the repository's own structure — top-level packages, feature folders, or modules.
+Common cross-cutting scopes: `deps`, `ci`, `release`, `config`, `docs`.
+If a change is genuinely repo-wide, omit the scope (`chore: ...`).
+
+## Exit Criteria
+
+- All changes are committed (no unstaged/staged leftovers)
+- Lint/typecheck passes after every commit
+- Tests pass after the final commit
+- No commit mixes unrelated concerns
