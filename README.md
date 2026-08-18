@@ -19,6 +19,8 @@ Hooks are read when a session starts, so restart any session that is already ope
 | Plugin | What it does |
 | --- | --- |
 | [`guard-hooks`](#guard-hooks) | Seven defensive hooks — five block, two warn. |
+| [`context-handoff`](#context-handoff) | Carry work across sessions, and keep the context that carries it lean. |
+| [`repo-gate`](#repo-gate) | What runs between "the code works" and "it is pushed". |
 
 ## guard-hooks
 
@@ -197,7 +199,44 @@ Two details worth knowing if you extend them.
 The opt-out cases feed the hook a 200KB payload over a real pipe and read the *writer's* exit status, because Python's `subprocess` swallows `BrokenPipeError` — an `input=`-style test cannot see the bug they exist to catch, and moving the opt-out check above the stdin read fails them with `SIGPIPE` rather than passing quietly.
 `shellcheck-on-edit.test.py` skips its findings checks when `shellcheck` is absent and asserts the silent no-op instead, so it stays meaningful in CI either way.
 
+## context-handoff
+
+```bash
+/plugin install context-handoff@cc-agents-kit
+```
+
+Six skills for work that outlives one session, and for the config that work drags along.
+
+| Skill | Use it when |
+| --- | --- |
+| `handoff` | Context is long or degrading and the next session needs a self-contained brief — printed, or written to a file a fresh session can pick up. |
+| `session-export` | You want the transcript itself as readable markdown, tool calls collapsed. |
+| `log-it` | A session found something non-obvious and it should outlive the window. Routes each fact by who has to read it. |
+| `wayfinder` | The effort is too big for one session. Charts it as decision tickets under `docs/plans/`, one resolved per session. |
+| `context-budget` | You want to know what is eating the context window — agents, skills, MCP servers, rules — ranked by what you would get back. |
+| `config-gc` | `~/.claude` has accumulated. Walks redundant, stale, and orphaned items with a confirmation per deletion. |
+
+`wayfinder`, `context-budget`, and `config-gc` derive from MIT-licensed work by others, with the overlap measured rather than described — see [CREDITS.md](CREDITS.md).
+
+## repo-gate
+
+```bash
+/plugin install repo-gate@cc-agents-kit
+```
+
+Five skills for the stretch between "the code works" and "it is pushed".
+
+| Skill | Use it when |
+| --- | --- |
+| `semantic-commit` | Unrelated changes are staged together and want splitting into conventional commits, verified before each one. |
+| `setup-trunk` | Adding trunk.io to a repo, or configuring its linters and hooks over a codebase with existing violations. |
+| `ci-babysit` | A branch is pushed and CI has to go green. Self-heals mechanical failures within an attempt budget, then stops honestly when a human is needed. |
+| `fix-osv-vulnerabilities` | `osv-scanner` or `trunk check` reports GHSA advisories and they need triage rather than a blanket bump. |
+| `cspell-triage` | cspell is reporting unknown words, or its dictionaries need consolidating. |
+
+These are ecosystem-agnostic where the task allows it: the commit and CI skills read the project's own declared scripts rather than assuming a stack.
+
 ## Licence
 
-Apache-2.0.
-Attribution for anything adapted from upstream work is in [CREDITS.md](CREDITS.md).
+Apache-2.0, except where [CREDITS.md](CREDITS.md) records an upstream MIT component.
+Every skill adapted from someone else's work names its source in a `metadata.origin` key and in that file.
