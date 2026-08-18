@@ -26,6 +26,11 @@ jobs:
             sudo apt-get update && sudo apt-get install -y shellcheck
           fi
 
+      # Present on the Linux image, absent on the macOS one. The frontmatter
+      # check needs a real parser: asserting that it parses is the point.
+      - name: Ensure pyyaml
+        run: python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --disable-pip-version-check pyyaml
+
       - name: Report the bash under test
         run: /bin/bash -c 'echo "/bin/bash is $BASH_VERSION"'
 
