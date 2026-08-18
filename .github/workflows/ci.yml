@@ -64,6 +64,41 @@ jobs:
           print(f"{wired} wired hook(s) present")
           PY
 
+      - name: Every skill has parseable frontmatter with a name and description
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+          bad, n = [], 0
+          for f in sorted(pathlib.Path("plugins").glob("*/skills/*/SKILL.md")):
+              n += 1
+              try:
+                  d = yaml.safe_load(f.read_text().split("---\n")[1])
+              except Exception as e:
+                  bad.append(f"{f}: frontmatter does not parse ({e})"); continue
+              for key in ("name", "description"):
+                  if not (d or {}).get(key):
+                      bad.append(f"{f}: missing {key}")
+              if (d or {}).get("name") != f.parent.name:
+                  bad.append(f"{f}: name {d.get('name')!r} != directory {f.parent.name!r}")
+          if bad:
+              sys.exit("\n".join(bad))
+          print(f"{n} skill(s) ok")
+          PY
+
+      # An absolute home path is a leak unless it is an obvious placeholder.
+      # `.zprofile.secrets` is deliberately NOT matched — it is the path
+      # secrets-path-guard exists to protect, so its presence is the feature.
+      - name: No private or machine-specific references
+        run: |
+          hits=$(grep -rniE '/Users/[a-z]|/Volumes/[a-z]|llm-wiki|ydm2790' plugins/ \
+                 | grep -vE '/Users/(me|you|user|USERNAME|<[a-z]+>)\b' || true)
+          if [ -n "$hits" ]; then
+            printf '%s\n' "$hits" >&2
+            echo "^ published plugins must not carry machine-specific paths" >&2
+            exit 1
+          fi
+          echo "no private references"
+
       - name: Shellcheck
         run: shellcheck plugins/*/hooks/*.sh
 
