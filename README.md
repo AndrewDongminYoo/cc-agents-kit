@@ -107,7 +107,7 @@ To turn the whole bundle off, use `/plugin` and disable `guard-hooks`.
 ### Requirements
 
 - **`jq`** — a hard prerequisite. Every hook parses its input with `jq`, and each one fails *open* when `jq` is missing: the guards stop guarding silently rather than erroring. Confirm with `jq --version` after installing.
-- **`bash`** — the hooks are invoked as `bash <script>` regardless of your interactive shell, and are written against macOS's system `/bin/bash` 3.2. Verified on macOS (`GNU bash 3.2.57`, darwin arm64). Linux with bash 4+ or 5+ is expected to work but is not yet verified.
+- **`bash`** — the hooks are invoked as `bash <script>` regardless of your interactive shell, and are written against macOS's system `/bin/bash` 3.2, the oldest bash they need to parse under. Verified on macOS (`GNU bash 3.2.57`, darwin arm64) and on Linux, where CI runs shellcheck and the full suite on `ubuntu-latest` for every push to `main` and every pull request.
 - **`shellcheck`** — optional; only `shellcheck-on-edit.sh` uses it, and that hook no-ops without it.
 - **`python3`** — tests only, not runtime.
 
