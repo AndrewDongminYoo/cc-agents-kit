@@ -132,6 +132,7 @@ cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; d
 ```
 
 Every suite is mutation-verified: with the blocking logic removed (`exit 2` → `exit 0`, `-ot` → `-nt`, the reporting line dropped) each suite fails, so a pass is evidence rather than a formality.
+The opt-out contract is pinned the same way — each suite feeds the hook a 200KB payload over a real pipe and reads the *writer's* exit status, so moving the opt-out check above the stdin read fails the suite with `SIGPIPE` instead of passing quietly.
 `shellcheck-on-edit.test.py` skips its findings checks when `shellcheck` is absent and asserts the silent no-op instead, so it stays meaningful in CI either way.
 
 ## Licence
