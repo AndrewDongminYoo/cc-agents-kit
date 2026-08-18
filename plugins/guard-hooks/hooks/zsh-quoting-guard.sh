@@ -7,8 +7,11 @@
 #      command substitution, so the backticked word is deleted from the message
 #      (and its "command not found" is easy to miss in the commit output).
 #   2. An unquoted glob in an option value (--include=*.dart, -name *.md).
-#      zsh's `nomatch` aborts the WHOLE command when nothing matches, and
-#      expands it to a single arbitrary filename when something does.
+#      What zsh does depends on how many files in the CWD match, and only one
+#      of the three outcomes is quiet: no match aborts the whole command
+#      (`nomatch`), several expand to a list the tool rejects, and exactly one
+#      expands to that filename — so the tool searches a single file instead of
+#      the pattern, exits 0, and the answer looks complete.
 #
 # Regex on the command string — a guardrail against an accidental slip, not a
 # parser. Must fail open (exit 0) on any empty/malformed input.
@@ -53,7 +56,7 @@ fi
 GLOB_EQ_RE='--(include|exclude|glob|iglob|ignore)=[^"'\''[:space:]]*[*?]'
 GLOB_ARG_RE='[[:space:]]-(name|iname|path|ipath)[[:space:]]+[^"'\''[:space:]]*[*?]'
 if [[ "$SCAN" =~ $GLOB_EQ_RE ]] || [[ "$SCAN" =~ $GLOB_ARG_RE ]]; then
-  echo "Blocked: unquoted glob pattern (${BASH_REMATCH[0]# }). zsh expands it against the CWD — aborting the whole command when nothing matches, or substituting one arbitrary filename when something does. Quote the pattern: --include='*.dart', -name '*.md'." >&2
+  echo "Blocked: unquoted glob pattern (${BASH_REMATCH[0]# }). zsh expands it against the CWD before the tool sees it: no match aborts the whole command, several become a filename list the tool rejects, and exactly one silently searches that single file instead of the pattern. Quote it: --include='*.dart', -name '*.md'." >&2
   exit 2
 fi
 

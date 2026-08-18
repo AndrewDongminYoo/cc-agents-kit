@@ -13,16 +13,19 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT
 
 mkdir -p "$stage/docs"
 echo "# README" > "$stage/README.md"
 echo "# design notes" > "$stage/docs/DESIGN.md"
 
-cat > "$stage/play.sh" <<'PLAY'
+# Kept outside the stage: anything in there shows up in the `ls -R` on screen.
+play="$stage.play.sh"
+trap 'rm -rf "$stage" "$play"' EXIT
+
+cat > "$play" <<'PLAY'
 #!/bin/bash
 set -u
-cd "$(dirname "$0")"
+cd "$1" || exit 1
 
 P=$'\033[38;5;114m'; C=$'\033[38;5;245m'; R=$'\033[38;5;203m'; X=$'\033[0m'
 
@@ -59,15 +62,16 @@ beat 0.9
 type_out "claude -p 'find . -name *.md'"
 say "$R" "PreToolUse:Bash hook error: [\${CLAUDE_PLUGIN_ROOT}/hooks/zsh-quoting-guard.sh]"
 say "$R" "Blocked: unquoted glob pattern (-name *). zsh expands it against the CWD"
-say "$R" "— aborting the whole command when nothing matches, or substituting one"
-say "$R" "arbitrary filename when something does. Quote it: -name '*.md'."
+say "$R" "before the tool sees it: no match aborts the whole command, several"
+say "$R" "become a filename list the tool rejects, and exactly one silently"
+say "$R" "searches that single file instead of the pattern. Quote it: -name '*.md'."
 beat 1.2
 say "$P" "# /plugin install guard-hooks@cc-agents-kit"
 beat 3.2
 PLAY
 
-chmod +x "$stage/play.sh"
-asciinema rec "$here/guard-hooks.cast" --headless --overwrite -c "bash $stage/play.sh"
+chmod +x "$play"
+asciinema rec "$here/guard-hooks.cast" --headless --overwrite -c "bash $play $stage"
 agg "$here/guard-hooks.cast" "$here/guard-hooks.gif" \
   --font-size 16 --theme asciinema --idle-time-limit 1.5
 echo "wrote $here/guard-hooks.gif"
