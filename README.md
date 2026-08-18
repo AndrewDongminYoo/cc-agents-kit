@@ -1,5 +1,7 @@
 # cc-agents-kit
 
+[![ci](https://github.com/AndrewDongminYoo/cc-agents-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/AndrewDongminYoo/cc-agents-kit/actions/workflows/ci.yml)
+
 A Claude Code plugin marketplace.
 Each plugin is scoped to one pain, so you install the part you want and nothing else.
 
@@ -37,6 +39,17 @@ grep -rn "AudioPool" lib/ --include=*.dart
 
 Neither produces a wrong-looking result, which is what makes them expensive.
 The guard blocks both shapes before the command runs.
+
+### Why you should trust it in your shell
+
+A hook bundle runs on every tool call, so "it has tests" is not worth much on its own.
+These are the three properties that matter, and each is pinned by a case that fails when the property is removed:
+
+- **A passing suite is not taken as evidence.** 117 cases across the five hooks; delete the logic they cover — `exit 2` → `exit 0`, `-ot` → `-nt`, drop the reporting line — and 49 of them fail. Mutants are parse-checked first, because `bash` exits `2` on a syntax error and an unparseable mutant would otherwise produce a vacuous pass.
+- **Guards fail open, never closed.** Empty, malformed, or key-less input exits `0` silently. A broken guard degrades to no guard, and never to a blocked tool call.
+- **The two `PostToolUse` hooks cannot block you.** They only attach a warning. Every hook also has its own kill switch, and a disabled hook still drains its input, so turning one off cannot itself break a large `Write`.
+
+Nothing here is a sandbox — see [Known limits](#known-limits) for what these guards do not stop.
 
 ### The five hooks
 
@@ -131,8 +144,10 @@ Each hook has a regression suite next to it — plain `python3` + `bash` + `jq`,
 cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done
 ```
 
-Every suite is mutation-verified: with the blocking logic removed (`exit 2` → `exit 0`, `-ot` → `-nt`, the reporting line dropped) each suite fails, so a pass is evidence rather than a formality.
-The opt-out contract is pinned the same way — each suite feeds the hook a 200KB payload over a real pipe and reads the *writer's* exit status, so moving the opt-out check above the stdin read fails the suite with `SIGPIPE` instead of passing quietly.
+The mutation counts above are re-derived from these files, not quoted from a past run.
+
+Two details worth knowing if you extend them.
+The opt-out cases feed the hook a 200KB payload over a real pipe and read the *writer's* exit status, because Python's `subprocess` swallows `BrokenPipeError` — an `input=`-style test cannot see the bug they exist to catch, and moving the opt-out check above the stdin read fails them with `SIGPIPE` rather than passing quietly.
 `shellcheck-on-edit.test.py` skips its findings checks when `shellcheck` is absent and asserts the silent no-op instead, so it stays meaningful in CI either way.
 
 ## Licence
