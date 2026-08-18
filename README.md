@@ -10,6 +10,10 @@ Each plugin is scoped to one pain, so you install the part you want and nothing 
 /plugin install guard-hooks@cc-agents-kit
 ```
 
+Upgrading needs `claude plugin update guard-hooks@cc-agents-kit` — the marketplace suffix is required, and installing again is a no-op that reports success.
+Refreshing the marketplace alone is not enough: the cache keeps one directory per version, and the runtime loads the version recorded at install time, so `claude plugin details` can report the new version while the old one is still what fires.
+Hooks are read when a session starts, so restart any session that is already open.
+
 | Plugin | What it does |
 | --- | --- |
 | [`guard-hooks`](#guard-hooks) | Seven defensive hooks — five block, two warn. |

@@ -37,6 +37,21 @@ Hooks must **run**, not merely parse, under macOS's system `/bin/bash` 3.2 — a
 The suites therefore call `/bin/bash` rather than `bash`, and CI runs on `macos-latest` alongside Linux for the same reason.
 Testing through a newer bash on `PATH` hides whole classes of fault: `"${arr[@]}"` on an empty array aborts under `set -u` in 3.2 but not in 4.4+, and paired with a `|| true` that abort is swallowed, leaving the guard silently disabled on exactly the machines it targets.
 
+## Before a release
+
+CI validates the manifests structurally, but the CLI's own validator knows the schema and is the last word.
+It needs the `claude` CLI, so it runs locally rather than in CI:
+
+```bash
+claude plugin validate .
+```
+
+Then bump the changed plugin's `version` in its `plugin.json`.
+The marketplace's own `version` is independent and does not track any plugin — the runtime keys its cache on the plugin version alone.
+
+After publishing, verify the new version actually loads rather than assuming it did: `claude plugin update <plugin>@cc-agents-kit`, start a fresh session, and confirm a hook that exists only in the new version fires with `${CLAUDE_PLUGIN_ROOT}` in its error.
+Pick a probe that is harmless when it is *not* blocked — `prettier --write` fails on its own without a formatter installed, whereas `jsonsort` would quietly rewrite the tree.
+
 ## Commits
 
 Conventional commits, grouped by concern.
