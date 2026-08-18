@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Validate manifests
+        run: |
+          for f in .claude-plugin/marketplace.json plugins/*/.claude-plugin/plugin.json plugins/*/hooks/hooks.json; do
+            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"
+          done
+
+      - name: Every marketplace plugin source exists
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          m = json.load(open(".claude-plugin/marketplace.json"))
+          missing = [p["source"] for p in m["plugins"] if not pathlib.Path(p["source"]).is_dir()]
+          if missing:
+              sys.exit(f"marketplace.json points at missing directories: {missing}")
+          print(f'{len(m["plugins"])} plugin source(s) present')
+          PY
+
+      - name: Shellcheck
+        run: shellcheck plugins/*/hooks/*.sh
+
+      - name: Hook regression suites
+        run: |
+          cd plugins/guard-hooks/hooks
+          for t in *.test.py; do python3 "$t" || exit 1; done
