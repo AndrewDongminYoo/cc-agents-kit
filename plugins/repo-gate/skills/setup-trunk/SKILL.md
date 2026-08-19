@@ -16,7 +16,22 @@ This skill covers first-time integration and configuration. Running trunk day to
 
 ## Initialization Flow
 
-### 1. Run trunk init
+### 1. Inspect the repository before selecting linters
+
+Do not start from a memorized linter bundle.
+First inspect the repository's manifests and lockfiles, existing CI workflows, declared package scripts, language and generated-file layout, and any existing linter configuration.
+Use that evidence to identify tools the project already runs, file types that actually exist, and checks CI already owns.
+
+```bash
+git ls-files | grep -E '(^|/)(package.json|pubspec.yaml|pyproject.toml|Cargo.toml|go.mod|Podfile)$'
+git ls-files '.github/**'
+git ls-files | grep -Ei '(^|/)([^/]*(eslint|prettier|ruff|markdownlint|shellcheck)[^/]*)$'
+```
+
+Read the files found, including scripts in manifests and the commands used by CI, before proposing `lint.enabled`.
+Enable a linter only when a repository artifact or an explicit user requirement supports it; do not infer that mobile, web, infrastructure, and documentation checks all belong in the same repository.
+
+### 2. Run trunk init
 
 ```bash
 trunk init
@@ -38,15 +53,15 @@ trunk init  # then: trunk config hide
 `trunk config hide` adds `.trunk/` to `.gitignore`, keeping the config local.
 Alternatively, `trunk init --single-player-mode` does both in one step (verified in `trunk init --help`: "initialize trunk with a gitignored config, run 'trunk config share' to undo").
 
-### 2. Verify built-in actions are enabled
+### 3. Review built-in actions
 
-After `trunk init`, confirm all four built-in actions are active:
+After `trunk init`, review which built-in actions are active and compare them with existing CI and repository hooks:
 
 ```bash
 trunk actions list
 ```
 
-Expected enabled actions:
+Available actions commonly include:
 
 | Action                    | Purpose                                 |
 | ------------------------- | --------------------------------------- |
@@ -55,7 +70,7 @@ Expected enabled actions:
 | `trunk-fmt-pre-commit`    | Auto-formats staged files before commit |
 | `trunk-upgrade-available` | Notifies when upgrades are available    |
 
-Enable any missing action:
+Enable only actions that do not duplicate or conflict with the repository's existing hooks:
 
 ```bash
 trunk actions enable trunk-fmt-pre-commit
@@ -65,7 +80,7 @@ trunk actions enable trunk-check-pre-push
 **Disable `trunk-fmt-pre-commit` only** when contributing to an external repo that owns its own formatting rules (e.g., submitting a PR to an open-source project).
 Re-enable when back on your own repo.
 
-### 3. Full-repo scan and baseline
+### 4. Full-repo scan and baseline
 
 ```bash
 trunk check --all
@@ -74,10 +89,13 @@ trunk check --all
 This identifies **all** existing violations.
 Existing violations in the repo are expected to be fixed — "already enabled but ignored" lint rules are in scope.
 
-To auto-fix everything fixable:
+Do not auto-fix the whole repository as part of setup without explicit approval.
+That is a broad rewrite, so list the affected paths first and ask for approval for those explicit paths or a narrow linter filter.
+After approval, run a scoped fix such as:
 
 ```bash
-trunk check --all --fix
+trunk check --fix path/to/file
+trunk check --fix --filter=eslint src/
 ```
 
 To focus on one linter at a time when overwhelmed:
@@ -87,21 +105,26 @@ trunk check --all --filter=eslint
 trunk check --all --filter=shellcheck --sample=5
 ```
 
-## Stack-specific Linter Selection
+## Evidence-based Linter Selection
 
-### Universal baseline (all stacks)
+### No universal baseline
 
-These linters appear in virtually every repo and should always be enabled:
+No linter is mandatory for every repository.
+Choose from the following candidates only when the inspection step finds matching files, dependencies, configuration, or CI behavior:
 
-| Linter           | Purpose                                   |
-| ---------------- | ----------------------------------------- |
-| `git-diff-check` | Detects whitespace/merge conflict markers |
-| `trufflehog`     | Secrets detection in committed content    |
-| `osv-scanner`    | Dependency vulnerability scanning         |
-| `checkov`        | Infrastructure-as-code security           |
-| `markdownlint`   | Markdown style enforcement                |
-| `prettier`       | Multi-language code formatter             |
-| `yamllint`       | YAML syntax and style                     |
+| Evidence | Candidate linters |
+| --- | --- |
+| GitHub Actions workflows | `actionlint` |
+| Shell scripts | `shellcheck`, optionally `shfmt` when the repository already formats shell |
+| JavaScript or TypeScript manifest and existing config | project-pinned `eslint@SYSTEM`, `prettier` |
+| Python manifest and existing config | `ruff`, `mypy`, or `black` as declared by the project |
+| Markdown or YAML with an established style config | `markdownlint`, `yamllint` |
+| Dependency lockfiles supported by the scanner | `osv-scanner` after verifying the lockfile targets it can interpret |
+| Terraform, Kubernetes, or other IaC files | `checkov` |
+| A repository requirement for committed-secret scanning | `trufflehog` |
+
+The stack examples below are reference fragments, not bundles to copy wholesale.
+Remove every entry unsupported by the inspected repository and preserve tools already pinned by the project.
 
 ### React Native
 
@@ -126,8 +149,6 @@ lint:
   ignore:
     - linters: [shellcheck]
       paths: ["android/gradlew", "example/android/gradlew"]
-    - linters: [osv-scanner]
-      paths: ["**/Podfile.lock"]
     - linters: [markdownlint]
       paths: [".github/**/*.md"]
     - linters: [dotenv-linter]
@@ -159,8 +180,6 @@ lint:
   ignore:
     - linters: [shellcheck]
       paths: ["android/gradlew"]
-    - linters: [osv-scanner]
-      paths: ["**/Podfile.lock"]
     - linters: [markdownlint]
       paths: [".github/**/*.md"]
 # Custom dart tooling via actions (replaces trunk's dart linter):
@@ -236,13 +255,12 @@ lint:
 | ---------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `oxipng`, `svgo` | SVG/PNG assets managed externally or with metadata | Disable unless you've reviewed output                                                            |
 | `svgo`           | Mobile (React Native/Flutter) repos with SVGs      | Disable — rarely useful, high risk                                                               |
-| `shellcheck`     | `android/gradlew`, `example/android/gradlew`       | Always add to ignore paths                                                                       |
-| `osv-scanner`    | `**/Podfile.lock`                                  | Always ignore for iOS dependency locks                                                           |
+| `shellcheck`     | `android/gradlew`, `example/android/gradlew`       | Ignore only after confirming the generated wrapper is intentionally outside shell lint scope     |
+| `osv-scanner`    | Resolved dependency lockfiles                      | Scan supported targets directly; ignore only a proven unsupported or mis-mapped target            |
 | `markdownlint`   | `.github/**/*.md` (PR templates, issue templates)  | Ignore — not user-authored prose                                                                 |
 | `dart`           | Flutter projects using a pinned SDK                | Disable; use `custom action` instead                                                             |
 | `dotenv-linter`  | `ios/.xcode.env`, `ios/.xcode.env.local`           | Ignore — Xcode requires `export VAR=VALUE`; dotenv-linter strips `export`, breaking Xcode builds |
 | `cspell`         | `android/gradlew` (auto-generated identifiers)     | Add to ignore alongside shellcheck                                                               |
-| Any linter       | `*.lock` files                                     | Add to `lint.ignore`                                                                             |
 | Any linter       | Config files in non-root dirs (`.github/`, etc.)   | Check if linter respects non-root path                                                           |
 
 **Warning:** `oxipng`, `svgo`, and `dotenv-linter` modify files in place.
@@ -272,21 +290,21 @@ Do **not** use `SYSTEM` if the tool isn't installed in the project.
 
 ### Configuring ignores in `.trunk/trunk.yaml`
 
+Keep format and style ignores linter-specific.
+Never place resolved dependency lockfiles under `[ALL]`: vulnerability scanners need to inspect supported resolved locks directly.
+Ignore a scanner target only after direct evidence shows that exact target is unsupported or mis-mapped, and record the rationale beside the scanner-specific ignore.
+
 ```yaml
 lint:
   ignore:
     - linters: [ALL]
       paths:
-        - "**/*.lock" # lock files (all linters)
         - "src/generated/**" # generated code
         - "!src/generated/**/*.ts" # re-enable for TS inside generated/
     - linters: [shellcheck, cspell]
       paths:
         - "android/gradlew"
         - "example/android/gradlew"
-    - linters: [osv-scanner]
-      paths:
-        - "**/Podfile.lock"
     - linters: [markdownlint]
       paths:
         - ".github/**/*.md"
@@ -311,7 +329,7 @@ This is intentional — run without `--all` before committing:
 
 ```bash
 trunk check
-trunk fmt
+trunk fmt path/to/changed-file
 ```
 
 If a violation is **intentional** (accepted technical debt, unavoidable pattern), suppress it inline:
@@ -337,10 +355,11 @@ legacy_code_block()
 
 When `trunk check` reports a dependency vulnerability (e.g., from `osv-scanner`):
 
-1. Assess impact scope — is the vulnerable code path reachable?
-2. If not reachable: add to `lint.ignore` with an explanation comment, or suppress inline on the lock file.
-3. If reachable: upgrade the dependency or pin to a safe version.
-4. If no upstream fix: file an issue with the upstream project.
+1. Scan the actual resolved lockfile directly with the scanner and confirm the advisory maps to the resolved dependency path and target.
+2. Assess impact scope — is the vulnerable code path reachable?
+3. If reachable, upgrade the dependency or pin to a safe version. If no upstream fix exists, file an issue with the upstream project.
+4. If not reachable, document the reachability decision without hiding the resolved lockfile from unrelated scanners.
+5. Ignore a scanner target only after direct evidence shows that exact target is unsupported or mis-mapped. Keep the ignore scanner-specific and record the evidence and rationale.
 
 ## Common Mistakes
 
@@ -349,8 +368,7 @@ When `trunk check` reports a dependency vulnerability (e.g., from `osv-scanner`)
 | Running `trunk check --all` every commit                      | Use `trunk check` (no `--all`) for daily work                        |
 | Disabling `trunk-fmt-pre-commit` for convenience              | Only disable for external repo contributions                         |
 | Leaving `svgo` enabled in a mobile repo                       | Disable — SVG optimization rarely applies and can corrupt assets     |
-| Not ignoring `android/gradlew` for shellcheck                 | Add to `lint.ignore` immediately on any React Native / Flutter repo  |
-| Not ignoring `**/Podfile.lock` for osv-scanner                | iOS lock files trigger false CVEs from pod metadata, not actual deps |
+| Blanket-ignoring resolved lockfiles under `[ALL]`             | Keep style ignores linter-specific and scan supported locks directly |
 | Using trunk's `dart` linter in Flutter projects               | Disable `dart`; use a custom `dart-actions` definition instead       |
 | eslint/dart reporting different results than running directly | Pin to `@SYSTEM` in `trunk.yaml` to use the repo's own binary        |
 | Forgetting `!path` negative globs                             | Use `!pattern` to re-enable a subset inside an ignored directory     |
@@ -369,8 +387,8 @@ trunk actions list                  # View enabled/disabled actions
 trunk actions enable <action>       # Enable a built-in action
 trunk check                         # Check changed files only
 trunk check --all                   # Check entire repo (use at init)
-trunk check --all --fix             # Auto-fix all fixable issues
+trunk check --fix path/to/file      # Fix an approved explicit path
 trunk check --filter=<linter>       # Scope to one linter
-trunk fmt                           # Format changed files
+trunk fmt path/to/file              # Format an explicit path
 trunk check --sample=5              # Test linter config on 5 sample files
 ```
