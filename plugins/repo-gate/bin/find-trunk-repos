@@ -9,7 +9,7 @@
 #
 # Output format:
 #   <owner/repo>    <default-branch>    <file-web-url>
-set -u
+set -euo pipefail
 
 FILE=".trunk/trunk.yaml"
 OWNER="$(gh api user -q .login)"
