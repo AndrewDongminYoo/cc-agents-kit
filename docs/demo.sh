@@ -64,7 +64,8 @@ say "$R" "PreToolUse:Bash hook error: [\${CLAUDE_PLUGIN_ROOT}/hooks/zsh-quoting-
 say "$R" "Blocked: unquoted glob pattern (-name *). zsh expands it against the CWD"
 say "$R" "before the tool sees it: no match aborts the whole command, several"
 say "$R" "become a filename list the tool rejects, and exactly one silently"
-say "$R" "searches that single file instead of the pattern. Quote it: -name '*.md'."
+say "$R" "searches that single file instead of the pattern. Quote it:"
+say "$R" "--include='*.dart', -name '*.md'."
 beat 1.2
 say "$P" "# /plugin install guard-hooks@cc-agents-kit"
 beat 3.2

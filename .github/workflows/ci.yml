@@ -55,15 +55,16 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, pathlib, sys
-          root = pathlib.Path("plugins/guard-hooks")
           wired, missing = 0, []
-          for groups in json.load(open(root / "hooks/hooks.json"))["hooks"].values():
-              for group in groups:
-                  for hook in group["hooks"]:
-                      name = hook["command"].split("/hooks/")[-1].rstrip('"')
-                      wired += 1
-                      if not (root / "hooks" / name).is_file():
-                          missing.append(name)
+          for hooks_json in sorted(pathlib.Path("plugins").glob("*/hooks/hooks.json")):
+              root = hooks_json.parent.parent
+              for groups in json.load(open(hooks_json))["hooks"].values():
+                  for group in groups:
+                      for hook in group["hooks"]:
+                          name = hook["command"].split("/hooks/")[-1].rstrip('"')
+                          wired += 1
+                          if not (root / "hooks" / name).is_file():
+                              missing.append(f"{root.name}: {name}")
           if missing:
               sys.exit(f"hooks.json wires missing scripts: {missing}")
           print(f"{wired} wired hook(s) present")
@@ -104,12 +105,60 @@ jobs:
           fi
           echo "no private references"
 
+      # Every shell script in the repo, not just the hooks: a script shipped
+      # inside a skill or a plugin's bin/ reaches users the same way a hook does.
       - name: Shellcheck
-        run: shellcheck plugins/*/hooks/*.sh
+        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck
 
       - name: Parse under /bin/bash
         run: |
-          for f in plugins/*/hooks/*.sh; do /bin/bash -n "$f" || exit 1; done
+          find . -name '*.sh' -not -path './.git/*' -print0 |
+            xargs -0 -n1 /bin/bash -n
+
+      # A bin/ entry that is not executable, or has no shebang, is on PATH and
+      # unrunnable — the failure a skill referencing it by bare name cannot see.
+      - name: Plugin bin/ entries are runnable
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, sys
+          bad, n = [], 0
+          for f in sorted(pathlib.Path("plugins").glob("*/bin/*")):
+              if not f.is_file():
+                  continue
+              n += 1
+              if not os.access(f, os.X_OK):
+                  bad.append(f"{f}: not executable")
+              if not f.read_bytes().startswith(b"#!"):
+                  bad.append(f"{f}: no shebang")
+          if bad:
+              sys.exit("\n".join(bad))
+          print(f"{n} bin/ entr(ies) runnable")
+          PY
+
+      # The demo hardcodes the text zsh-quoting-guard prints. It drifted once
+      # already, so compare against what the hook actually emits rather than
+      # against its source — part of the message is assembled at runtime.
+      - name: Demo quotes the guard's current message
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, re, subprocess, sys
+          payload = json.dumps({"tool_input": {"command": "find . " + "-name *.md"}})
+          out = subprocess.run(
+              ["/bin/bash", "plugins/guard-hooks/hooks/zsh-quoting-guard.sh"],
+              input=payload, capture_output=True, text=True)
+          if out.returncode != 2:
+              sys.exit(f"expected the guard to block, got exit {out.returncode}")
+          printed = out.stderr
+          demo = pathlib.Path("docs/demo.sh").read_text()
+          quoted = re.findall(r'say "\$R" "([^"]+)"', demo)
+          fragments = [q for q in quoted if not q.startswith(("PreToolUse:", "# "))]
+          if not fragments:
+              sys.exit("docs/demo.sh no longer quotes the guard message — update this check")
+          missing = [f for f in fragments if f.replace("\\", "") not in printed]
+          if missing:
+              sys.exit("docs/demo.sh shows text the hook does not print:\n  " + "\n  ".join(missing))
+          print(f"{len(fragments)} quoted fragment(s) match what the hook prints")
+          PY
 
       - name: Hook regression suites
         run: |

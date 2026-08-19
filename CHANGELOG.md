@@ -5,6 +5,21 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-08-19
+
+### Fixed
+
+- `session-export` could not run as an installed plugin. Its skill told the agent to execute `~/.claude/skills/session-export/scripts/session-to-md.mjs`, a path that exists only where the skill was originally authored — never for anyone who installs the plugin. `CLAUDE_PLUGIN_ROOT` is substituted for hooks and is unset in the Bash tool, so the fix is the documented `bin/` mechanism: the script now ships as `context-handoff/bin/session-to-md`, on PATH whenever the plugin is enabled, and the skill calls it by bare name. Verified by resolving and running it through `--plugin-dir`.
+- `setup-trunk` pointed at a `trunk-quality-gate` agent that is not part of this repository. The paragraph now states the scope boundary instead of naming something the reader does not have.
+- `find-trunk-repos.sh` shipped inside `setup-trunk` with nothing referencing it. It now lives in `repo-gate/bin/find-trunk-repos` and the skill documents it for what it is good at: reading a trunk config you already wrote instead of inventing one.
+
+### Changed
+
+- CI lints and parses **every** shell script in the repository rather than only `plugins/*/hooks/*.sh`. Two scripts that ship to users, including one inside a skill, had been outside the gate; both were clean, but a repository whose pitch is that shell quality is gated should not exempt its own shipped scripts.
+- The hook-wiring existence check no longer hardcodes `guard-hooks`, so a second plugin adding hooks is covered on the day it does.
+- New check: every `plugins/*/bin/*` entry is executable and carries a shebang — on PATH and unrunnable is exactly the failure a skill calling it by bare name cannot see.
+- New check: the demo recording is compared against what `zsh-quoting-guard` actually prints, by running it, rather than against its source. It caught a real mismatch on the first run — the recording had been shortening the message's final line — which is now corrected and the GIF regenerated.
+
 ## [0.3.0] — 2026-08-18
 
 ### Added
