@@ -22,6 +22,7 @@ CASES = [
     (2, "command: source .env", {"command": "source .env"}),
     (2, ".env.local", {"file_path": "/proj/.env.local"}),
     (2, ".env.production", {"file_path": "/proj/.env.production"}),
+    (2, ".env.production.local", {"file_path": "/proj/.env.production.local"}),
     (2, "quoted .env in a command", {"command": 'grep KEY ".env"'}),
     # --- must NOT block: template variants ---
     (0, "safe: .env.example", {"file_path": "/proj/.env.example"}),
@@ -35,10 +36,8 @@ CASES = [
     (0, "safe: import.meta.env", {"command": "grep -rn import.meta.env src/"}),
     (0, "safe: unrelated file", {"file_path": "/proj/README.md"}),
     (0, "safe: unrelated command", {"command": "ls -la"}),
-    # --- known hole, asserted so a future fix is visible as a change here ---
-    # A command mixing a template and a real .env satisfies the template
-    # exception on the whole string, so it passes. Documented in the hook.
-    (0, "KNOWN HOLE: template + real .env in one command",
+    # A template token must not exempt a separate live dotenv token.
+    (2, "template + real .env in one command",
      {"command": "cat .env.example .env"}),
 ]
 

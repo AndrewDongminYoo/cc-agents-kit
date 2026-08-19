@@ -79,8 +79,16 @@ while IFS= read -r segment; do
 
     # Anything that is not a flag counts as the path the rule asks for.
     has_path=""
+    skip_value=""
     for token in $rest; do
+      if [[ -n "$skip_value" ]]; then
+        skip_value=""
+        continue
+      fi
       case "$token" in
+        --config)
+          [[ "$tool" == "ruff format" ]] && skip_value=1
+          ;;
         -*) ;;
         *)
           has_path=1

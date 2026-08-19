@@ -18,6 +18,7 @@ CASES = [
     (2, "bare trunk fmt", "trunk fmt"),
     (2, "trunk fmt --all", "trunk fmt --all"),
     (2, "bare ruff format", "ruff format"),
+    (2, "ruff config is not a path", "ruff format --config pyproject.toml"),
     # --- write-mode tools, no path ---
     (2, "prettier --write", "prettier --write"),
     (2, "prettier -w", "prettier -w"),

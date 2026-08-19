@@ -3,8 +3,12 @@
 
 import json
 import os
+import shlex
+import shutil
+import signal
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 HOOK = str(Path(__file__).resolve().with_name("staged-secret-guard.sh"))
@@ -31,10 +35,24 @@ def repo(files, stage=True):
     return d
 
 
-def check_hook(command, cwd):
+def commit_seed(d):
+    """Commit the current index so later fixtures can exercise tracked changes."""
+    subprocess.run(["git", "-C", d, "commit", "-qm", "seed"], check=True)
+
+
+def marker_command(directory, name):
+    """Create an external diff command that leaves a marker when executed."""
+    marker = Path(directory, f"{name}.marker")
+    command = Path(directory, f"{name}.sh")
+    command.write_text(f'#!/bin/bash\ntouch "{marker}"\nexit 1\n')
+    command.chmod(0o755)
+    return command, marker
+
+
+def check_hook(command, cwd, env=None):
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
     proc = subprocess.run(
-        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True, cwd=cwd
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True, cwd=cwd, env=env
     )
     return proc.returncode, proc.stderr
 
@@ -88,6 +106,7 @@ check("nothing staged passes", rc == 0, f"exit={rc}")
 d = repo({"config.txt": f"{GITHUB}\n"})
 for label, command in (
     ("non-commit git command", "git status --short"),
+    ("commit word in a later non-git segment", "git status --short && echo commit"),
     ("prose mentioning git commit", "echo 'run git commit next'"),
     ("unrelated command", "ls -la"),
 ):
@@ -99,6 +118,209 @@ dirty = repo({"config.txt": f"{GITHUB}\n"})
 clean = repo({"README.md": "# hello\n"})
 rc, _ = check_hook(f"git -C {dirty} commit -m x", clean)
 check("git -C scans the named repo", rc == 2, f"exit={rc}")
+
+rc, err = check_hook(
+    f"git commit -m safe && git -C {dirty} commit -m secret",
+    clean,
+)
+check("multiple git commit segments are rejected", rc == 2, f"exit={rc}")
+check("multiple commit rejection is explained", "single git commit" in err, f"stderr={err.strip()[:160]}")
+
+# Command-supplied Git config must not be propagated into the guard's own Git
+# process, where config keys such as diff.external can execute code.
+config_repo = repo({"config.txt": f"{GITHUB}\n"})
+config_command, config_marker = marker_command(config_repo, "command-config")
+rc, _ = check_hook(f"git -c diff.external={config_command} commit -m x", config_repo)
+check("command-supplied git -c is blocked", rc == 2, f"exit={rc}")
+check("command-supplied diff.external is not executed", not config_marker.exists())
+
+# Repository-local diff configuration and attributes are untrusted too. The
+# fixed internal diff must disable both external diff and text conversion.
+external_repo = repo({"config.txt": f"{GITHUB}\n"})
+external_command, external_marker = marker_command(external_repo, "repo-external")
+subprocess.run(
+    ["git", "-C", external_repo, "config", "diff.external", str(external_command)],
+    check=True,
+)
+rc, _ = check_hook("git commit -m x", external_repo)
+check("credential still blocks with repository diff.external", rc == 2, f"exit={rc}")
+check("repository diff.external is not executed", not external_marker.exists())
+
+textconv_repo = repo(
+    {".gitattributes": "config.txt diff=marker\n", "config.txt": f"{GITHUB}\n"}
+)
+textconv_command, textconv_marker = marker_command(textconv_repo, "repo-textconv")
+subprocess.run(
+    ["git", "-C", textconv_repo, "config", "diff.marker.textconv", str(textconv_command)],
+    check=True,
+)
+rc, _ = check_hook("git commit -m x", textconv_repo)
+check("credential still blocks with repository textconv", rc == 2, f"exit={rc}")
+check("repository textconv is not executed", not textconv_marker.exists())
+
+# A whitespace-containing -C value is one argument, not a truncated repo path.
+space_parent = tempfile.mkdtemp(prefix="staged secret parent ")
+space_repo = str(Path(space_parent, "repo with spaces"))
+Path(space_repo).mkdir()
+subprocess.run(["git", "-C", space_repo, "init", "-q"], check=True)
+subprocess.run(["git", "-C", space_repo, "config", "user.email", "t@example.invalid"], check=True)
+subprocess.run(["git", "-C", space_repo, "config", "user.name", "t"], check=True)
+Path(space_repo, "config.txt").write_text(f"{GITHUB}\n")
+subprocess.run(["git", "-C", space_repo, "add", "-A"], check=True)
+rc, _ = check_hook(f'git -C "{space_repo}" commit -m x', clean)
+check("quoted git -C path with whitespace is scanned", rc == 2, f"exit={rc}")
+
+rc, err = check_hook('git -C "$repo" commit -m x', clean)
+check("dynamic git -C path is blocked instead of mis-scanned", rc == 2, f"exit={rc}")
+check("unsafe commit form explains the parse failure", "could not safely parse" in err, f"stderr={err.strip()[:160]}")
+
+# Working-tree diffs must not invoke repository-configured clean filters. The
+# guard blocks these commit forms before content inspection instead.
+filter_all_repo = repo({".gitattributes": "tracked.txt filter=marker\n", "tracked.txt": "clean\n"})
+commit_seed(filter_all_repo)
+filter_all_command, filter_all_marker = marker_command(filter_all_repo, "commit-all-clean-filter")
+subprocess.run(
+    ["git", "-C", filter_all_repo, "config", "filter.marker.clean", str(filter_all_command)],
+    check=True,
+)
+Path(filter_all_repo, "tracked.txt").write_text(f"{GITHUB}\n")
+rc, _ = check_hook("git commit -am x", filter_all_repo)
+check("git commit -a blocks an active clean filter", rc == 2, f"exit={rc}")
+check("git commit -a does not execute the clean filter", not filter_all_marker.exists())
+
+filter_path_repo = repo({".gitattributes": "tracked.txt filter=marker\n", "tracked.txt": "clean\n"})
+commit_seed(filter_path_repo)
+filter_path_command, filter_path_marker = marker_command(filter_path_repo, "pathspec-clean-filter")
+subprocess.run(
+    ["git", "-C", filter_path_repo, "config", "filter.marker.clean", str(filter_path_command)],
+    check=True,
+)
+Path(filter_path_repo, "tracked.txt").write_text(f"{GITHUB}\n")
+rc, _ = check_hook("git commit tracked.txt -m x", filter_path_repo)
+check("pathspec commit blocks an active clean filter", rc == 2, f"exit={rc}")
+check("pathspec commit does not execute the clean filter", not filter_path_marker.exists())
+
+# Attribute inspection must stay bounded as candidate counts grow. A PATH shim
+# observes the real hook-to-Git process boundary and forwards every invocation.
+batch_repo = repo({"first.txt": "clean\n", "second.txt": "clean\n"})
+commit_seed(batch_repo)
+Path(batch_repo, "first.txt").write_text(f"{GITHUB}\n")
+Path(batch_repo, "second.txt").write_text("changed\n")
+with tempfile.TemporaryDirectory() as wrapper_dir:
+    count_file = Path(wrapper_dir, "check-attr.count")
+    wrapper = Path(wrapper_dir, "git")
+    real_git = shutil.which("git")
+    wrapper.write_text(
+        "#!/bin/bash\n"
+        'for arg in "$@"; do\n'
+        '  if [[ "$arg" == "check-attr" ]]; then\n'
+        f"    printf 'call\\n' >> {shlex.quote(str(count_file))}\n"
+        "    break\n"
+        "  fi\n"
+        "done\n"
+        f'exec {shlex.quote(real_git)} "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    wrapper_env = dict(os.environ)
+    wrapper_env["PATH"] = wrapper_dir + os.pathsep + wrapper_env["PATH"]
+    rc, _ = check_hook("git commit -am x", batch_repo, env=wrapper_env)
+    check_attr_calls = count_file.read_text().splitlines() if count_file.exists() else []
+check("multiple candidates still block a credential", rc == 2, f"exit={rc}")
+check("multiple candidates use one batch attribute query", len(check_attr_calls) == 1, f"calls={len(check_attr_calls)}")
+
+# A parent-only signal must interrupt the hook's wait, reap the attribute child,
+# and remove both hook-owned temporary files within the hook timeout.
+termination_repo = repo({"tracked.txt": "clean\n"})
+commit_seed(termination_repo)
+Path(termination_repo, "tracked.txt").write_text("changed\n")
+with tempfile.TemporaryDirectory() as wrapper_dir, tempfile.TemporaryDirectory() as hook_tmpdir:
+    ready_file = Path(wrapper_dir, "check-attr.ready")
+    child_pid_file = Path(wrapper_dir, "check-attr.pid")
+    wrapper = Path(wrapper_dir, "git")
+    real_git = shutil.which("git")
+    wrapper.write_text(
+        "#!/bin/bash\n"
+        'for arg in "$@"; do\n'
+        '  if [[ "$arg" == "check-attr" ]]; then\n'
+        f"    printf '%s\\n' \"$$\" > {shlex.quote(str(child_pid_file))}\n"
+        f"    touch {shlex.quote(str(ready_file))}\n"
+        "    exec /bin/sleep 30\n"
+        "  fi\n"
+        "done\n"
+        f'exec {shlex.quote(real_git)} "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    wrapper_env = dict(os.environ)
+    wrapper_env["PATH"] = wrapper_dir + os.pathsep + wrapper_env["PATH"]
+    wrapper_env["TMPDIR"] = hook_tmpdir
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git commit -am x"}})
+    proc = subprocess.Popen(
+        ["/bin/bash", HOOK],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        cwd=termination_repo,
+        env=wrapper_env,
+        start_new_session=True,
+    )
+    proc.stdin.write(payload)
+    proc.stdin.close()
+    deadline = time.monotonic() + 5
+    while (
+        (not ready_file.exists() or not child_pid_file.exists())
+        and proc.poll() is None
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+    reached_attribute_query = ready_file.exists() and child_pid_file.exists()
+    child_pid = int(child_pid_file.read_text()) if child_pid_file.exists() else None
+    parent_exited = proc.poll() is not None
+    if reached_attribute_query and not parent_exited:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+            parent_exited = True
+        except subprocess.TimeoutExpired:
+            parent_exited = False
+    child_alive = False
+    if child_pid is not None:
+        try:
+            os.kill(child_pid, 0)
+            child_alive = True
+        except ProcessLookupError:
+            child_alive = False
+    leftovers = list(Path(hook_tmpdir).glob("cc-staged-secret-*"))
+    if not parent_exited:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=5)
+    elif child_alive:
+        os.kill(child_pid, signal.SIGKILL)
+check("termination reaches attribute inspection", reached_attribute_query)
+check("parent-only SIGTERM exits the hook promptly", parent_exited)
+check("parent-only SIGTERM reaps the attribute child", not child_alive)
+check("termination removes candidate and attribute temp files", not leftovers, f"leftovers={len(leftovers)}")
+
+# `commit -a` includes unstaged modifications to tracked files.
+auto_repo = repo({"tracked.txt": "clean\n"})
+commit_seed(auto_repo)
+Path(auto_repo, "tracked.txt").write_text(f"{GITHUB}\n")
+rc, _ = check_hook("git commit -am x", auto_repo)
+check("git commit -a scans tracked unstaged changes", rc == 2, f"exit={rc}")
+
+# A pathspec commit takes the named working-tree content and excludes staged
+# changes outside that pathspec.
+pathspec_repo = repo({"selected.txt": "clean\n", "other.txt": "clean\n"})
+commit_seed(pathspec_repo)
+Path(pathspec_repo, "selected.txt").write_text(f"{GITHUB}\n")
+rc, _ = check_hook("git commit selected.txt -m x", pathspec_repo)
+check("pathspec commit scans selected working-tree content", rc == 2, f"exit={rc}")
+
+Path(pathspec_repo, "selected.txt").write_text("clean again\n")
+Path(pathspec_repo, "other.txt").write_text(f"{GITHUB}\n")
+subprocess.run(["git", "-C", pathspec_repo, "add", "other.txt"], check=True)
+rc, _ = check_hook("git commit selected.txt -m x", pathspec_repo)
+check("pathspec commit excludes staged changes outside pathspec", rc == 0, f"exit={rc}")
 
 # --- fail-open contract -----------------------------------------------------
 for label, payload in (

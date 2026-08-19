@@ -19,22 +19,249 @@ HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
 COMMAND=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 [[ -z "$COMMAND" ]] && exit 0
 
-# Only act on a real `git commit` invocation at a command position, so prose or
-# an argument mentioning it is not mistaken for one.
-GIT_COMMIT_RE='(^|[;|&(][[:space:]]*)(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*)?(/[^[:space:]]*/)?git([[:space:]]+-[cC][[:space:]]+[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)'
+# Only act when the command contains a plausible git commit invocation. The
+# tokenizer below then validates the form without executing the inspected text.
+GIT_COMMIT_RE='(^|[;|&(][[:space:]]*)(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*)?(/[^[:space:]]*/)?git[^;|&]*[[:space:]]commit([[:space:]]|$)'
 [[ "$COMMAND" =~ $GIT_COMMIT_RE ]] || exit 0
 
-# Honour `git -C <path>` so the scan reads the repository being committed to.
+block_unparsed() {
+  echo "Blocked: could not safely parse this git commit command. Run a single git commit with explicit, conventionally quoted arguments so the effective commit candidate can be scanned." >&2
+  exit 2
+}
+
+unsafe_value() {
+  [[ "$1" == *'$'* || "$1" == *'`'* || "$1" == *'<'* || "$1" == *'>'* ]]
+}
+
+# Tokenize shell quoting without eval, expansion, or command execution. Shell
+# operators become boundary tokens; malformed quoting is rejected.
+TOKENS=()
+token=""
+quote=""
+escaped=""
+token_started=""
+command_len=${#COMMAND}
+command_pos=0
+while ((command_pos < command_len)); do
+  char="${COMMAND:command_pos:1}"
+  if [[ -n "$escaped" ]]; then
+    token="$token$char"
+    token_started=1
+    escaped=""
+  elif [[ "$quote" == "'" ]]; then
+    if [[ "$char" == "'" ]]; then quote=""; else token="$token$char"; fi
+  elif [[ "$quote" == '"' ]]; then
+    if [[ "$char" == '"' ]]; then
+      quote=""
+    elif [[ "$char" == "\\" ]]; then
+      escaped=1
+    else
+      token="$token$char"
+    fi
+  else
+    case "$char" in
+      "'" | '"') quote="$char"; token_started=1 ;;
+      "\\") escaped=1; token_started=1 ;;
+      " " | $'\t' | $'\n')
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        ;;
+      ";" | "|" | "&" | "(" | ")")
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        TOKENS+=("$char")
+        ;;
+      *) token="$token$char"; token_started=1 ;;
+    esac
+  fi
+  ((command_pos += 1))
+done
+[[ -z "$quote" && -z "$escaped" ]] || block_unparsed
+[[ -z "$token_started" ]] || TOKENS+=("$token")
+
 REPO_ARGS=()
-if [[ "$COMMAND" =~ git[[:space:]]+-C[[:space:]]+([^[:space:]]+) ]]; then
-  REPO_ARGS=(-C "${BASH_REMATCH[1]//\"/}")
-fi
+commit_index=-1
+commit_count=0
+token_count=${#TOKENS[@]}
+token_index=0
+while ((token_index < token_count)); do
+  current="${TOKENS[token_index]}"
+  if [[ "$current" == "git" || "$current" == */git ]]; then
+    scan_index=$((token_index + 1))
+    candidate_repo_args=()
+    while ((scan_index < token_count)); do
+      current="${TOKENS[scan_index]}"
+      case "$current" in
+        -C)
+          ((scan_index + 1 < token_count)) || block_unparsed
+          unsafe_value "${TOKENS[scan_index + 1]}" && block_unparsed
+          candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
+          scan_index=$((scan_index + 2))
+          ;;
+        -C?*)
+          unsafe_value "${current:2}" && block_unparsed
+          candidate_repo_args+=("${current:0:2}" "${current:2}")
+          scan_index=$((scan_index + 1))
+          ;;
+        -c | -c?*) block_unparsed ;;
+        commit)
+          ((commit_count += 1))
+          if ((commit_count == 1)); then
+            commit_index=$scan_index
+            if [[ -n "${candidate_repo_args[*]-}" ]]; then
+              REPO_ARGS=("${candidate_repo_args[@]}")
+            fi
+          fi
+          break
+          ;;
+        --*) block_unparsed ;;
+        *) break ;;
+      esac
+    done
+  fi
+  token_index=$((token_index + 1))
+done
+((commit_index >= 0)) || block_unparsed
+((commit_count == 1)) || block_unparsed
+
+ALL_MODE=""
+PATHS=()
+after_separator=""
+token_index=$((commit_index + 1))
+while ((token_index < token_count)); do
+  current="${TOKENS[token_index]}"
+  case "$current" in
+    ";" | "|" | "&" | "(" | ")") break ;;
+  esac
+  if [[ -n "$after_separator" ]]; then
+    unsafe_value "$current" && block_unparsed
+    [[ "$current" == *'*'* || "$current" == *'?'* || "$current" == *'['* ]] && block_unparsed
+    PATHS+=("$current")
+    token_index=$((token_index + 1))
+    continue
+  fi
+  case "$current" in
+    --) after_separator=1 ;;
+    -a | --all) ALL_MODE=1 ;;
+    -am | -ma) ALL_MODE=1; token_index=$((token_index + 1)) ;;
+    -m | --message | -F | --file | -C | --reuse-message | -c | --reedit-message | --author | --date | --cleanup | --fixup | --squash | -t | --template | --trailer | -u | --untracked-files)
+      ((token_index + 1 < token_count)) || block_unparsed
+      token_index=$((token_index + 1))
+      ;;
+    --message=* | --file=* | --reuse-message=* | --reedit-message=* | --author=* | --date=* | --cleanup=* | --fixup=* | --squash=* | --template=* | --trailer=* | --untracked-files=*) ;;
+    -v | --verbose | -s | --signoff | -n | --no-verify | --amend | --no-edit | --dry-run | --short | --branch | --porcelain | --long | --no-post-rewrite | -o | --only) ;;
+    -i | --include) block_unparsed ;;
+    --pathspec-from-file | --pathspec-from-file=* | --pathspec-file-nul) block_unparsed ;;
+    -*) block_unparsed ;;
+    *)
+      unsafe_value "$current" && block_unparsed
+      [[ "$current" == *'*'* || "$current" == *'?'* || "$current" == *'['* ]] && block_unparsed
+      PATHS+=("$current")
+      ;;
+  esac
+  token_index=$((token_index + 1))
+done
+[[ -n "$ALL_MODE" && -n "${PATHS[*]-}" ]] && block_unparsed
+
+FILTER_CANDIDATE_FILE=""
+FILTER_ATTR_FILE=""
+FILTER_ATTR_PID=""
+
+cleanup_filter_scan() {
+  if [[ -n "$FILTER_ATTR_PID" ]]; then
+    kill "$FILTER_ATTR_PID" 2>/dev/null || true
+    wait "$FILTER_ATTR_PID" 2>/dev/null || true
+    FILTER_ATTR_PID=""
+  fi
+  [[ -z "$FILTER_CANDIDATE_FILE" ]] || rm -f -- "$FILTER_CANDIDATE_FILE"
+  [[ -z "$FILTER_ATTR_FILE" ]] || rm -f -- "$FILTER_ATTR_FILE"
+}
+
+# Invoked indirectly by the signal traps installed during the filter scan.
+# shellcheck disable=SC2329
+terminate_filter_scan() {
+  local signal_status="$1"
+  trap '' HUP INT TERM
+  cleanup_filter_scan
+  trap - EXIT HUP INT TERM
+  exit "$signal_status"
+}
+
+block_active_filters() {
+  local candidate_path attr_path attr_name attr_value trailing_attr
+
+  FILTER_CANDIDATE_FILE=$(mktemp "${TMPDIR:-/tmp}/cc-staged-secret-candidates.XXXXXX") || block_unparsed
+  trap cleanup_filter_scan EXIT
+  trap 'terminate_filter_scan 129' HUP
+  trap 'terminate_filter_scan 130' INT
+  trap 'terminate_filter_scan 143' TERM
+  FILTER_ATTR_FILE=$(mktemp "${TMPDIR:-/tmp}/cc-staged-secret-attributes.XXXXXX") || block_unparsed
+
+  if [[ -n "${PATHS[*]-}" ]]; then
+    git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached --name-only -z -- "${PATHS[@]}" >"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
+    git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ls-files -m -d -z -- "${PATHS[@]}" >>"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
+  else
+    git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached --name-only -z >"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
+    git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ls-files -m -d -z >>"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
+  fi
+
+  git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} check-attr -z --stdin filter <"$FILTER_CANDIDATE_FILE" >"$FILTER_ATTR_FILE" 2>/dev/null &
+  FILTER_ATTR_PID=$!
+  if wait "$FILTER_ATTR_PID"; then
+    FILTER_ATTR_PID=""
+  else
+    FILTER_ATTR_PID=""
+    block_unparsed
+  fi
+
+  exec 4<"$FILTER_CANDIDATE_FILE"
+  exec 3<"$FILTER_ATTR_FILE"
+  while IFS= read -r -d '' candidate_path <&4; do
+    if ! IFS= read -r -d '' attr_path <&3 ||
+      ! IFS= read -r -d '' attr_name <&3 ||
+      ! IFS= read -r -d '' attr_value <&3; then
+      block_unparsed
+    fi
+    if [[ "$attr_path" != "$candidate_path" || "$attr_name" != "filter" ]]; then
+      block_unparsed
+    fi
+    if [[ "$attr_value" != "unspecified" && "$attr_value" != "unset" && -n "$attr_value" ]]; then
+      echo "Blocked: this commit form would inspect working-tree content through an active clean filter. Stage reviewed content without the filter before committing." >&2
+      exit 2
+    fi
+  done
+  trailing_attr=""
+  if IFS= read -r -d '' trailing_attr <&3 || [[ -n "$trailing_attr" ]]; then
+    block_unparsed
+  fi
+  exec 3<&-
+  exec 4<&-
+
+  cleanup_filter_scan
+  FILTER_CANDIDATE_FILE=""
+  FILTER_ATTR_FILE=""
+  trap - EXIT HUP INT TERM
+}
 
 # `${a[@]+"${a[@]}"}` not `"${a[@]}"`: under `set -u`, bash 3.2 — the version at
 # /bin/bash on macOS — treats an empty array expansion as an unbound variable and
 # aborts. With the `|| true` below that would swallow the abort and leave DIFF
 # empty, silently turning the guard off on exactly the machines it targets.
-DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --cached 2>/dev/null || true)
+if [[ -n "${PATHS[*]-}" ]]; then
+  if git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} rev-parse --verify HEAD >/dev/null 2>&1; then
+    block_active_filters
+    DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv HEAD -- "${PATHS[@]}" 2>/dev/null || true)
+  else
+    DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached -- "${PATHS[@]}" 2>/dev/null || true)
+  fi
+elif [[ -n "$ALL_MODE" ]]; then
+  if git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} rev-parse --verify HEAD >/dev/null 2>&1; then
+    block_active_filters
+    DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv HEAD 2>/dev/null || true)
+  else
+    DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached 2>/dev/null || true)
+  fi
+else
+  DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached 2>/dev/null || true)
+fi
 [[ -n "$DIFF" ]] || exit 0
 
 # Added lines only — an existing secret being deleted must not block its removal.

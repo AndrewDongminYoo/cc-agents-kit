@@ -14,10 +14,12 @@ DIRTY = "#!/usr/bin/env bash\nUNQUOTED=/tmp/a b\necho $UNQUOTED\n"
 CLEAN = '#!/usr/bin/env bash\nset -euo pipefail\necho "hello"\n'
 
 
-def run(file_path):
+def run(file_path, env=None):
     """Return (exit_code, additionalContext or None)."""
     payload = json.dumps({"tool_name": "Write", "tool_input": {"file_path": file_path}})
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True, env=env
+    )
     out = proc.stdout.strip()
     if not out:
         return proc.returncode, None
@@ -77,6 +79,25 @@ with tempfile.TemporaryDirectory() as tmp:
     check("non-shell file ignored", ctx is None, f"ctx={ctx}")
     _, ctx = run(write(tmp, "script.py", DIRTY))
     check(".py ignored", ctx is None, f"ctx={ctx}")
+
+    # The truncation path must drain the producer instead of closing it through
+    # `head`, which becomes SIGPIPE under the hook's `pipefail` setting.
+    fake_bin = Path(tmp, "bin")
+    fake_bin.mkdir()
+    fake_shellcheck = fake_bin / "shellcheck"
+    fake_shellcheck.write_text(
+        "#!/bin/bash\nfor i in {1..2000}; do printf 'line %s: SC9999 finding padding padding padding\\n' \"$i\"; done\nexit 1\n"
+    )
+    fake_shellcheck.chmod(0o755)
+    fake_env = dict(os.environ)
+    fake_env["PATH"] = f"{fake_bin}:{fake_env['PATH']}"
+    code, ctx = run(write(tmp, "many-findings.sh", CLEAN), env=fake_env)
+    check("large findings stay advisory", code == 0, f"exit={code}")
+    check(
+        "large findings are truncated to 40 lines",
+        ctx is not None and ctx.count("SC9999") == 40,
+        f"finding_count={ctx.count('SC9999') if ctx else 0}",
+    )
 
 # --- fail-open contract ---
 for label, payload in (

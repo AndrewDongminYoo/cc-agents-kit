@@ -25,16 +25,20 @@ RM_SEG_RE='(^|[;|&([:space:]])\\?(/bin/|/usr/bin/)?rm[[:space:]][^;|&]*'
 RM_RECURSIVE_RE='[[:space:]]-[[:alnum:]]*[rR]|--recursive'
 # shellcheck disable=SC2016  # $HOME is a literal regex token, not an expansion
 RM_TARGET_RE='[[:space:]]["'\'']?(/|~|\$HOME|\$\{HOME\})(/\*?|\*)?["'\'']?\*?([[:space:]]|$)'
-if [[ "$COMMAND" =~ $RM_SEG_RE ]]; then
-  seg="${BASH_REMATCH[0]}"
+while IFS= read -r command_segment; do
+  if [[ "$command_segment" =~ $RM_SEG_RE ]]; then
+    seg="${BASH_REMATCH[0]}"
+  else
+    continue
+  fi
   if [[ "$seg" =~ $RM_RECURSIVE_RE ]] && [[ "$seg" =~ $RM_TARGET_RE ]]; then
     echo "Blocked: recursive rm targeting \$HOME or a filesystem root. Scope the deletion to a specific subdirectory instead." >&2
     exit 2
   fi
-fi
+done < <(printf '%s\n' "$COMMAND" | tr ';|&' '\n')
 
 # --- download-and-execute pipeline ------------------------------------------
-FETCH_PIPE_RE='(curl|wget|aria2c|httpie|fetch)[^|;&]*\|[[:space:]]*(sudo[[:space:]]+)?(sh|bash|zsh|dash|ksh|python[0-9.]*|perl|ruby|node)([[:space:]]|$)'
+FETCH_PIPE_RE='(curl|wget|aria2c|httpie|fetch)[^|;&]*\|[[:space:]]*(sudo[[:space:]]+)?(/[^[:space:]]*/)?(sh|bash|zsh|dash|ksh|python[0-9.]*|perl|ruby|node)([[:space:]]|$)'
 if [[ "$COMMAND" =~ $FETCH_PIPE_RE ]]; then
   echo "Blocked: piping a downloaded script directly into an interpreter. Download to a file first, let the user inspect it, then execute it as an explicit separate step." >&2
   exit 2

@@ -21,7 +21,24 @@ CASES = [
         "backtick in gh pr body",
         'gh pr create --title "x" --body "uses `AudioPool` now"',
     ),
+    (
+        2,
+        "backtick after git global -C option",
+        'git -C /tmp/repo commit -m "fix: preserve `players`"',
+    ),
+    (
+        2,
+        "backtick after git --work-tree option",
+        'git --work-tree "/tmp/work tree" commit -m "fix: preserve `players`"',
+    ),
+    (
+        2,
+        "backtick after git --git-dir equals option",
+        'git --git-dir=/tmp/repo-metadata commit -m "fix: preserve `players`"',
+    ),
     (2, "unquoted --include glob", 'grep -rn "AudioPool" lib/ --include=*.dart'),
+    (2, "unquoted --include separated glob", 'grep -rn "AudioPool" lib/ --include *.dart'),
+    (2, "unquoted --glob separated glob", "rg AudioPool --glob *.dart"),
     (2, "unquoted find -name glob", "find . -name *.md"),
     (0, "safe: -F file carrier", "git commit -F /tmp/msg.txt"),
     (

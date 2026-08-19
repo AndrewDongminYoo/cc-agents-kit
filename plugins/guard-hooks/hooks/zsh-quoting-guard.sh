@@ -37,7 +37,9 @@ if [[ "$SCAN" =~ \<\<[[:space:]]*[\'\"] ]]; then
 fi
 
 # --- 1. backtick in a message-carrying command -------------------------------
-MSG_CMD_RE='(git[[:space:]]+commit|git[[:space:]]+tag[[:space:]]+-a|gh[[:space:]]+(pr|issue|release)[[:space:]]+(create|comment|edit))'
+GIT_ARG_RE='("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:]]+)'
+GIT_GLOBAL_OPTION_RE="(-[cC][[:space:]]+$GIT_ARG_RE|--(work-tree|git-dir)(=$GIT_ARG_RE|[[:space:]]+$GIT_ARG_RE))"
+MSG_CMD_RE="(git([[:space:]]+$GIT_GLOBAL_OPTION_RE)*[[:space:]]+commit|git[[:space:]]+tag[[:space:]]+-a|gh[[:space:]]+(pr|issue|release)[[:space:]]+(create|comment|edit))"
 if [[ "$SCAN" =~ $MSG_CMD_RE ]]; then
   # -F/--body-file read the message from a file: already the safe carrier.
   # `-F -` is not one — it reads stdin, which an unquoted heredoc interpolates.
@@ -54,7 +56,7 @@ fi
 
 # --- 2. unquoted glob in an option value -------------------------------------
 GLOB_EQ_RE='--(include|exclude|glob|iglob|ignore)=[^"'\''[:space:]]*[*?]'
-GLOB_ARG_RE='[[:space:]]-(name|iname|path|ipath)[[:space:]]+[^"'\''[:space:]]*[*?]'
+GLOB_ARG_RE='[[:space:]](--(include|exclude|glob|iglob|ignore)|-(name|iname|path|ipath))[[:space:]]+[^"'\''[:space:]]*[*?]'
 if [[ "$SCAN" =~ $GLOB_EQ_RE ]] || [[ "$SCAN" =~ $GLOB_ARG_RE ]]; then
   echo "Blocked: unquoted glob pattern (${BASH_REMATCH[0]# }). zsh expands it against the CWD before the tool sees it: no match aborts the whole command, several become a filename list the tool rejects, and exactly one silently searches that single file instead of the pattern. Quote it: --include='*.dart', -name '*.md'." >&2
   exit 2

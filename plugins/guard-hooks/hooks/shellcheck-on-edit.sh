@@ -30,8 +30,10 @@ if OUT=$("$SC" "$FILE_PATH" 2>&1); then
   exit 0
 fi
 
-OUT=$(printf '%s\n' "$OUT" | head -n 40)
+# awk reads the full stream while retaining only the first 40 lines. `head`
+# closes early and can make the producer die with SIGPIPE under `pipefail`.
+OUT=$(printf '%s\n' "$OUT" | awk 'NR <= 40')
 MSG="⚠️ shellcheck found issues in $FILE_PATH:
 $OUT"
-jq -n --arg ctx "$MSG" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}'
+jq -n --arg ctx "$MSG" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}' || true
 exit 0

@@ -28,18 +28,25 @@ if [[ "$FILE_PATH" == *".zprofile.secrets"* || "$COMMAND" == *".zprofile.secrets
   exit 2
 fi
 
-# .env files hold live secrets; template variants (.env.example etc.) do not.
+# .env files hold live secrets; exact template variants (.env.example etc.) do not.
 # The .env token must start a path component (start/space/slash/quote/=) so
-# code like process.env.HOME is not caught.
-# ponytail: a command mixing a template and a real .env (cat .env.example .env)
-# slips through the exception; per-token parsing if that ever matters.
-ENV_RE='(^|[/[:space:]"'\''=])\.env(\.[A-Za-z0-9-]+)?([^A-Za-z0-9_.-]|$)'
-ENV_TEMPLATE_RE='(^|[/[:space:]"'\''=])\.env\.(example|sample|template|dist|defaults?)([^A-Za-z0-9-]|$)'
+# code like process.env.HOME is not caught. Inspect every token independently
+# so a template token cannot exempt a separate live dotenv token.
+ENV_RE='(^|[/[:space:]"'\''=])(\.env(\.[A-Za-z0-9-]+)*)([^A-Za-z0-9_.-]|$)'
 for s in "$FILE_PATH" "$COMMAND" "$SEARCH_PATH"; do
-  if [[ -n "$s" && "$s" =~ $ENV_RE ]] && ! [[ "$s" =~ $ENV_TEMPLATE_RE ]]; then
+  remaining="$s"
+  while [[ -n "$remaining" && "$remaining" =~ $ENV_RE ]]; do
+    env_token="${BASH_REMATCH[2]}"
+    matched="${BASH_REMATCH[0]}"
+    case "$env_token" in
+      .env.example | .env.sample | .env.template | .env.dist | .env.default | .env.defaults)
+        remaining="${remaining#*"$matched"}"
+        continue
+        ;;
+    esac
     echo ".env files hold live secrets and must not be read, edited, or echoed by Claude. Read the template variant (.env.example / .env.sample) instead, or ask the user for the specific value you need." >&2
     exit 2
-  fi
+  done
 done
 
 exit 0
