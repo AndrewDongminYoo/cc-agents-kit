@@ -176,7 +176,7 @@ cleanup_filter_scan() {
 }
 
 # Invoked indirectly by the signal traps installed during the filter scan.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 terminate_filter_scan() {
   local signal_status="$1"
   trap '' HUP INT TERM
