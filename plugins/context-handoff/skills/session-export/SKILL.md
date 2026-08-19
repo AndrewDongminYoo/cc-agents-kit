@@ -12,16 +12,18 @@ Render a session `.jsonl` transcript from `~/.claude/projects/<munged-cwd>/` int
 
 ## Usage
 
+`session-to-md` is on PATH whenever this plugin is enabled — it ships in the plugin's `bin/`, so there is no path to resolve.
+
 ```bash
 # Export the current project's most recent session (this session) to ~/Downloads
-node ~/.claude/skills/session-export/scripts/session-to-md.mjs
+session-to-md
 
 # List this project's sessions (id, time, size, first-prompt preview)
-node ~/.claude/skills/session-export/scripts/session-to-md.mjs --list
+session-to-md --list
 
 # Export a specific session by id, or the Nth most recent
-node ~/.claude/skills/session-export/scripts/session-to-md.mjs <session-id>
-node ~/.claude/skills/session-export/scripts/session-to-md.mjs --last 2
+session-to-md <session-id>
+session-to-md --last 2
 
 # Options
 #   --out <file|dir>   output path (default: ~/Downloads/<date>-<title>.md)
