@@ -12,7 +12,7 @@ metadata:
 Trunk.io is a meta-linter and git hook manager.
 Its core principle is "hold-the-line": existing violations are acknowledged and ignored initially, but new violations on changed files are blocked.
 This lets teams adopt linting incrementally without a big-bang cleanup.
-This skill covers first-time integration and configuration; for RUNNING trunk day-to-day (check/fmt at milestones, cache corruption, linter-version alignment, vuln triage), spawn the global `trunk-quality-gate` agent instead.
+This skill covers first-time integration and configuration. Running trunk day to day is a different job — `trunk check` / `trunk fmt` at milestones, cache corruption, aligning trunk-pinned linter versions with the workspace, vulnerability triage — and is out of scope here.
 
 ## Initialization Flow
 
@@ -357,7 +357,11 @@ When `trunk check` reports a dependency vulnerability (e.g., from `osv-scanner`)
 
 ## Quick Reference
 
+Before inventing a config, look at one you already wrote. `find-trunk-repos` is on PATH whenever this plugin is enabled and lists your own public repositories whose default branch already carries `.trunk/trunk.yaml`, so an existing setup can be read rather than reconstructed. It needs the GitHub CLI authenticated (`gh auth login`), and prints `<owner/repo>  <default-branch>  <file-url>`.
+
 ```bash
+find-trunk-repos                    # your repos that already have a trunk config
+
 trunk init                          # Initialize trunk in repo
 trunk config hide                   # Keep .trunk/ local (not committed)
 trunk config share                  # Commit .trunk/ config to repo
