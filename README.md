@@ -63,7 +63,7 @@ The guard blocks both shapes before the command runs.
 A hook bundle runs on every tool call, so "it has tests" is not worth much on its own.
 These are the three properties that matter, and each is pinned by a case that fails when the property is removed:
 
-- **A passing suite is not taken as evidence.** 184 cases across the seven hooks; delete the logic they cover — `exit 2` → `exit 0`, `-ot` → `-nt`, drop the reporting line — and 74 of them fail. Mutants are parse-checked first, because `bash` exits `2` on a syntax error and an unparseable mutant would otherwise produce a vacuous pass.
+- **A passing suite is not taken as evidence.** Delete the logic a regression covers — `exit 2` → `exit 0`, `-ot` → `-nt`, drop the reporting line — and confirm that regression fails. Mutants are parse-checked first, because `bash` exits `2` on a syntax error and an unparseable mutant would otherwise produce a vacuous pass.
 - **Guards fail open, never closed.** Empty, malformed, or key-less input exits `0` silently. A broken guard degrades to no guard, and never to a blocked tool call.
 - **The two `PostToolUse` hooks cannot block you.** They only attach a warning. Every hook also has its own kill switch, and a disabled hook still drains its input, so turning one off cannot itself break a large `Write`.
 
@@ -117,9 +117,9 @@ Tools that already error out without a path (`black`, `dart format`) are deliber
 
 #### `staged-secret-guard.sh`
 
-Before a `git commit` runs, scans the *added* lines of the staged diff for credential shapes: npm auth tokens, GitHub / Slack / Google / PyPI tokens, OpenAI- and Anthropic-style keys, AWS access key ids, and private key blocks.
+Before a `git commit` runs, scans the *added* lines of the effective commit candidate for credential shapes: npm auth tokens, GitHub / Slack / Google / PyPI tokens, OpenAI- and Anthropic-style keys, AWS access key ids, and private key blocks.
 Deleting a secret is never blocked, only adding one.
-`git -C <path>` is honoured, so the scan reads the repository being committed to.
+Staged commits, `git commit -a`, pathspec commits, and quoted `git -C <path>` repositories are distinguished without executing the command string; a commit form that cannot be parsed safely is blocked instead of scanning the wrong candidate.
 
 This is the commit-time counterpart to `secrets-path-guard.sh`, which blocks *reading* secret files - a value still reaches a diff by being typed, pasted, or written by a generator.
 High-confidence patterns only: a guard that cries wolf gets switched off.
@@ -167,7 +167,7 @@ To turn the whole bundle off, use `/plugin` and disable `guard-hooks`.
 
 - **`jq`** — a hard prerequisite. Every hook parses its input with `jq`, and each one fails *open* when `jq` is missing: the guards stop guarding silently rather than erroring. Confirm with `jq --version` after installing.
 - **`bash`** — the hooks are invoked as `bash <script>` regardless of your interactive shell, and are written against macOS's system `/bin/bash` 3.2, the oldest bash they need to parse under. Verified on macOS (`GNU bash 3.2.57`, darwin arm64) and on Linux, where CI runs shellcheck and the full suite on `ubuntu-latest` for every push to `main` and every pull request.
-- **`git`** — only `staged-secret-guard.sh` uses it, to read the staged diff; outside a repository the hook exits `0`.
+- **`git`** — only `staged-secret-guard.sh` uses it, to read the effective commit candidate; outside a repository the hook exits `0`.
 - **`shellcheck`** — optional; only `shellcheck-on-edit.sh` uses it, and that hook no-ops without it.
 - **`python3`** — tests only, not runtime.
 
@@ -180,7 +180,6 @@ These are guardrails against an accidental slip, not a sandbox.
 They match patterns in the tool input, so deliberate multi-step obfuscation (symlinks, variable indirection, base64) bypasses them, and the harness's own permission layer remains the enforcement boundary.
 
 - **Prose is matched too.** A command that merely *mentions* a blocked shape is blocked — writing a file whose text contains a download-and-execute pipeline trips `dangerous-command-guard`, and naming a secrets file in a message trips `secrets-path-guard`. Split the literal, or write the file with a tool other than `Bash`.
-- **Mixed dotenv arguments slip through.** One command naming both a template and a real dotenv file is allowed, because the template exception is evaluated per command string rather than per token. Pinned as a `KNOWN HOLE` case in `secrets-path-guard.test.py`, so a future fix surfaces as that case changing.
 - **`staged-secret-guard` matches shapes, not entropy.** A credential with no recognisable prefix - a bare password, a random hex string, a private API host - is not detected. Treat it as a floor, not a scanner.
 - **`pathless-rewriter-guard` only knows the tools it lists.** A rewriter outside that list, or one reached through a shell alias or a package script (`npm run format`), is invisible to it.
 - **`zsh-quoting-guard` stops scanning at a quoted heredoc**, which also discards anything chained after the terminator. A deliberate fail-open.
@@ -214,7 +213,7 @@ Six skills for work that outlives one session, and for the config that work drag
 | `log-it` | A session found something non-obvious and it should outlive the window. Routes each fact by who has to read it. |
 | `wayfinder` | The effort is too big for one session. Charts it as decision tickets under `docs/plans/`, one resolved per session. |
 | `context-budget` | You want to know what is eating the context window — agents, skills, MCP servers, rules — ranked by what you would get back. |
-| `config-gc` | `~/.claude` has accumulated. Walks redundant, stale, and orphaned items with a confirmation per deletion. |
+| `config-gc` | The active root from `CLAUDE_CONFIG_DIR` or `~/.claude` has accumulated. Walks redundant, stale, and orphaned items with a confirmation per deletion. |
 
 `wayfinder`, `context-budget`, and `config-gc` derive from MIT-licensed work by others, with the overlap measured rather than described — see [CREDITS.md](CREDITS.md).
 

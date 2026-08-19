@@ -24,9 +24,11 @@ An entry pointing at a missing directory breaks installation for everyone, so ad
 ## Verifying a change
 
 ```bash
-shellcheck plugins/*/hooks/*.sh
+find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck
 cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done
 ```
+
+CI also lints and parses extensionless Bash entries under `plugins/*/bin/`; local verification must include any such entry changed by the contribution.
 
 A passing suite is not on its own evidence.
 Before claiming a suite covers the logic, remove that logic and confirm the suite fails: flip `exit 2` to `exit 0`, invert the comparison, or delete the reporting line.

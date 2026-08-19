@@ -5,6 +5,16 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Fixed
+
+- Guard hooks now cover git global options and separated long-option globs, every dangerous command segment and absolute pipeline interpreters, multi-suffix and mixed live dotenv paths, effective `commit -a` and pathspec candidates, value-taking rewriter options, and large ShellCheck findings without advisory SIGPIPE failures.
+- `find-trunk-repos` now propagates GitHub authentication and repository-list failures instead of reporting a false empty success.
+- `config-gc` now derives one active root from `CLAUDE_CONFIG_DIR` or `~/.claude`, and `setup-trunk` selects linters from repository evidence before proposing scoped changes.
+
+### Changed
+
+- CI now lints and parses extensionless Bash plugin `bin/` entries as well as `*.sh`; the previous claim that every shipped shell artifact was covered was broader than the implemented gate.
+
 ## [0.3.1] — 2026-08-19
 
 ### Fixed
@@ -15,7 +25,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Changed
 
-- CI lints and parses **every** shell script in the repository rather than only `plugins/*/hooks/*.sh`. Two scripts that ship to users, including one inside a skill, had been outside the gate; both were clean, but a repository whose pitch is that shell quality is gated should not exempt its own shipped scripts.
+- CI lints and parses every `*.sh` script in the repository rather than only `plugins/*/hooks/*.sh`. Two scripts that ship to users, including one inside a skill, had been outside the gate; both were clean, but extensionless Bash `bin/` entries were not yet covered.
 - The hook-wiring existence check no longer hardcodes `guard-hooks`, so a second plugin adding hooks is covered on the day it does.
 - New check: every `plugins/*/bin/*` entry is executable and carries a shebang — on PATH and unrunnable is exactly the failure a skill calling it by bare name cannot see.
 - New check: the demo recording is compared against what `zsh-quoting-guard` actually prints, by running it, rather than against its source. It caught a real mismatch on the first run — the recording had been shortening the message's final line — which is now corrected and the GIF regenerated.
