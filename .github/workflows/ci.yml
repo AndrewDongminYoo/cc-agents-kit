@@ -105,15 +105,32 @@ jobs:
           fi
           echo "no private references"
 
-      # Every shell script in the repo, not just the hooks: a script shipped
-      # inside a skill or a plugin's bin/ reaches users the same way a hook does.
+      # Cover both named shell scripts and extensionless Bash plugin bin entries.
       - name: Shellcheck
-        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck
+        run: |
+          python3 - <<'PY' | xargs -0 shellcheck
+          import os, pathlib, sys
+          for f in sorted(pathlib.Path(".").rglob("*")):
+              if not f.is_file() or ".git" in f.parts:
+                  continue
+              first_line = f.open("rb").readline()
+              is_bash_bin = len(f.parts) == 4 and f.parts[0] == "plugins" and f.parts[2] == "bin" and f.suffix == "" and b"bash" in first_line
+              if f.suffix == ".sh" or is_bash_bin:
+                  sys.stdout.buffer.write(os.fsencode(str(f)) + b"\0")
+          PY
 
       - name: Parse under /bin/bash
         run: |
-          find . -name '*.sh' -not -path './.git/*' -print0 |
-            xargs -0 -n1 /bin/bash -n
+          python3 - <<'PY' | xargs -0 -n1 /bin/bash -n
+          import os, pathlib, sys
+          for f in sorted(pathlib.Path(".").rglob("*")):
+              if not f.is_file() or ".git" in f.parts:
+                  continue
+              first_line = f.open("rb").readline()
+              is_bash_bin = len(f.parts) == 4 and f.parts[0] == "plugins" and f.parts[2] == "bin" and f.suffix == "" and b"bash" in first_line
+              if f.suffix == ".sh" or is_bash_bin:
+                  sys.stdout.buffer.write(os.fsencode(str(f)) + b"\0")
+          PY
 
       # A bin/ entry that is not executable, or has no shebang, is on PATH and
       # unrunnable — the failure a skill referencing it by bare name cannot see.
@@ -164,3 +181,6 @@ jobs:
         run: |
           cd plugins/guard-hooks/hooks
           for t in *.test.py; do python3 "$t" || exit 1; done
+
+      - name: Repo discovery regression suite
+        run: python3 plugins/repo-gate/bin/find-trunk-repos.test.py
