@@ -1,6 +1,6 @@
 ---
 name: config-gc
-description: Garbage collection for ~/.claude — scans skills, memory, hooks, permissions, MCP servers, and caches for redundant, stale, or orphaned items, then walks the user through confirm-each-deletion cleanup. Use on "clean up my config", "config GC", "too many skills", "my .claude is bloated", or a periodic review.
+description: Garbage collection for the active Claude config root — scans skills, memory, hooks, permissions, MCP servers, and caches for redundant, stale, or orphaned items, then walks the user through confirm-each-deletion cleanup. Use on "clean up my config", "config GC", "too many skills", "my .claude is bloated", or a periodic review.
 metadata:
   category: claude-config
   origin: https://github.com/affaan-m/ecc (MIT), skills/config-gc — substantially upstream; see CREDITS.md
@@ -19,26 +19,37 @@ Borrowed from runtime garbage collection: periodically scan for objects that are
 
 Do NOT activate for: cleaning project source code (that's refactoring), clearing chat history, or uninstalling Claude Code itself.
 
+## Active Config Root
+
+Derive one root at the start of the run and use it for every scan, backup, soft-delete, and log operation:
+
+```bash
+ACTIVE_CONFIG_ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+```
+
+Do not scan both the default and an override.
+When `CLAUDE_CONFIG_DIR` is set, it is the active root; otherwise use `$HOME/.claude`.
+
 ## Design Philosophy
 
 1. **Append-only configs leak.** Skills, memory files, hooks, and permission entries only ever get added. Without periodic review they rot silently.
 2. **Regular audits beat one-time purges.** Scan every ~30 days, propose a small batch of candidates each time.
 3. **Per-channel strategies.** Each accumulation type (skills, hooks, permissions, ...) has its own staleness signals — don't apply one rule everywhere.
-4. **Soft-delete first.** Rename to `.disabled` > move to `~/.claude/_gc_trash/` > real deletion. Always keep an undo path.
+4. **Soft-delete first.** Rename to `.disabled` > move to `$ACTIVE_CONFIG_ROOT/_gc_trash/` > real deletion. Always keep an undo path.
 5. **Forced human-in-the-loop.** Every candidate gets its own `[y/n/skip]` confirmation. No "yes to all" shortcut.
-6. **Keep a log.** Every GC run appends to `~/.claude/gc_log.md`: what was touched, why, and how to undo it.
+6. **Keep a log.** Every GC run appends to `$ACTIVE_CONFIG_ROOT/gc_log.md`: what was touched, why, and how to undo it.
 
 ## Scan Channels
 
 | #   | Channel                    | Path                                                           | Staleness / redundancy signals                                                                                                                                                    |
 | --- | -------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Skills                     | `~/.claude/skills/*/`                                          | Heavily overlapping names; never triggered in recent transcripts; domain mismatch with the user's actual work; broken or empty SKILL.md                                           |
-| 2   | Memory                     | `~/.claude/**/memory/*.md` + its index                         | Multiple index entries for one topic; contents contradicting newer entries; dates that have passed; orphan files missing from the index; sub-100-word fragments that should merge |
-| 3   | Hooks                      | `~/.claude/hooks/` + settings                                  | Scripts present on disk but referenced by no hook config; old versions superseded by rewrites                                                                                     |
+| 1   | Skills                     | `$ACTIVE_CONFIG_ROOT/skills/*/`                                | Heavily overlapping names; never triggered in recent transcripts; domain mismatch with the user's actual work; broken or empty SKILL.md                                           |
+| 2   | Memory                     | `$ACTIVE_CONFIG_ROOT/**/memory/*.md` + its index               | Multiple index entries for one topic; contents contradicting newer entries; dates that have passed; orphan files missing from the index; sub-100-word fragments that should merge |
+| 3   | Hooks                      | `$ACTIVE_CONFIG_ROOT/hooks/` + settings                        | Scripts present on disk but referenced by no hook config; old versions superseded by rewrites                                                                                     |
 | 4   | Permissions                | `permissions.allow` in `settings.json` / `settings.local.json` | Duplicate entries; specific entries already covered by a wildcard (e.g. `Bash(git push)` when `Bash(*)` is allowed); one-off grants from past experiments                         |
-| 5   | MCP servers                | `~/.claude.json` or project `.mcp.json`                        | Servers that fail to connect; functional duplicates; long-unused                                                                                                                  |
-| 6   | Scheduled reminders / jobs | wherever the user keeps them                                   | Fired one-shots older than 30 days; jobs whose target scripts no longer exist                                                                                                     |
-| 7   | Project history            | `~/.claude/projects/*/`                                        | Stale handoff snapshots; session records superseded by newer state                                                                                                                |
+| 5   | MCP servers                | `$ACTIVE_CONFIG_ROOT/.claude.json` or `.mcp.json` records      | Servers that fail to connect; functional duplicates; long-unused                                                                                                                  |
+| 6   | Scheduled reminders / jobs | job metadata referenced from `$ACTIVE_CONFIG_ROOT`             | Fired one-shots older than 30 days; jobs whose target scripts no longer exist                                                                                                     |
+| 7   | Project history            | `$ACTIVE_CONFIG_ROOT/projects/*/`                              | Stale handoff snapshots; session records superseded by newer state                                                                                                                |
 | 8   | Runtime caches             | `cache/`, `file-history/`, `logs/`, `shell-snapshots/`         | Sort by size and mtime; propose items >30 days old and large                                                                                                                      |
 
 ## Workflow
@@ -47,7 +58,7 @@ Do NOT activate for: cleaning project source code (that's refactoring), clearing
 2. **Rank** by confidence (broken/orphaned = high; merely old = low) and present as a numbered table. Cap each run at ~20 candidates — GC is periodic, not exhaustive.
 3. **Confirm one by one.** For each candidate show the evidence, then ask `[y/n/skip]`. The user can stop at any point.
 4. **Soft-delete confirmed items**: prefer `.disabled` rename for skills/hooks and `_gc_trash/<date>/` move for files. Permission entries live in JSON (no comments possible): back up the settings file, record each removed entry verbatim in `gc_log.md`, then remove it from the `allow` array with `jq`. Only hard-delete when the user explicitly asks.
-5. **Log** the run to `~/.claude/gc_log.md`: timestamp, items actioned, undo instructions.
+5. **Log** the run to `$ACTIVE_CONFIG_ROOT/gc_log.md`: timestamp, items actioned, undo instructions.
 6. **Report**: reclaimed size, channels still healthy, suggested next review date.
 
 ## Example Scan Commands
@@ -56,10 +67,11 @@ Orphaned hook scripts (channel 3) — scripts on disk that no hook config refere
 **Grep each settings file separately.** `settings.local.json` is often absent, and on macOS/BSD an unreadable file makes grep exit 2 even when the pattern matched in the file that does exist — one missing file then reports every script as an orphan:
 
 ```bash
-for f in ~/.claude/hooks/* ~/.claude/scripts/*; do
+ACTIVE_CONFIG_ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+for f in "$ACTIVE_CONFIG_ROOT"/hooks/* "$ACTIVE_CONFIG_ROOT"/scripts/*; do
   [ -f "$f" ] || continue
   name=$(basename "$f") hit=""
-  for cfg in ~/.claude/settings.json ~/.claude/settings.local.json; do
+  for cfg in "$ACTIVE_CONFIG_ROOT/settings.json" "$ACTIVE_CONFIG_ROOT/settings.local.json"; do
     [ -f "$cfg" ] && grep -qF "$name" "$cfg" && hit=1
   done
   [ -n "$hit" ] || echo "ORPHAN: $f"
@@ -72,7 +84,8 @@ Redundant permission entries (channel 4) — duplicates, and specific grants sha
 Both settings files are optional, so guard the read; `jq` on a missing path aborts the pipeline:
 
 ```bash
-for cfg in ~/.claude/settings.json ~/.claude/settings.local.json; do
+ACTIVE_CONFIG_ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+for cfg in "$ACTIVE_CONFIG_ROOT/settings.json" "$ACTIVE_CONFIG_ROOT/settings.local.json"; do
   [ -f "$cfg" ] || continue
   echo "-- $cfg"
   jq -r '.permissions.allow[]?' "$cfg" | sort | uniq -d
@@ -88,7 +101,8 @@ Marketplaces that version by git SHA mint a fresh directory on every upstream co
 Key the lookup on the full `plugin@marketplace` id, never on the plugin name alone — the same plugin name ships from more than one marketplace (`commit-commands` and `frontend-design` each exist twice here), and a name-only match reports the surviving twin's version as current for the uninstalled one:
 
 ```bash
-cd ~/.claude
+ACTIVE_CONFIG_ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+cd "$ACTIVE_CONFIG_ROOT"
 for pdir in plugins/cache/*/*/; do
   mp=$(basename "$(dirname "$pdir")"); plugin=$(basename "$pdir")
   cur=$(jq -r --arg k "$plugin@$mp" '.plugins[$k][0].version // empty' plugins/installed_plugins.json)
@@ -99,31 +113,34 @@ for pdir in plugins/cache/*/*/; do
 done
 ```
 
-There is a single config dir (`~/.claude`) — the `CLAUDE_CONFIG_DIR` flutter worktree was decommissioned 2026-08-08. Historical caveat should a second config dir ever return: its cache records `installPath` pointing at the home config, so `claude plugin uninstall` there deletes nothing and leaves the whole plugin directory behind.
+Before proposing a cached plugin directory, verify its `installPath` also resolves under `$ACTIVE_CONFIG_ROOT`; a mismatched record is evidence to investigate, not permission to delete another root.
 
 Largest stale caches (channel 8) — `du -k` instead of GNU-only `find -printf`, so it works on macOS/BSD too:
 
 ```bash
-find ~/.claude/file-history ~/.claude/shell-snapshots -type f -mtime +30 \
+ACTIVE_CONFIG_ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+find "$ACTIVE_CONFIG_ROOT/file-history" "$ACTIVE_CONFIG_ROOT/shell-snapshots" -type f -mtime +30 \
   -exec du -k {} + 2>/dev/null | sort -rn | head -20
 ```
 
 Soft-delete with undo path (capture the date once so the log can't disagree with the directory):
 
 ```bash
+ACTIVE_CONFIG_ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 gc_date=$(date +%Y-%m-%d)
-mkdir -p ~/.claude/_gc_trash/$gc_date
-mv ~/.claude/skills/dead-skill ~/.claude/_gc_trash/$gc_date/
-echo "$(date -Iseconds) moved skills/dead-skill -> _gc_trash/$gc_date/ (undo: mv back)" >> ~/.claude/gc_log.md
+mkdir -p "$ACTIVE_CONFIG_ROOT/_gc_trash/$gc_date"
+mv "$ACTIVE_CONFIG_ROOT/skills/dead-skill" "$ACTIVE_CONFIG_ROOT/_gc_trash/$gc_date/"
+echo "$(date -Iseconds) moved skills/dead-skill -> _gc_trash/$gc_date/ (undo: mv back)" >> "$ACTIVE_CONFIG_ROOT/gc_log.md"
 ```
 
 Removing a confirmed-redundant permission entry (JSON has no comments — back up, log, then edit):
 
 ```bash
-cp ~/.claude/settings.local.json ~/.claude/settings.local.json.bak
-echo "$(date -Iseconds) removed permission entry: Bash(git push) (undo: restore from .bak or re-add)" >> ~/.claude/gc_log.md
-jq '.permissions.allow -= ["Bash(git push)"]' ~/.claude/settings.local.json.bak \
-  > ~/.claude/settings.local.json
+ACTIVE_CONFIG_ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+cp "$ACTIVE_CONFIG_ROOT/settings.local.json" "$ACTIVE_CONFIG_ROOT/settings.local.json.bak"
+echo "$(date -Iseconds) removed permission entry: Bash(git push) (undo: restore from .bak or re-add)" >> "$ACTIVE_CONFIG_ROOT/gc_log.md"
+jq '.permissions.allow -= ["Bash(git push)"]' "$ACTIVE_CONFIG_ROOT/settings.local.json.bak" \
+  > "$ACTIVE_CONFIG_ROOT/settings.local.json"
 ```
 
 ## Anti-Patterns
@@ -132,7 +149,7 @@ jq '.permissions.allow -= ["Bash(git push)"]' ~/.claude/settings.local.json.bak 
 - **Hard-deleting on first pass.** If there's no `_gc_trash/` copy or `.disabled` rename, you did it wrong.
 - **Treating "old" as "dead".** A skill untouched for 60 days may be seasonal (tax season, quarterly reviews). Age is a signal, not a verdict — that's why a human confirms.
 - **Cleaning memory by truncation.** Merging two contradicting memory files requires reading both and keeping the newer truth, not deleting the longer one.
-- **Touching anything outside `~/.claude`** (or the project's `.claude/`). Config GC never wanders into source trees.
+- **Touching anything outside `$ACTIVE_CONFIG_ROOT`.** Config GC never wanders into another config root or a source tree.
 
 ## Best Practices
 
