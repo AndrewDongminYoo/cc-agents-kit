@@ -3,10 +3,11 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
-## [Unreleased]
+## [0.3.2] — 2026-08-24
 
 ### Fixed
 
+- `staged-secret-guard`'s two `sk-` key patterns had no left boundary, so a kebab-case word whose tail clears the 20-character floor — `live-task-status-transitioning` contains `sk-status-transitioning` — read as an OpenAI key and blocked a real commit. Both patterns now require a non-word character (or line start) before `sk-`, with regression tests for the slug and for a key at line start.
 - Guard hooks now cover git global options and separated long-option globs, every dangerous command segment and absolute pipeline interpreters, multi-suffix and mixed live dotenv paths, effective `commit -a` and pathspec candidates, value-taking rewriter options, and large ShellCheck findings without advisory SIGPIPE failures.
 - `find-trunk-repos` now propagates GitHub authentication and repository-list failures instead of reporting a false empty success.
 - `config-gc` now derives one active root from `CLAUDE_CONFIG_DIR` or `~/.claude`, and `setup-trunk` selects linters from repository evidence before proposing scoped changes.
