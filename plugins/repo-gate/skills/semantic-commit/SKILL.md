@@ -55,8 +55,8 @@ Assign each changed file to exactly one group:
 
 Rules:
 
-- One file → one group.
-  If a file spans two concerns, lean toward the dominant intent.
+- One file → one group by default.
+  If a file genuinely spans two concerns, split it at hunk level (see Hunk-Level Splitting) and list it in both groups, marking which part goes where.
 - Test files travel with their production file when both change together.
 - Never mix `feat` and `fix` in the same commit.
 - Pick `scope` from the affected module/package/feature area (see Scopes below).
@@ -82,7 +82,8 @@ Wait for user confirmation ("go" / "네" / "좋습니다") before committing.
 
 For each group in order:
 
-1. Stage only the files in this group: `git add <files>`
+1. Stage only the files in this group: `git add <files>`.
+   For a file split across groups, stage only its hunks (see Hunk-Level Splitting).
 2. Run the project's verification commands (see Verification below)
 3. Fix any issues before committing (do not skip verification)
 4. Commit with the message on the subject line:
@@ -114,6 +115,27 @@ Committed:
   def5678  test(auth): cover refresh-token rotation edge cases
   ghi9012  build(deps): bump jsonwebtoken to 9.0.2
 ```
+
+## Hunk-Level Splitting
+
+`git add -p` is fully driveable over a pipe — it reads answers from stdin, so no TTY is needed:
+
+```bash
+git diff -- <file>                      # count and read the hunks first
+printf 'y\nn\n' | git add -p -- <file>  # one y/n answer per hunk, in diff order
+git diff --cached -- <file>             # confirm exactly the intended hunks are staged
+```
+
+Rules:
+
+- Read the full diff and count the hunks **before** answering — provide exactly one answer per hunk.
+  On EOF `git add -p` quits without staging further hunks, so an answer-count mismatch under-stages silently; the `git diff --cached` confirmation is mandatory, not optional.
+- If two concerns are interleaved inside a single hunk, do not use `s` (its split points are line-count driven and rarely land on the concern boundary).
+  Fall back to patch editing: `git diff -- <file> > /tmp/part.patch`, delete the unwanted hunks/lines from the patch, then `git apply --cached /tmp/part.patch`.
+- After partial staging, the working tree and the index differ, so checks run on the working tree would test code that is not being committed.
+  Isolate the commit candidate: `git stash push --keep-index`, run verification, commit, then `git stash apply` → confirm the remaining hunks are back → `git stash drop` (prefer apply-then-drop over `pop`).
+- Do not blindly re-`git add` a partially staged file after a formatter runs — that would pull the withheld hunks back in.
+  Use the formatter's `--check` mode as the gate for such files, or re-split from scratch.
 
 ## Verification
 
