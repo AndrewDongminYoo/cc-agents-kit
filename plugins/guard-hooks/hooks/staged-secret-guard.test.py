@@ -91,6 +91,18 @@ d = repo({"README.md": "# hello\nNo secrets here.\n"})
 rc, _ = check_hook("git commit -m docs", d)
 check("clean diff passes", rc == 0, f"exit={rc}")
 
+# "sk-" inside a kebab-case word is prose, not a key — "live-task-status-transitioning"
+# blocked a real commit on 2026-08-24 because "sk-status-transitioning" clears the
+# 20-char floor.
+d = repo({"notes.md": "see the live-task-status-transitioning page slug\n"})
+rc, _ = check_hook("git commit -m docs", d)
+check("kebab-case word containing sk- passes", rc == 0, f"exit={rc}")
+
+# The boundary must not weaken detection of a key that starts its line.
+d = repo({"config.txt": f"{OPENAI}\n"})
+rc, _ = check_hook("git commit -m x", d)
+check("key at line start still blocks", rc == 2, f"exit={rc}")
+
 # A secret being REMOVED must not block its own removal.
 d = repo({"config.txt": f"{GITHUB}\n"})
 subprocess.run(["git", "-C", d, "commit", "-qm", "seed"], capture_output=True)

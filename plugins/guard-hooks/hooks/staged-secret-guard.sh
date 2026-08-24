@@ -272,8 +272,10 @@ ADDED=$(printf '%s\n' "$DIFF" | grep -E '^\+' | grep -Ev '^\+\+\+' || true)
 PATTERNS=(
   'npm auth token|_authToken[[:space:]]*=[[:space:]]*[^[:space:]$"'"'"']{16,}'
   'GitHub token|gh[pousr]_[A-Za-z0-9]{36,}'
-  'OpenAI-style key|sk-[A-Za-z0-9_-]{20,}'
-  'Anthropic key|sk-ant-[A-Za-z0-9_-]{20,}'
+  # sk- needs a left boundary: "live-task-status-transitioning" contains
+  # "sk-status-transitioning", which clears the 20-char floor.
+  'OpenAI-style key|(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}'
+  'Anthropic key|(^|[^A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{20,}'
   'AWS access key id|AKIA[0-9A-Z]{16}'
   'Slack token|xox[baprs]-[A-Za-z0-9-]{10,}'
   'Google API key|AIza[A-Za-z0-9_-]{35}'
