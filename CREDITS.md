@@ -16,6 +16,8 @@ Column meanings:
 | `dangerous-command-guard.sh` | original | Apache-2.0 | Written for this repository. |
 | `secrets-path-guard.sh` | original | Apache-2.0 | Written for this repository. |
 | `zsh-quoting-guard.sh` | original | Apache-2.0 | Written for this repository. |
+| `pathless-rewriter-guard.sh` | original | Apache-2.0 | Written for this repository. |
+| `staged-secret-guard.sh` | original | Apache-2.0 | Written for this repository. |
 | `lockfile-drift-check.sh` | original | Apache-2.0 | Written for this repository. |
 | `shellcheck-on-edit.sh` | original | Apache-2.0 | Written for this repository. |
 
