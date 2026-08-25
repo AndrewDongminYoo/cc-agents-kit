@@ -41,6 +41,8 @@ Column meanings:
 | `semantic-commit` | original | Apache-2.0 | Written for this repository. |
 | `fix-osv-vulnerabilities` | original | Apache-2.0 | Written for this repository. |
 | `cspell-triage` | original | Apache-2.0 | Written for this repository. |
+| `find-trunk-repos` | original | Apache-2.0 | Written for this repository. |
+| `cspell-dict-report` | original | Apache-2.0 | Written for this repository. |
 
 ## MIT notice
 
