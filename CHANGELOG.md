@@ -3,6 +3,25 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
+## [0.3.6] — 2026-08-25
+
+An over-engineering audit of the whole tree, and what it turned up. Nothing users invoke changes except one flag-parsing fix.
+
+### Fixed
+
+- `session-to-md` treated any argument it did not recognise as the session id, so `--tools none` typed as `--tool none` silently exported a different session instead of complaining. Its flags are parsed with `node:util`'s `parseArgs` now, which is strict; the error names the offending flag on one line rather than as a stack trace. Its usage line also still named `session-to-md.mjs`, the path the script had before 0.3.1 moved it into `bin/`.
+
+### Changed
+
+- The opt-out contract every guard-hooks suite runs — feeding the hook over a real pipe, checking a disabled hook still drains a 200KB payload — was byte-identical in all seven suites, and its three blocking cases were byte-identical in four of them. It now lives in `hooks/_optout.py`, beside the suites so their `Path(__file__).with_name()` hook lookup is unaffected, and named with a leading underscore so CI's `*.test.py` glob does not run it as a suite. 324 lines of copies became 29 lines of calls. `staged-secret-guard`'s opt-out cases gained the silence assertion the other four already had.
+- `staged-secret-guard` spelled its `-C <path>` expansion out at twelve call sites and selected its diff through three branches by two sub-branches of one command. A `gitq()` wrapper and a pathspec array reduce that to one condition and one call. The `check-attr` call stays spelled out, because backgrounding a function makes `$!` the subshell's pid and the kill and wait around it would then never reach git — the suite caught exactly that.
+- CI listed the shell scripts to check twice, in two byte-identical heredocs. One step writes the list now and asserts it is non-empty, because a discovery that matched nothing would leave both consumers passing on empty stdin.
+- `marketplace.json` drops `version`. The schema does not require it, it never moved through five releases, and a reader would take `0.1.0` for the marketplace's version.
+
+### Provenance
+
+- CLAUDE.md said a component thin enough to be effectively vendored upstream code does not belong here, while `context-budget` ships at 87% verbatim with CREDITS.md saying so. The rule now matches the practice: mostly-upstream is allowed as a declared redistribution — measured overlap, copyright holder named, licence permitting it — and what is barred is upstream work presented as this repository's own.
+
 ## [0.3.5] — 2026-08-25
 
 ### Fixed
