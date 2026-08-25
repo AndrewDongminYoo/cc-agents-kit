@@ -3,6 +3,16 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
+## [0.3.3] — 2026-08-25
+
+### Added
+
+- `semantic-commit` splits a file at hunk level when it genuinely spans two concerns, instead of assigning it wholesale to the dominant intent. It documents driving `git add -p` over a pipe — it reads answers from stdin, so no TTY is needed — with the `git diff --cached` confirmation made mandatory rather than optional, because on EOF `git add -p` quits and an answer-count mismatch under-stages silently. Also the patch-editing fallback for two concerns interleaved inside one hunk, where `s` splits on line counts and rarely lands on the concern boundary, and `git stash push --keep-index` so verification runs against the commit candidate rather than a working tree that no longer matches it.
+
+### Provenance
+
+- CREDITS.md gains rows for `pathless-rewriter-guard.sh` and `staged-secret-guard.sh`. Both are original work, but the two hooks shipped in 0.2.0 without entries, so the file that claims to cover everything published did not.
+
 ## [0.3.2] — 2026-08-24
 
 ### Fixed
