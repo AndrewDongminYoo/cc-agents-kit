@@ -38,7 +38,7 @@ Read each changed file if the diff alone is insufficient to determine intent.
 
 ### 2. Group by Concern
 
-Assign each changed file to exactly one group:
+Assign each changed file to a group:
 
 | Type              | When                                        |
 | ----------------- | ------------------------------------------- |
@@ -69,12 +69,16 @@ Show the proposed commit sequence **before executing**:
 Proposed commits:
 
 1. feat(auth): add refresh-token rotation
-   Files: src/auth/..., src/api/...
+   Files: src/api/..., src/auth/session.ts (hunk 1 only — the rotation path)
 2. test(auth): cover refresh-token rotation edge cases
    Files: tests/auth/...
 3. build(deps): bump jsonwebtoken to 9.0.2
    Files: package.json, package-lock.json
+4. fix(auth): reject a refresh token past its expiry
+   Files: src/auth/session.ts (hunks 2-3 only — the expiry check)
 ```
+
+A file split across groups appears under each one, naming the hunks that belong there.
 
 Wait for user confirmation ("go" / "네" / "좋습니다") before committing.
 
