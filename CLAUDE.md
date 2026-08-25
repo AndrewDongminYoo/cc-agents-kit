@@ -55,6 +55,11 @@ Before claiming coverage, remove the logic and confirm the suite fails: `exit 2`
 
 Mutate in a way that still parses. `bash` exits `2` on a syntax error, which is indistinguishable from a block, so an unparseable mutant yields a vacuous pass — run `/bin/bash -n` on the mutant first, and treat a mutation that matched nothing (a "skipped" file) as a failed check rather than a pass.
 
+## Releasing
+
+The procedure is `CONTRIBUTING.md` §Releasing, and it is not obvious from the history: plugin versions ride their own feature commit, the release commit is CHANGELOG-only, the PR merges with a merge commit, and the tag goes on that merge commit.
+Before cutting anything, compare `git tag` against `gh release list` and finish whatever is behind — the tag and the GitHub release are separate trailing steps and both have been dropped before.
+
 ## Working in this repo, the guards are usually live
 
 The same hooks are typically installed in the developing session's own `~/.claude/settings.json`, so they inspect the tool calls used to edit them.
