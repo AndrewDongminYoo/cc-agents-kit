@@ -11,6 +11,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import _optout
+
 HOOK = str(Path(__file__).resolve().with_name("staged-secret-guard.sh"))
 
 # Fake values assembled at runtime so this file carries no scannable literal.
@@ -385,55 +387,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("outside a repository passes", rc == 0, f"exit={rc}")
 
 DISABLE_VAR = "CC_GUARD_DISABLE_STAGED_SECRET"
-WRAP = 'cd "$3" && cat "$1" | bash "$2"; echo "STATUS ${PIPESTATUS[0]} ${PIPESTATUS[1]}"'
-HUGE = json.dumps(
-    {"tool_name": "Write", "tool_input": {"file_path": "/tmp/x.sh", "content": "x" * 200_000}}
-)
 BLOCKING = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}})
 SAFE = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls -la /tmp"}})
 dirty = repo({"config.txt": f"{GITHUB}\n"})
 
-
-def run_piped(payload, disabled, cwd):
-    """Feed the hook over a real pipe. Returns (writer_status, hook_status, stdout, stderr)."""
-    env = dict(os.environ)
-    env.pop(DISABLE_VAR, None)
-    if disabled:
-        env[DISABLE_VAR] = "1"
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
-        fh.write(payload)
-        tmp = fh.name
-    try:
-        proc = subprocess.run(
-            ["/bin/bash", "-c", WRAP, "_", tmp, HOOK, cwd], capture_output=True, text=True, env=env
-        )
-    finally:
-        os.unlink(tmp)
-    lines = proc.stdout.splitlines()
-    writer, hook = (int(x) for x in lines[-1].split()[1:3])
-    return writer, hook, "\n".join(lines[:-1]), proc.stderr
-
-
 # --- opt-out contract -------------------------------------------------------
-# The opt-out is checked AFTER stdin is drained, on purpose. A hook that exits
-# before reading leaves the harness writing to a closed pipe, so a *disabled*
-# hook makes the tool call report an error. The large-payload case below pins
-# that placement: it fails (writer killed by SIGPIPE, 141) if the check moves
-# above the read.
-for label, disabled, payload, want_exit in (
-    ("opt-out on: staged secret passes", True, BLOCKING, 0),
-    ("opt-out off: staged secret still blocks", False, BLOCKING, 2),
-    ("opt-out on: unrelated input passes", True, SAFE, 0),
-):
-    _, hook_rc, _, _ = run_piped(payload, disabled, dirty)
-    check(f"{label} (exit={hook_rc})", hook_rc == want_exit, f"want {want_exit}")
-
-writer_rc, hook_rc, _, _ = run_piped(HUGE, True, dirty)
-check(
-    "disabled hook still drains a 200KB payload",
-    writer_rc == 0 and hook_rc == 0,
-    f"writer={writer_rc} hook={hook_rc}",
-)
+fails += _optout.contract(HOOK, DISABLE_VAR, BLOCKING, SAFE, dirty)
 
 print("\nALL PASS" if not fails else f"\n{fails} FAILURES")
 raise SystemExit(1 if fails else 0)
