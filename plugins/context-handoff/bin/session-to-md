@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Render a Claude Code session .jsonl transcript as readable markdown.
-// Usage: node session-to-md.mjs [sessionIdOrJsonlPath] [--out <file|dir>] [--tools collapsed|none|full] [--thinking] [--list] [--last N]
+// Usage: session-to-md [sessionIdOrJsonlPath] [--out <file|dir>] [--tools collapsed|none|full] [--thinking] [--list] [--last N]
 // Defaults: latest session of the project for $PWD, tools collapsed, thinking omitted, output to ~/Downloads.
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseArgs } from "node:util";
 
 const RESULT_LIMIT = 1200; // chars kept per tool result in collapsed mode
 const INPUT_VALUE_LIMIT = 400; // chars kept per tool-input string value
@@ -40,27 +41,6 @@ function listSessions(dir) {
       };
     })
     .sort((a, b) => b.mtime - a.mtime);
-}
-
-function parseArgs(argv) {
-  const args = {
-    tools: "collapsed",
-    thinking: false,
-    list: false,
-    last: 1,
-    out: null,
-    target: null,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--out") args.out = argv[++i];
-    else if (a === "--tools") args.tools = argv[++i];
-    else if (a === "--thinking") args.thinking = true;
-    else if (a === "--list") args.list = true;
-    else if (a === "--last") args.last = parseInt(argv[++i], 10) || 1;
-    else args.target = a;
-  }
-  return args;
 }
 
 function readEntries(file) {
@@ -230,7 +210,28 @@ function render(entries, opts) {
 }
 
 function main() {
-  const args = parseArgs(process.argv.slice(2));
+  // Strict by default, so a mistyped flag errors instead of being taken as a
+  // session id, the way the hand-rolled loop this replaced did. Reported as one
+  // line — a stack trace reads as a broken tool.
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: process.argv.slice(2),
+      options: {
+        out: { type: "string" },
+        tools: { type: "string", default: "collapsed" },
+        thinking: { type: "boolean", default: false },
+        list: { type: "boolean", default: false },
+        last: { type: "string", default: "1" },
+      },
+      allowPositionals: true,
+    });
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  const { values, positionals } = parsed;
+  const args = { ...values, last: parseInt(values.last, 10) || 1, target: positionals[0] };
   const dir = projectDir();
 
   if (args.list) {
