@@ -94,6 +94,15 @@ Verify a specific word rather than guessing:
 cspell trace <word>     # shows every dictionary that has it, and where that dictionary lives
 ```
 
+For a whole lint run rather than one word, `cspell-dict-report` (this plugin's `bin/`, on PATH) traces the list in one process and ranks the unenabled dictionaries by what each one *newly* covers:
+
+```bash
+cspell lint . --words-only --no-progress --no-summary | cspell-dict-report
+```
+
+Run it from the repo root so cspell discovers the real config.
+The ranking is evidence, not a decision — a dictionary that clears words is still yours to reject if it does not match the stack.
+
 ## Step 3 — dispose of what remains
 
 Each surviving word gets exactly one disposition.
@@ -157,7 +166,15 @@ The worst case had 86 entries of which 73 were byte-identical to an unrelated pr
 
 A dictionary that overlaps heavily with an unrelated project's was copied, not earned; `comm -12` between the two files shows it in one command.
 
-To find the live set, **edit the config in place on a scratch copy** — see the `-c` trap below:
+To find the live set, feed the dictionary to `cspell-dict-report --exclude <its name>`.
+That reports as if the file were not configured, without editing anything: the covered section is what something else already has — delete those entries — and the in-no-dictionary section is what the file is actually carrying its weight for.
+
+```bash
+cspell-dict-report --exclude custom-dictionary < .cspell/custom-dictionary.txt
+```
+
+That reads the dictionary against itself, which finds dead-by-redundancy entries but not dead-by-nothing-uses-them ones.
+For those, **edit the config in place on a scratch copy** — see the `-c` trap below:
 
 1. Enable the ecosystem dictionaries from step 2.
 2. Remove the local dictionary from `dictionaries:`.

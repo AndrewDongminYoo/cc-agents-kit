@@ -22,10 +22,29 @@ Do not rely on it for anything a gate checks.
 Top-level `dictionaries:` enables a dictionary for every file type.
 Left out of that list, a language dictionary only activates for its own `languageId`, so vocabulary that appears in prose, Makefiles, or TOML still flags.
 
+`cspell dictionaries` reports the set enabled with no file type in play, so a `languageId`-activated dictionary reads as disabled there until `--file-type` names its language (`typescript` is absent from the default listing and present under `--file-type typescript`).
+That is the same asymmetry the top-level key exists to remove, seen from the CLI side.
+
 ```bash
 cspell trace <word>          # which dictionaries contain it, and their on-disk paths
 cspell --words-only --unique <paths>   # the raw candidate list — never pipe to head before counting
 ```
+
+### Reading trace output in bulk
+
+`cspell trace --stdin --only-found` takes a whole word list in one process — under two seconds for a hundred words — and prints a `Word / F / Dictionary / Dictionary Location` block per input word in input order, a bare header standing for a word nothing has.
+Three things in that output mislead a parser:
+
+- **The name column truncates at 20 characters and marks the truncation with a trailing `*` — the same character that marks a dictionary as enabled.** Eight bundled names are long enough to collide (`coding-compound-terms`, `en-common-misspellings`, `software-term-suggestions`, …), so `coding-compound-ter*` is unreadable either way. `cspell dictionaries` prints both columns in full and its default path format is byte-identical to trace's: join on the location and never parse trace's name column.
+- **A compound match renders as `look•ahead`.** The dictionary holds the pieces, not the word, so it clears only under `allowCompoundWords`.
+- **A word carrying a separator is decomposed**, each part traced under its own `<part>: Found` heading with the whole word's verdict on the first such line (`393JTTV68D: Not Found`, then `JTTV`, then `D`). cspell's own `--words-only` output never contains a separator, so this surfaces only when tracing a hand-written list.
+
+A misspelling comes back as `recieve->(receive)` under flag `-` rather than `*` — that is how `en-common-misspellings` hands over the correction.
+
+`cspell lint --disable-dictionary <name>` genuinely drops a dictionary, which is what makes an "if this file did not exist" audit one command.
+On `cspell trace` the same flag only re-marks the row `<name>!` and still reports it: trace says where a word lives, not whether the run would accept it.
+
+`cspell-dict-report` (this plugin's `bin/`) is the packaging of all of the above; see step 2 and step 4 of the skill.
 
 ## Custom and shared dictionaries
 

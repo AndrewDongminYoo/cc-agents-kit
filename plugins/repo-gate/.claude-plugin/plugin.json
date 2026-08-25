@@ -1,6 +1,6 @@
 {
   "name": "repo-gate",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "What runs between \"the code works\" and \"it is pushed\": trunk setup, conventional-commit splitting, dependency vulnerability triage, spell-check triage, and babysitting CI until it is green.",
   "author": {
     "name": "Dongmin Yu"

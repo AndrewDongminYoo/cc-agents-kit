@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""Rank the cspell dictionaries that would clear a word list, and show what is left.
+
+Reads a word list on stdin, one word per line, repeats counting as occurrences:
+
+    cspell lint . --words-only --no-progress --no-summary | cspell-dict-report
+
+Case-variant duplicates are folded together, so the VS Code "^(.*)\\n(\\1)$"
+replace pass is not needed first.
+
+Every unique word is traced in a single `cspell trace` process against the
+config cspell discovers in the working directory, and the report says:
+
+  1. words a dictionary knows as misspellings, with the suggested correction,
+  2. words an already-enabled dictionary covers,
+  3. dictionaries that are not enabled, ranked by how many words ONLY they have,
+  4. words no dictionary has at all.
+
+Section 3 ranks on exclusive coverage because overlap is the norm - a common
+word can sit in twenty dictionaries - and the exclusive column is what tells a
+React Native project that `flutter` earns its place only through `pubspec`.
+The script never edits a config: whether a dictionary matches the project's
+intent is a judgment it hands you the evidence for.
+
+Run it backwards to prune an inherited dictionary:
+
+    cspell-dict-report --exclude custom-dictionary < .cspell/custom-dictionary.txt
+
+--exclude answers "if this dictionary did not exist, what would still be
+covered?" without editing the config: section 2 is then the set of entries
+something else already covers - delete those - and section 4 is the set the
+file is actually carrying its weight for. It is not `cspell trace
+--no-dictionary`, which leaves the row in place and only re-marks it.
+
+There is deliberately no --config passthrough. `cspell -c` merges with the
+config the repo already has instead of replacing it, so a report built on one
+would describe a configuration that does not exist. Run this from the repo root
+and let cspell discover the real config.
+
+Requires the `cspell` CLI on PATH.
+"""
+
+import argparse
+import re
+import subprocess
+import sys
+from collections import defaultdict
+
+# cspell splits identifiers on anything outside this set, and traces each piece
+# separately under its own "<part>: Found" heading. Its own --words-only output
+# never contains a separator, so filtering here costs nothing on the common path
+# and keeps the trace output one flat block per word.
+TRACEABLE = re.compile(r"^[A-Za-z']+$")
+SAMPLE = 5
+
+
+def run(argv, stdin=None):
+    try:
+        done = subprocess.run(argv, input=stdin, capture_output=True, text=True)
+    except FileNotFoundError:
+        sys.exit(f"{argv[0]} is not on PATH")
+    if done.returncode != 0:
+        sys.exit(f"{' '.join(argv)} exited {done.returncode}:\n{done.stderr.strip()}")
+    return done.stdout
+
+
+def dictionary_index():
+    """Map each dictionary's on-disk location to (name, enabled).
+
+    The location is the join key because `cspell trace` truncates its name
+    column at 20 characters and marks the truncation with the same trailing
+    asterisk it uses for "enabled" - eight bundled dictionaries are long enough
+    to hit it. `cspell dictionaries` prints both columns in full, and its
+    default path format is byte-identical to trace's.
+    """
+    index = {}
+    for line in run(["cspell", "dictionaries"]).splitlines()[1:]:
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            name = parts[0]
+            index[parts[1].strip()] = (name.rstrip("*"), name.endswith("*"))
+    return index
+
+
+def trace(words, index, excluded):
+    """Return {word: {(dictionary, enabled)}} and {word: suggestion}."""
+    found = defaultdict(set)
+    misspelled = {}
+    known = {w.lower() for w in words}
+    out = run(["cspell", "trace", "--stdin", "--only-found"], stdin="\n".join(words) + "\n")
+    for line in out.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) != 4 or parts[:3] == ["Word", "F", "Dictionary"]:
+            continue
+        word, flag, name, location = parts
+        word, _, suggestion = word.partition("->")
+        # A compound hit renders as "look•ahead" - the dictionary holds the
+        # pieces, not the word. It only clears the word under allowCompoundWords,
+        # which the configs this skill writes turn off, so counting it as
+        # coverage would overstate what enabling that dictionary buys.
+        compound = "•" in word
+        word = word.replace("•", "").lower()
+        if word not in known:
+            print(f"warning: trace reported an unrequested word {word!r}", file=sys.stderr)
+            continue
+        if compound:
+            continue
+        if flag == "*":
+            resolved, enabled = index.get(location, (name.rstrip("*"), True))
+            if resolved in excluded:
+                continue
+            found[word].add((resolved, enabled))
+        elif suggestion:
+            misspelled.setdefault(word, suggestion.strip("()"))
+    return found, misspelled
+
+
+def table(rows, headers):
+    widths = [max(len(str(r[i])) for r in [headers, *rows]) for i in range(len(headers))]
+    for row in [headers, *rows]:
+        cells = [str(c).ljust(w) for c, w in zip(row, widths)]
+        print("  " + "  ".join(cells).rstrip())
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--exclude",
+        metavar="DICTIONARY",
+        action="append",
+        default=[],
+        help="report as if this dictionary were not configured; repeatable",
+    )
+    excluded = set(parser.parse_args().exclude)
+
+    occurrences = defaultdict(int)
+    casings = defaultdict(set)
+    for line in sys.stdin:
+        word = line.strip()
+        if word and not word.startswith("#"):  # cspell dictionary files comment with #
+            occurrences[word.lower()] += 1
+            casings[word.lower()].add(word)
+
+    if not occurrences:
+        sys.exit("no words on stdin")
+
+    total = sum(occurrences.values())
+    traceable = sorted(w for w in occurrences if TRACEABLE.match(w))
+    skipped = sorted(set(occurrences) - set(traceable))
+    print(f"{len(occurrences)} unique words, {total} occurrences", end="")
+    folded = sum(len(v) - 1 for v in casings.values())
+    print(f", {folded} case-variant duplicate(s) folded" if folded else "")
+
+    index = dictionary_index()
+    unknown = excluded - {name for name, _ in index.values()}
+    if unknown:
+        print(f"warning: --exclude names no configured dictionary: {', '.join(sorted(unknown))}", file=sys.stderr)
+    found, misspelled = trace(traceable, index, excluded) if traceable else ({}, {})
+
+    def by_count(words):
+        return sorted(words, key=lambda w: (-occurrences[w], w))
+
+    def spelling(word):
+        """The casing to write down: the source's own, or lowercase if it varies."""
+        forms = casings[word]
+        return next(iter(forms)) if len(forms) == 1 else word
+
+    if misspelled:
+        print("\nMISSPELLED - a dictionary knows these as errors, fix the source")
+        table(
+            [(spelling(w), f"{occurrences[w]}x", f"-> {misspelled[w]}") for w in by_count(misspelled)],
+            ("WORD", "SEEN", "SUGGESTION"),
+        )
+
+    covered = {w: d for w, d in found.items() if any(on for _, on in d)}
+    if covered:
+        print("\nALREADY COVERED by an enabled dictionary")
+        print("  (from a word list: the entry is redundant, delete it. From a lint log")
+        print("   this should be empty - a word an enabled dictionary has does not flag")
+        print("   - so a row means the word is forbidden rather than unknown, or the log")
+        print("   predates the config. `cspell dictionaries` reports the no-file-type set,")
+        print("   so a languageId-activated dictionary shows up under CANDIDATES instead.)")
+        table(
+            [
+                (spelling(w), f"{occurrences[w]}x", ", ".join(sorted(n for n, on in covered[w] if on)))
+                for w in by_count(covered)
+            ],
+            ("WORD", "SEEN", "ENABLED DICTIONARIES"),
+        )
+
+    # Rank only over words nothing enabled covers yet - that is the work left.
+    pending = {w: {n for n, on in d if not on} for w, d in found.items() if w not in covered}
+    pending = {w: d for w, d in pending.items() if d}
+
+    if pending:
+        print(f"\nDICTIONARY CANDIDATES - {len(pending)} word(s) no enabled dictionary has")
+        # Greedy set cover: each row is scored against the words the rows above
+        # it leave behind, so NEW is what enabling that dictionary actually buys
+        # and a dictionary listed as redundant provably is. Plain "words only
+        # this dictionary has" cannot say that - overlap is the norm, and words
+        # whose every dictionary overlaps would be counted in no row at all.
+        totals = defaultdict(list)
+        for word, names in pending.items():
+            for name in names:
+                totals[name].append(word)
+        remaining, rows = dict(pending), []
+        while remaining:
+            gain = defaultdict(list)
+            for word, names in remaining.items():
+                for name in names:
+                    gain[name].append(word)
+            name = min(gain, key=lambda n: (-len(gain[n]), -sum(occurrences[w] for w in gain[n]), n))
+            words = by_count(gain[name])
+            rows.append(
+                (
+                    name,
+                    len(words),
+                    len(totals[name]),
+                    sum(occurrences[w] for w in words),
+                    ", ".join(spelling(w) for w in words[:SAMPLE]) + (", ..." if len(words) > SAMPLE else ""),
+                )
+            )
+            for word in words:
+                del remaining[word]
+        table(rows, ("DICTIONARY", "NEW", "TOTAL", "SEEN", "WORDS IT ADDS"))
+        redundant = sorted(set(totals) - {r[0] for r in rows})
+        if redundant:
+            print(f"\n  Cover nothing the rows above miss: {', '.join(redundant)}")
+
+    residue = by_count(set(occurrences) - set(found) - set(misspelled) - set(skipped))
+    if residue:
+        seen = sum(occurrences[w] for w in residue)
+        print(f"\nIN NO DICTIONARY - {len(residue)} word(s), {seen} occurrence(s)")
+        print("  Typos to fix, generated-file noise to ignorePaths, or real vocabulary")
+        print("  to register. Stemmer fragments here mean a generated tree is in scope.")
+        table([(spelling(w), f"{occurrences[w]}x") for w in residue], ("WORD", "SEEN"))
+
+    if skipped:
+        print(f"\nNOT TRACED - {len(skipped)} word(s) carry a separator cspell splits on")
+        print(f"  {', '.join(spelling(w) for w in skipped)}")
+
+
+if __name__ == "__main__":
+    main()
