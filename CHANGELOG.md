@@ -3,6 +3,17 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
+## [0.3.5] — 2026-08-25
+
+### Fixed
+
+- **`staged-secret-guard` let a staged credential through under `git commit -u -m <msg>`.** Its `git commit` flag table put `-u` / `--untracked-files` among the options that take the *next* token as their value, but git defines them as `-u[<mode>]` — the value is attached and optional, never a separate token. So the guard read `-m` as `-u`'s value and the message as a pathspec, built a commit candidate for a path that does not exist, scanned nothing, and exited 0 while git committed the staged content. `-S` / `--gpg-sign` carry the same optional-attached shape and are now handled with it. Both the separate-token forms and the attached forms (`-uall`, `-S<key-id>`) are covered by regression cases that exit 0 against the previous table. The defect entered in 0.3.2 and was present in 0.3.3 and 0.3.4; releases before that are unaffected.
+- **`git commit -q` was blocked as unparseable.** `-q` / `--quiet` was absent from the no-value flag list, so it fell through to the catch-all that refuses an unrecognised flag — a benign, extremely common flag failing closed. Added along with the other no-value flags the table had omitted, each read off `git commit`'s own option list rather than recalled: `-z` / `--null`, `--verify`, `--no-signoff`, `--reset-author`, `--allow-empty`, `--allow-empty-message`, `--status` / `--no-status`, `--no-gpg-sign`.
+
+`-e` / `--edit` is deliberately still refused: it opens `$EDITOR`, and the agent shell has no TTY, so admitting it would trade a millisecond refusal for a hung tool call. Bundled short flags (`-sq`) are refused as before — the table matches whole flags, which the README now states as a limit rather than implying the list is exhaustive.
+
+Flags that change *which* content is committed stay fail-closed, and a case now pins that: `-p`, `--interactive`, and any unrecognised flag are still refused rather than guessed at. The four mutations covering this change — restoring `-u` to the value-consuming list, dropping `-q`, dropping the attached-value arm, and widening the list far enough to admit `-p` — each fail a case.
+
 ## [0.3.4] — 2026-08-25
 
 ### Added

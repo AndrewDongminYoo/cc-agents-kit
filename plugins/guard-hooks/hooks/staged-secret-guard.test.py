@@ -186,6 +186,41 @@ rc, err = check_hook('git -C "$repo" commit -m x', clean)
 check("dynamic git -C path is blocked instead of mis-scanned", rc == 2, f"exit={rc}")
 check("unsafe commit form explains the parse failure", "could not safely parse" in err, f"stderr={err.strip()[:160]}")
 
+# --- the commit flag table must match git's own grammar ---------------------
+# Every case below distinguishes "parsed, scanned, found the credential" from
+# "refused to parse". Both exit 2, so exit code alone proves nothing.
+for label, command in (
+    ("-q", "git commit -q -m x"),
+    ("--quiet", "git commit --quiet -m x"),
+    # -u and -S carry an optional ATTACHED value. Reading the next token as
+    # their value made -m the value and x a pathspec: an empty candidate that
+    # scanned clean while git committed the staged credential. This case
+    # exited 0 before the table was corrected.
+    ("-u before -m", "git commit -u -m x"),
+    ("-uall", "git commit -uall -m x"),
+    ("--untracked-files before -m", "git commit --untracked-files -m x"),
+    ("-S before -m", "git commit -S -m x"),
+):
+    rc, err = check_hook(command, dirty)
+    check(f"{label} is parsed, not refused", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
+    check(f"{label} still scans the staged credential", rc == 2, f"exit={rc}")
+
+rc, _ = check_hook("git commit -q -m docs", clean)
+check("a parsed flag does not block a clean diff", rc == 0, f"exit={rc}")
+
+# Flags that change WHICH content is committed stay fail-closed, so widening
+# the no-value list cannot quietly admit one.
+for label, command in (
+    ("-p", "git commit -p -m x"),
+    ("--interactive", "git commit --interactive -m x"),
+    # -e parses fine but would open $EDITOR against a shell with no TTY, so a
+    # fast refusal beats a hung tool call.
+    ("-e", "git commit -e -m x"),
+    ("an unknown flag", "git commit --not-a-real-flag -m x"),
+):
+    rc, err = check_hook(command, dirty)
+    check(f"{label} is still refused", rc == 2 and "could not safely parse" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
 # Working-tree diffs must not invoke repository-configured clean filters. The
 # guard blocks these commit forms before content inspection instead.
 filter_all_repo = repo({".gitattributes": "tracked.txt filter=marker\n", "tracked.txt": "clean\n"})
