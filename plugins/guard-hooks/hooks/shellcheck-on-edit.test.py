@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import _optout
+
 HOOK = str(Path(__file__).resolve().with_name("shellcheck-on-edit.sh"))
 
 DIRTY = "#!/usr/bin/env bash\nUNQUOTED=/tmp/a b\necho $UNQUOTED\n"
@@ -115,57 +117,24 @@ for label, payload in (
 
 
 # --- opt-out contract -------------------------------------------------------
-# The opt-out is checked AFTER stdin is drained, on purpose. A hook that exits
-# before reading leaves the harness writing to a closed pipe, so a *disabled*
-# hook makes the tool call report an error. The large-payload case below pins
-# that placement: it fails (writer killed by SIGPIPE, 141) if the check moves
-# above the read.
+# This hook warns rather than blocks, so the shared blocking cases do not apply;
+# see _optout for why the drain case exists.
 DISABLE_VAR = "CC_GUARD_DISABLE_SHELLCHECK"
-WRAP = 'cat "$1" | bash "$2"; echo "STATUS ${PIPESTATUS[0]} ${PIPESTATUS[1]}"'
-HUGE = json.dumps(
-    {"tool_name": "Write", "tool_input": {"file_path": "/tmp/x.sh", "content": "x" * 200_000}}
-)
-
-
-def run_piped(payload, disabled):
-    """Feed the hook over a real pipe. Returns (writer_status, hook_status, stdout, stderr)."""
-    env = dict(os.environ)
-    env.pop(DISABLE_VAR, None)
-    if disabled:
-        env[DISABLE_VAR] = "1"
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
-        fh.write(payload)
-        tmp = fh.name
-    try:
-        proc = subprocess.run(
-            ["/bin/bash", "-c", WRAP, "_", tmp, HOOK], capture_output=True, text=True, env=env
-        )
-    finally:
-        os.unlink(tmp)
-    lines = proc.stdout.splitlines()
-    writer, hook = (int(x) for x in lines[-1].split()[1:3])
-    return writer, hook, "\n".join(lines[:-1]), proc.stderr
-
 
 with tempfile.TemporaryDirectory() as tmp:
     warning_payload = json.dumps(
         {"tool_name": "Write", "tool_input": {"file_path": write(tmp, "dirty.sh", DIRTY)}}
     )
-    _, hook_rc, out, err = run_piped(warning_payload, True)
+    _, hook_rc, out, err = _optout.run_piped(HOOK, DISABLE_VAR, warning_payload, True)
     check(
         "opt-out on: warning input stays silent",
         hook_rc == 0 and not out and not err,
         f"exit={hook_rc} stdout={out[:120]}",
     )
-    _, _, out, _ = run_piped(warning_payload, False)
+    _, _, out, _ = _optout.run_piped(HOOK, DISABLE_VAR, warning_payload, False)
     check("opt-out off: warning still fires", bool(out), f"stdout={out[:120]}")
 
-writer_rc, hook_rc, _, _ = run_piped(HUGE, True)
-check(
-    "disabled hook still drains a 200KB payload",
-    writer_rc == 0 and hook_rc == 0,
-    f"writer={writer_rc} hook={hook_rc}",
-)
+fails += _optout.drain(HOOK, DISABLE_VAR)
 
 print("\nALL PASS" if not fails else f"\n{fails} FAILURES")
 raise SystemExit(1 if fails else 0)

@@ -170,6 +170,14 @@ while ((token_index < token_count)); do
 done
 [[ -n "$ALL_MODE" && -n "${PATHS[*]-}" ]] && block_unparsed
 
+# `${a[@]+"${a[@]}"}` not `"${a[@]}"`: under `set -u`, bash 3.2 — the version at
+# /bin/bash on macOS — treats an empty array expansion as an unbound variable and
+# aborts. With the `|| true` at the call sites that would swallow the abort and
+# leave DIFF empty, silently turning the guard off on exactly the machines it targets.
+gitq() { git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} "$@"; }
+DIFF_SPEC=()
+[[ -z "${PATHS[*]-}" ]] || DIFF_SPEC=(-- "${PATHS[@]}")
+
 FILTER_CANDIDATE_FILE=""
 FILTER_ATTR_FILE=""
 FILTER_ATTR_PID=""
@@ -204,14 +212,12 @@ block_active_filters() {
   trap 'terminate_filter_scan 143' TERM
   FILTER_ATTR_FILE=$(mktemp "${TMPDIR:-/tmp}/cc-staged-secret-attributes.XXXXXX") || block_unparsed
 
-  if [[ -n "${PATHS[*]-}" ]]; then
-    git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached --name-only -z -- "${PATHS[@]}" >"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
-    git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ls-files -m -d -z -- "${PATHS[@]}" >>"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
-  else
-    git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached --name-only -z >"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
-    git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ls-files -m -d -z >>"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
-  fi
+  gitq diff --no-ext-diff --no-textconv --cached --name-only -z ${DIFF_SPEC[@]+"${DIFF_SPEC[@]}"} >"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
+  gitq ls-files -m -d -z ${DIFF_SPEC[@]+"${DIFF_SPEC[@]}"} >>"$FILTER_CANDIDATE_FILE" 2>/dev/null || block_unparsed
 
+  # Spelled out rather than through gitq: backgrounding a function makes `$!` the
+  # subshell's pid, so the kill and wait below would never reach git itself and
+  # a terminated hook would leave the child running.
   git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} check-attr -z --stdin filter <"$FILTER_CANDIDATE_FILE" >"$FILTER_ATTR_FILE" 2>/dev/null &
   FILTER_ATTR_PID=$!
   if wait "$FILTER_ATTR_PID"; then
@@ -250,27 +256,16 @@ block_active_filters() {
   trap - EXIT HUP INT TERM
 }
 
-# `${a[@]+"${a[@]}"}` not `"${a[@]}"`: under `set -u`, bash 3.2 — the version at
-# /bin/bash on macOS — treats an empty array expansion as an unbound variable and
-# aborts. With the `|| true` below that would swallow the abort and leave DIFF
-# empty, silently turning the guard off on exactly the machines it targets.
-if [[ -n "${PATHS[*]-}" ]]; then
-  if git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} rev-parse --verify HEAD >/dev/null 2>&1; then
-    block_active_filters
-    DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv HEAD -- "${PATHS[@]}" 2>/dev/null || true)
-  else
-    DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached -- "${PATHS[@]}" 2>/dev/null || true)
-  fi
-elif [[ -n "$ALL_MODE" ]]; then
-  if git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} rev-parse --verify HEAD >/dev/null 2>&1; then
-    block_active_filters
-    DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv HEAD 2>/dev/null || true)
-  else
-    DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached 2>/dev/null || true)
-  fi
+# A pathspec or `-a` commit records working-tree content, so it is diffed against
+# HEAD and has to clear the clean-filter check first. Everything else — including
+# either of those in a repository with no HEAD yet — is the staged diff.
+if [[ -n "${PATHS[*]-}" || -n "$ALL_MODE" ]] && gitq rev-parse --verify HEAD >/dev/null 2>&1; then
+  block_active_filters
+  REF=HEAD
 else
-  DIFF=$(git ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} diff --no-ext-diff --no-textconv --cached 2>/dev/null || true)
+  REF=--cached
 fi
+DIFF=$(gitq diff --no-ext-diff --no-textconv "$REF" ${DIFF_SPEC[@]+"${DIFF_SPEC[@]}"} 2>/dev/null || true)
 [[ -n "$DIFF" ]] || exit 0
 
 # Added lines only — an existing secret being deleted must not block its removal.
