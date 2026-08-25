@@ -64,4 +64,4 @@ Use the `Write` tool for that content, or split the literal in a script (`".e" +
 
 `CREDITS.md` is the single place origin is recorded; a hook or skill never restates its own.
 Before committing anything derived from upstream work, read the upstream licence directly (`gh api repos/OWNER/REPO/license -q .license.spdx_id`) rather than inferring it, and add an `origin:` key to that component's frontmatter.
-A component whose adaptation is thin enough to be effectively vendored upstream code does not belong here.
+A component may be mostly upstream — `context-budget` is 87% verbatim — but then it ships as a declared redistribution, not as original work: CREDITS.md states the measured overlap and names the copyright holder, and the licence has to permit it. What does not belong here is upstream work presented as this repository's own.
