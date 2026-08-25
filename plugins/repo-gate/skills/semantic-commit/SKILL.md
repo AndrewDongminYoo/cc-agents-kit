@@ -135,9 +135,11 @@ Rules:
 - Read the full diff and count the hunks **before** answering — provide exactly one answer per hunk.
   On EOF `git add -p` quits without staging further hunks, so an answer-count mismatch under-stages silently; the `git diff --cached` confirmation is mandatory, not optional.
 - If two concerns are interleaved inside a single hunk, do not use `s` (its split points are line-count driven and rarely land on the concern boundary).
-  Fall back to patch editing: `git diff -- <file> > /tmp/part.patch`, delete the unwanted hunks/lines from the patch, then `git apply --cached /tmp/part.patch`.
+  Fall back to patch editing: `git diff -- <file> > /tmp/part.patch`, delete the unwanted hunks/lines from the patch, then `git apply --cached --recount /tmp/part.patch`.
+  `--recount` is not optional once lines are deleted from inside a hunk: the `@@` counts go stale and `git apply` rejects the whole file with `corrupt patch` rather than applying what is left. It is harmless when whole hunks were dropped instead.
 - After partial staging, the working tree and the index differ, so checks run on the working tree would test code that is not being committed.
-  Isolate the commit candidate: `git stash push --keep-index`, run verification, commit, then `git stash apply` → confirm the remaining hunks are back → `git stash drop` (prefer apply-then-drop over `pop`).
+  Isolate the commit candidate: `git stash push --keep-index --include-untracked`, run verification, commit, then `git stash apply` → confirm the remaining hunks are back → `git stash drop` (prefer apply-then-drop over `pop`).
+  `--include-untracked` is load-bearing: `--keep-index` alone leaves untracked files in the tree, so a new file belonging to a later group stays visible to test discovery and to the compiler, and verification is not running against the commit candidate after all.
 - Do not blindly re-`git add` a partially staged file after a formatter runs — that would pull the withheld hunks back in.
   Use the formatter's `--check` mode as the gate for such files, or re-split from scratch.
 
