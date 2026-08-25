@@ -29,6 +29,7 @@ plugins/<plugin>/
   hooks/hooks.json                # auto-discovered; commands reference ${CLAUDE_PLUGIN_ROOT}
   hooks/*.sh
   hooks/*.test.py                 # beside its hook, never in a tests/ directory
+  hooks/_optout.py                # shared suite helper; leading _ keeps it out of the *.test.py glob
 ```
 
 This mirrors Anthropic's own multi-plugin marketplace (`claude-code-plugins`), which is the layout to check against — **not** `rn-agents-kit`, whose single plugin uses `"source": "./"` and says nothing about nesting.
@@ -36,7 +37,7 @@ This mirrors Anthropic's own multi-plugin marketplace (`claude-code-plugins`), w
 Two placements are load-bearing:
 
 - A `source` in `marketplace.json` that names a missing directory breaks installation for every user of the marketplace. Add the entry and the directory in the same commit.
-- Each suite resolves its hook with `Path(__file__).resolve().with_name(...)`. Moving tests into their own directory silently breaks that line, so they stay next to the scripts.
+- Each suite resolves its hook with `Path(__file__).resolve().with_name(...)`, and imports `_optout` as a plain sibling module. Moving either into its own directory silently breaks that, so they stay next to the scripts.
 
 ## Hook contract
 
@@ -44,7 +45,7 @@ Enforced by the suites; break one and the corresponding case fails.
 
 - **Fail open.** Empty, malformed, or key-less input exits `0` with no output. `jq` is parsed with `|| true`, so a machine without `jq` makes every guard stop guarding *silently* — that is deliberate, and it is why `jq` is documented as a hard prerequisite rather than checked at runtime.
 - **`PreToolUse` guards exit `2` to block. `PostToolUse` hooks never block** — they emit `hookSpecificOutput.additionalContext` and exit `0`.
-- **The `CC_GUARD_DISABLE_*` opt-out is checked *after* `HOOK_INPUT=$(cat ...)`, never before.** A `Write` payload carries the whole file content, so exiting before draining stdin leaves the harness writing to a closed pipe and surfaces a hook error at exactly the moment the user asked for the hook to be off. Pinned by a 200KB-payload case that runs the hook behind a real pipe and reads the writer's `PIPESTATUS` — Python's `subprocess` swallows `BrokenPipeError`, so an `input=`-style test cannot see this bug.
+- **The `CC_GUARD_DISABLE_*` opt-out is checked *after* `HOOK_INPUT=$(cat ...)`, never before.** A `Write` payload carries the whole file content, so exiting before draining stdin leaves the harness writing to a closed pipe and surfaces a hook error at exactly the moment the user asked for the hook to be off. Pinned by a 200KB-payload case in `hooks/_optout.py`, shared by every suite, that runs the hook behind a real pipe and reads the writer's `PIPESTATUS` — Python's `subprocess` swallows `BrokenPipeError`, so an `input=`-style test cannot see this bug.
 - Scripts must parse under macOS's system `/bin/bash` 3.2, not just a newer bash on `PATH`.
 
 ## Verifying a change
