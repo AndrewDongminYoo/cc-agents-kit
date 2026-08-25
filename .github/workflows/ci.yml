@@ -16,7 +16,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install shellcheck
         run: |
@@ -182,5 +182,6 @@ jobs:
           cd plugins/guard-hooks/hooks
           for t in *.test.py; do python3 "$t" || exit 1; done
 
-      - name: Repo discovery regression suite
-        run: python3 plugins/repo-gate/bin/find-trunk-repos.test.py
+      - name: bin regression suites
+        run: |
+          for t in plugins/*/bin/*.test.py; do python3 "$t" || exit 1; done
