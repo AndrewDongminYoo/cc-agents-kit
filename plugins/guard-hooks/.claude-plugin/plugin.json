@@ -1,6 +1,6 @@
 {
   "name": "guard-hooks",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Seven defensive hooks: blocks recursive rm on $HOME, download-and-execute pipelines, secrets-file access, path-less formatter runs, credentials in the staged diff, and the two zsh quoting mistakes that fail silently; warns on stale lockfiles and shellcheck findings.",
   "author": {
     "name": "Dongmin Yu"

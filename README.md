@@ -181,6 +181,7 @@ They match patterns in the tool input, so deliberate multi-step obfuscation (sym
 
 - **Prose is matched too.** A command that merely *mentions* a blocked shape is blocked — writing a file whose text contains a download-and-execute pipeline trips `dangerous-command-guard`, and naming a secrets file in a message trips `secrets-path-guard`. Split the literal, or write the file with a tool other than `Bash`.
 - **`staged-secret-guard` matches shapes, not entropy.** A credential with no recognisable prefix - a bare password, a random hex string, a private API host - is not detected. Treat it as a floor, not a scanner.
+- **`staged-secret-guard` reads `git commit` flags from an allowlist.** A flag it does not recognise is blocked rather than guessed at, because an unknown flag might take a value and mis-parsing one would scan the wrong candidate. The table matches whole flags, so a bundled short form (`-sq`) is refused too. Flags that change *which* content is committed (`-i`, `-p`, `--interactive`, `--pathspec-from-file`) and `-e`, which would open an editor with no TTY to open it on, are blocked deliberately.
 - **`pathless-rewriter-guard` only knows the tools it lists.** A rewriter outside that list, or one reached through a shell alias or a package script (`npm run format`), is invisible to it.
 - **`zsh-quoting-guard` stops scanning at a quoted heredoc**, which also discards anything chained after the terminator. A deliberate fail-open.
 

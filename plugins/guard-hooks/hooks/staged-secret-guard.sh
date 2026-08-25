@@ -142,12 +142,21 @@ while ((token_index < token_count)); do
     --) after_separator=1 ;;
     -a | --all) ALL_MODE=1 ;;
     -am | -ma) ALL_MODE=1; token_index=$((token_index + 1)) ;;
-    -m | --message | -F | --file | -C | --reuse-message | -c | --reedit-message | --author | --date | --cleanup | --fixup | --squash | -t | --template | --trailer | -u | --untracked-files)
+    -m | --message | -F | --file | -C | --reuse-message | -c | --reedit-message | --author | --date | --cleanup | --fixup | --squash | -t | --template | --trailer)
       ((token_index + 1 < token_count)) || block_unparsed
       token_index=$((token_index + 1))
       ;;
-    --message=* | --file=* | --reuse-message=* | --reedit-message=* | --author=* | --date=* | --cleanup=* | --fixup=* | --squash=* | --template=* | --trailer=* | --untracked-files=*) ;;
-    -v | --verbose | -s | --signoff | -n | --no-verify | --amend | --no-edit | --dry-run | --short | --branch | --porcelain | --long | --no-post-rewrite | -o | --only) ;;
+    --message=* | --file=* | --reuse-message=* | --reedit-message=* | --author=* | --date=* | --cleanup=* | --fixup=* | --squash=* | --template=* | --trailer=* | --untracked-files=* | --gpg-sign=*) ;;
+    # -u and -S take an OPTIONAL ATTACHED value (-uall, -S<key-id>); git never
+    # reads the next token as their value. Consuming one made the following -m
+    # the "value" and its message a pathspec, so the candidate came out empty,
+    # scanned clean, and the staged credential was committed anyway.
+    -u | -u?* | --untracked-files | -S | -S?* | --gpg-sign | --no-gpg-sign) ;;
+    # No-value flags that change neither what is committed nor where from.
+    -v | --verbose | -q | --quiet | -z | --null | --short | --branch | --porcelain | --long | --dry-run | --status | --no-status) ;;
+    # -e/--edit is deliberately absent: it opens $EDITOR, which has no TTY here,
+    # so admitting it trades a millisecond refusal for a hung tool call.
+    -s | --signoff | --no-signoff | -n | --no-verify | --verify | --amend | --no-edit | --reset-author | --allow-empty | --allow-empty-message | --no-post-rewrite | -o | --only) ;;
     -i | --include) block_unparsed ;;
     --pathspec-from-file | --pathspec-from-file=* | --pathspec-file-nul) block_unparsed ;;
     -*) block_unparsed ;;
