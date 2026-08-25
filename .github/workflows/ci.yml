@@ -106,9 +106,10 @@ jobs:
           echo "no private references"
 
       # Cover both named shell scripts and extensionless Bash plugin bin entries.
-      - name: Shellcheck
+      # Listed once; the two steps below consume the same NUL-delimited list.
+      - name: List every shipped shell script
         run: |
-          python3 - <<'PY' | xargs -0 shellcheck
+          python3 - <<'PY' >"$RUNNER_TEMP/shell-files.z"
           import os, pathlib, sys
           for f in sorted(pathlib.Path(".").rglob("*")):
               if not f.is_file() or ".git" in f.parts:
@@ -118,19 +119,15 @@ jobs:
               if f.suffix == ".sh" or is_bash_bin:
                   sys.stdout.buffer.write(os.fsencode(str(f)) + b"\0")
           PY
+          # An empty list would make both steps below pass without reading a file.
+          test -s "$RUNNER_TEMP/shell-files.z" || { echo "no shell scripts found — the discovery above is broken" >&2; exit 1; }
+          tr '\0' '\n' <"$RUNNER_TEMP/shell-files.z"
+
+      - name: Shellcheck
+        run: xargs -0 shellcheck <"$RUNNER_TEMP/shell-files.z"
 
       - name: Parse under /bin/bash
-        run: |
-          python3 - <<'PY' | xargs -0 -n1 /bin/bash -n
-          import os, pathlib, sys
-          for f in sorted(pathlib.Path(".").rglob("*")):
-              if not f.is_file() or ".git" in f.parts:
-                  continue
-              first_line = f.open("rb").readline()
-              is_bash_bin = len(f.parts) == 4 and f.parts[0] == "plugins" and f.parts[2] == "bin" and f.suffix == "" and b"bash" in first_line
-              if f.suffix == ".sh" or is_bash_bin:
-                  sys.stdout.buffer.write(os.fsencode(str(f)) + b"\0")
-          PY
+        run: xargs -0 -n1 /bin/bash -n <"$RUNNER_TEMP/shell-files.z"
 
       # A bin/ entry that is not executable, or has no shebang, is on PATH and
       # unrunnable — the failure a skill referencing it by bare name cannot see.
