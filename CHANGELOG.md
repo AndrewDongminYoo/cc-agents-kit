@@ -3,6 +3,20 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
+## [0.3.4] — 2026-08-25
+
+### Added
+
+- `cspell-dict-report` gives `cspell-triage` a bulk form of its one-word `cspell trace` check. It reads a word list on stdin, traces every unique word in a single process, and separates what a dictionary knows as a misspelling, what an enabled dictionary already covers, which unenabled dictionaries are worth adding, and what nothing has. The candidate ranking is a greedy set cover rather than a per-dictionary count: each row is scored against the words the rows above it leave behind, so `NEW` is what enabling that dictionary actually buys. Overlap is the norm — a common word sits in twenty dictionaries — and a per-dictionary count credits the second one for words the first already took. Run backwards, `--exclude <name>` answers "if this dictionary did not exist, what would still be covered?" without editing the config, which is step 4's prune with no scratch copy. Three ways `cspell trace` output misleads a parser are handled: the name column truncates at 20 characters and marks the truncation with the same trailing asterisk that means "enabled", so the join runs on the on-disk location taken from `cspell dictionaries`, which prints both columns in full; a compound hit renders as `look•ahead` and clears the word only under `allowCompoundWords`, so counting it would overstate coverage; and a word carrying a separator is decomposed, each part traced under its own heading.
+
+### Changed
+
+- CI runs every `plugins/*/bin/*.test.py` instead of naming one suite, so a second `bin/` regression suite is covered on the day it lands, and pins `actions/checkout` at v7.
+
+### Provenance
+
+- CREDITS.md gains rows for `find-trunk-repos` and `cspell-dict-report`. `find-trunk-repos` shipped in 0.3.1 with no entry — the same omission 0.3.3 corrected for two hooks.
+
 ## [0.3.3] — 2026-08-25
 
 ### Added
