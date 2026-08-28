@@ -37,28 +37,94 @@ jobs:
       - name: Validate manifests
         run: |
           for f in .claude-plugin/marketplace.json plugins/*/.claude-plugin/plugin.json plugins/*/hooks/hooks.json; do
-            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"
+            python3 - "$f" <<'PY'
+          import json, sys
+
+          def reject_nonstandard_constant(value):
+              raise ValueError(f"nonstandard JSON constant {value}")
+
+          with open(sys.argv[1], encoding="utf-8") as manifest_file:
+              json.load(manifest_file, parse_constant=reject_nonstandard_constant)
+          PY
           done
 
       - name: Every marketplace plugin source exists
         run: |
           python3 - <<'PY'
           import json, pathlib, sys
-          m = json.load(open(".claude-plugin/marketplace.json"))
-          missing = [p["source"] for p in m["plugins"] if not pathlib.Path(p["source"]).is_dir()]
-          if missing:
-              sys.exit(f"marketplace.json points at missing directories: {missing}")
-          print(f'{len(m["plugins"])} plugin source(s) present')
+
+          def reject_nonstandard_constant(value):
+              raise ValueError(f"nonstandard JSON constant {value}")
+
+          try:
+              with open(".claude-plugin/marketplace.json", encoding="utf-8") as marketplace_file:
+                  m = json.load(marketplace_file, parse_constant=reject_nonstandard_constant)
+          except (OSError, UnicodeError, ValueError) as error:
+              sys.exit(f"marketplace.json cannot be parsed: {error}")
+          if not isinstance(m, dict):
+              sys.exit("marketplace.json root must be an object")
+          plugins = m.get("plugins")
+          if not isinstance(plugins, list):
+              sys.exit("marketplace.json: plugins must be a list")
+          bad, names, sources = [], {}, {}
+          for index, entry in enumerate(plugins):
+              label = f"marketplace.json plugins[{index}]"
+              if not isinstance(entry, dict):
+                  bad.append(f"{label}: entry must be an object")
+                  continue
+              name, source = entry.get("name"), entry.get("source")
+              valid_name = isinstance(name, str) and bool(name)
+              if not valid_name:
+                  bad.append(f"{label}: name must be a non-empty string")
+              elif name in names:
+                  bad.append(f"{label}: duplicate name {name!r} (also {names[name]})")
+              else:
+                  names[name] = label
+              if not isinstance(source, str) or not source:
+                  bad.append(f"{label}: missing or invalid source {source!r}")
+                  continue
+              if source in sources:
+                  bad.append(f"{label}: duplicate source {source!r} (also {sources[source]})")
+              else:
+                  sources[source] = label
+              source_path = pathlib.Path(source)
+              if not source_path.is_dir():
+                  bad.append(f"{label}: source directory missing: {source}")
+                  continue
+              manifest_path = source_path / ".claude-plugin" / "plugin.json"
+              if not manifest_path.is_file():
+                  bad.append(f"{label}: source manifest missing: {manifest_path}")
+                  continue
+              try:
+                  with manifest_path.open(encoding="utf-8") as manifest_file:
+                      manifest = json.load(manifest_file, parse_constant=reject_nonstandard_constant)
+              except (OSError, UnicodeError, ValueError) as error:
+                  bad.append(f"{label}: source manifest cannot be parsed {manifest_path}: {error}")
+                  continue
+              if not isinstance(manifest, dict):
+                  bad.append(f"{label}: source manifest must be a JSON object: {manifest_path}")
+                  continue
+              if valid_name and manifest.get("name") != name:
+                  bad.append(f"{label}: manifest name {manifest.get('name')!r} != entry name {name!r}: {manifest_path}")
+          if bad:
+              sys.exit("marketplace plugin validation failed:\n" + "\n".join(bad))
+          print(f'{len(m["plugins"])} marketplace plugin source(s) and manifest(s) valid')
           PY
 
       - name: Every wired hook exists
         run: |
           python3 - <<'PY'
           import json, pathlib, sys
+
+          def reject_nonstandard_constant(value):
+              raise ValueError(f"nonstandard JSON constant {value}")
+
           wired, missing = 0, []
           for hooks_json in sorted(pathlib.Path("plugins").glob("*/hooks/hooks.json")):
               root = hooks_json.parent.parent
-              for groups in json.load(open(hooks_json))["hooks"].values():
+              with hooks_json.open(encoding="utf-8") as hooks_file:
+                  hooks_manifest = json.load(hooks_file, parse_constant=reject_nonstandard_constant)
+              for groups in hooks_manifest["hooks"].values():
                   for group in groups:
                       for hook in group["hooks"]:
                           name = hook["command"].split("/hooks/")[-1].rstrip('"')
