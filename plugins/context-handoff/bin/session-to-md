@@ -231,7 +231,19 @@ function main() {
     process.exit(1);
   }
   const { values, positionals } = parsed;
-  const args = { ...values, last: parseInt(values.last, 10) || 1, target: positionals[0] };
+  if (!/^[1-9][0-9]*$/.test(values.last)) {
+    console.error("--last must be a positive integer");
+    process.exit(1);
+  }
+  if (!new Set(["collapsed", "none", "full"]).has(values.tools)) {
+    console.error("--tools must be collapsed, none, or full");
+    process.exit(1);
+  }
+  if (positionals.length > 1) {
+    console.error("Only one session identifier is allowed");
+    process.exit(1);
+  }
+  const args = { ...values, last: Number(values.last), target: positionals[0] };
   const dir = projectDir();
 
   if (args.list) {
@@ -320,11 +332,15 @@ function main() {
   // KST early-morning sessions under the previous day.
   const localDate = times[0] ? fmtTime(times[0]).slice(0, 10) : "session";
   const defaultName = `${localDate}-${slug}.md`;
-  if (!outPath) outPath = path.join(os.homedir(), "Downloads", defaultName);
-  else if (fs.existsSync(outPath) && fs.statSync(outPath).isDirectory())
-    outPath = path.join(outPath, defaultName);
-
-  fs.writeFileSync(outPath, doc);
+  try {
+    if (!outPath) outPath = path.join(os.homedir(), "Downloads", defaultName);
+    else if (fs.existsSync(outPath) && fs.statSync(outPath).isDirectory())
+      outPath = path.join(outPath, defaultName);
+    fs.writeFileSync(outPath, doc, { flag: "wx" });
+  } catch {
+    console.error(`Cannot create output file: ${outPath}`);
+    process.exit(1);
+  }
   console.log(outPath);
 }
 
