@@ -155,6 +155,14 @@ for label, command in (
     rc, _ = check_hook(command, continued_commit_repo)
     check(f"{label} scans the staged credential", rc == 2, f"exit={rc}")
 
+for label, command in (
+    ("command -p prefix", "command -p git commit -m x"),
+    ("env -u prefix", "env -u NAME git commit -m x"),
+):
+    rc, err = check_hook(command, continued_commit_repo)
+    check(f"{label} is parsed, not refused", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
+    check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
 # --- honours git -C so the right repo is scanned ----------------------------
 dirty = repo({"config.txt": f"{GITHUB}\n"})
 clean = repo({"README.md": "# hello\n"})

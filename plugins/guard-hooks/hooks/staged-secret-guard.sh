@@ -87,11 +87,13 @@ commit_count=0
 token_count=${#TOKENS[@]}
 token_index=0
 at_command_start=1
+command_prefix=""
 env_prefix=""
 while ((token_index < token_count)); do
   current="${TOKENS[token_index]}"
   if [[ "$current" == "$BOUNDARY_PREFIX"* ]]; then
     at_command_start=1
+    command_prefix=""
     env_prefix=""
     token_index=$((token_index + 1))
     continue
@@ -101,17 +103,43 @@ while ((token_index < token_count)); do
     continue
   fi
   if ((at_command_start)) && [[ "$current" == "command" ]]; then
+    command_prefix=1
     token_index=$((token_index + 1))
     continue
+  fi
+  if ((at_command_start)) && [[ -n "$command_prefix" ]]; then
+    case "$current" in
+      -p) token_index=$((token_index + 1)); continue ;;
+      --) command_prefix=""; token_index=$((token_index + 1)); continue ;;
+    esac
   fi
   if ((at_command_start)) && [[ "$current" == "env" || "$current" == */env ]]; then
     env_prefix=1
     token_index=$((token_index + 1))
     continue
   fi
-  if ((at_command_start)) && [[ -n "$env_prefix" ]] && [[ "$current" == "-i" || "$current" == "--ignore-environment" ]]; then
-    token_index=$((token_index + 1))
-    continue
+  if ((at_command_start)) && [[ -n "$env_prefix" ]]; then
+    case "$current" in
+      -i | --ignore-environment)
+        token_index=$((token_index + 1))
+        continue
+        ;;
+      -u | --unset)
+        if ((token_index + 1 < token_count)) && [[ "${TOKENS[token_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
+          token_index=$((token_index + 2))
+          continue
+        fi
+        ;;
+      -u?* | --unset=*)
+        token_index=$((token_index + 1))
+        continue
+        ;;
+      --)
+        env_prefix=""
+        token_index=$((token_index + 1))
+        continue
+        ;;
+    esac
   fi
   if ((at_command_start)) && [[ "$current" == "git" || "$current" == */git ]]; then
     scan_index=$((token_index + 1))
