@@ -3,6 +3,27 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
+## [0.3.7] — 2026-08-28
+
+A hardening release for marketplace installation, safety hooks, and repository workflow skills.
+
+### Fixed
+
+- `staged-secret-guard` now scans staged content after `command -p git commit` and `env -u NAME git commit`. Valid wrapper options can no longer bypass credential scanning.
+- Guard hooks now recognize more shell, package-runner, and rewriter forms. Commands that target protected locations or invoke a rewriter without a path no longer bypass the relevant guard.
+- `session-to-md` rejects malformed option values, accepts at most one session identifier, and refuses to overwrite an existing output file.
+- `find-trunk-repos` treats only a repository-content 404 as absence. Other GitHub API failures now name the affected repository.
+
+### Changed
+
+- Marketplace CI now requires an in-repository `./` source, rejects traversal and external resolved paths, and validates each plugin manifest against its marketplace entry.
+- `ci-babysit` keeps watch-only requests read-only. Reruns, repairs, commits, and pushes require explicit authority.
+- `cspell-triage` requires a clean cspell baseline before its canary edit, then requires the failure output to name the inserted token.
+
+### Added
+
+- `THIRD_PARTY_NOTICES.md` now carries the full MIT notices for declared upstream redistributions.
+
 ## [0.3.6] — 2026-08-25
 
 An over-engineering audit of the whole tree, and what it turned up. Nothing users invoke changes except one flag-parsing fix.
