@@ -56,8 +56,10 @@ jobs:
           def reject_nonstandard_constant(value):
               raise ValueError(f"nonstandard JSON constant {value}")
 
+          marketplace_path = pathlib.Path(".claude-plugin/marketplace.json")
+          marketplace_root = marketplace_path.parent.parent.resolve()
           try:
-              with open(".claude-plugin/marketplace.json", encoding="utf-8") as marketplace_file:
+              with marketplace_path.open(encoding="utf-8") as marketplace_file:
                   m = json.load(marketplace_file, parse_constant=reject_nonstandard_constant)
           except (OSError, UnicodeError, ValueError) as error:
               sys.exit(f"marketplace.json cannot be parsed: {error}")
@@ -83,8 +85,19 @@ jobs:
               if not isinstance(source, str) or not source:
                   bad.append(f"{label}: missing or invalid source {source!r}")
                   continue
+              if not source.startswith("./"):
+                  bad.append(f"{label}: source must be a ./ relative path: {source!r}")
+                  continue
               source_path = pathlib.Path(source)
+              if ".." in source_path.parts:
+                  bad.append(f"{label}: source path must not contain '..': {source!r}")
+                  continue
               source_key = source_path.resolve()
+              try:
+                  source_key.relative_to(marketplace_root)
+              except ValueError:
+                  bad.append(f"{label}: source resolves outside the marketplace root: {source!r}")
+                  continue
               if source_key in sources:
                   previous_source, previous_label = sources[source_key]
                   bad.append(
@@ -93,10 +106,10 @@ jobs:
                   )
               else:
                   sources[source_key] = (source, label)
-              if not source_path.is_dir():
+              if not source_key.is_dir():
                   bad.append(f"{label}: source directory missing: {source}")
                   continue
-              manifest_path = source_path / ".claude-plugin" / "plugin.json"
+              manifest_path = source_key / ".claude-plugin" / "plugin.json"
               if not manifest_path.is_file():
                   bad.append(f"{label}: source manifest missing: {manifest_path}")
                   continue
