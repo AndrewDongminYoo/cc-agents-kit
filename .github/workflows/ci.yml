@@ -83,11 +83,16 @@ jobs:
               if not isinstance(source, str) or not source:
                   bad.append(f"{label}: missing or invalid source {source!r}")
                   continue
-              if source in sources:
-                  bad.append(f"{label}: duplicate source {source!r} (also {sources[source]})")
-              else:
-                  sources[source] = label
               source_path = pathlib.Path(source)
+              source_key = source_path.resolve()
+              if source_key in sources:
+                  previous_source, previous_label = sources[source_key]
+                  bad.append(
+                      f"{label}: duplicate source {source!r} resolves to the same path as "
+                      f"{previous_source!r} ({previous_label})"
+                  )
+              else:
+                  sources[source_key] = (source, label)
               if not source_path.is_dir():
                   bad.append(f"{label}: source directory missing: {source}")
                   continue
