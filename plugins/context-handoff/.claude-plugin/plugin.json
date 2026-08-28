@@ -1,6 +1,6 @@
 {
   "name": "context-handoff",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Carry work across sessions and keep the context that carries it lean: hand off a session, export or log what it found, chart an effort too big for one sitting, and audit or garbage-collect your Claude Code config.",
   "author": {
     "name": "Dongmin Yu"

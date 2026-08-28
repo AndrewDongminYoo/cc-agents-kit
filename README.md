@@ -230,7 +230,7 @@ Five skills for the stretch between "the code works" and "it is pushed".
 | --- | --- |
 | `semantic-commit` | Unrelated changes are staged together and want splitting into conventional commits, verified before each one. Splits at hunk level when a single file spans two concerns. |
 | `setup-trunk` | Adding trunk.io to a repo, or configuring its linters and hooks over a codebase with existing violations. |
-| `ci-babysit` | A branch is pushed and CI has to go green. Self-heals mechanical failures within an attempt budget, then stops honestly when a human is needed. |
+| `ci-babysit` | A pushed branch or open PR needs CI monitoring. Watch-only requests remain read-only. Reruns, repairs, commits, and pushes require explicit authority, and the skill stops for logic failures or human decisions. |
 | `fix-osv-vulnerabilities` | `osv-scanner` or `trunk check` reports GHSA advisories and they need triage rather than a blanket bump. |
 | `cspell-triage` | cspell is reporting unknown words, or its dictionaries need consolidating. |
 

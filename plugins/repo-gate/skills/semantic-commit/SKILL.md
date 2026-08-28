@@ -32,9 +32,12 @@ Run in parallel:
 ```bash
 git status
 git diff HEAD
+git diff --cached
 ```
 
 Read each changed file if the diff alone is insufficient to determine intent.
+Treat the existing index as owned work.
+Do not reset, unstage, or replace it without explicit approval.
 
 ### 2. Group by Concern
 
@@ -86,11 +89,23 @@ Wait for user confirmation ("go" / "네" / "좋습니다") before committing.
 
 For each group in order:
 
-1. Stage only the files in this group: `git add <files>`.
+1. Inspect the full index with `git diff --cached --name-only` and `git diff --cached`.
+   If it contains a file or hunk outside this group, stop and ask for direction.
+2. Stage only the files in this group: `git add <files>`.
    For a file split across groups, stage only its hunks (see Hunk-Level Splitting).
-2. Run the project's verification commands (see Verification below)
-3. Fix any issues before committing (do not skip verification)
-4. Commit with the message on the subject line:
+3. Verify the complete candidate index before every commit:
+
+   ```bash
+   git diff --cached --name-only
+   git diff --cached --check
+   git diff --cached
+   ```
+
+   Confirm that the full index contains only the planned group and intended hunks.
+4. Run the project's verification commands against the isolated candidate (see Verification below).
+5. Fix any issues before committing.
+   Re-run the full-index verification after each fix.
+6. Commit with the message on the subject line:
 
    ```bash
    git commit -m "type(scope): description"
@@ -140,6 +155,8 @@ Rules:
 - After partial staging, the working tree and the index differ, so checks run on the working tree would test code that is not being committed.
   Isolate the commit candidate: `git stash push --keep-index --include-untracked`, run verification, commit, then `git stash apply` → confirm the remaining hunks are back → `git stash drop` (prefer apply-then-drop over `pop`).
   `--include-untracked` is load-bearing: `--keep-index` alone leaves untracked files in the tree, so a new file belonging to a later group stays visible to test discovery and to the compiler, and verification is not running against the commit candidate after all.
+  Before stashing, confirm that the index contains only the planned group.
+  Do not stash another person's staged files to make the candidate appear isolated.
 - Do not blindly re-`git add` a partially staged file after a formatter runs — that would pull the withheld hunks back in.
   Use the formatter's `--check` mode as the gate for such files, or re-split from scratch.
 

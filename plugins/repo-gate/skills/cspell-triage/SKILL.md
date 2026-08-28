@@ -228,7 +228,27 @@ The same split applies to inline directives, which is easy to get wrong:
   Once an override needs more than a couple of words, put them in their own dictionary file and reference it with `dictionaries:`, adding that file to the override's `filename` globs so it covers itself.
 - **Declaring the gate green from a scoped run.**
   Run the same command the gate runs, then break it once before trusting the pass.
-  Inject the canary typo into a file you are **already** editing and undo it with `git checkout -- <file>`.
+  Inject the canary typo into a file you are **already** editing.
+  Preserve its pre-existing working-tree diff before the change, then remove only the injected typo with the same editor used for the change.
+
+  ```bash
+  canary_before=$(mktemp)
+  canary_after=$(mktemp)
+  git ls-files --error-unmatch -- <file> >/dev/null
+  git diff -- <file> > "$canary_before"
+  # Run the repository cspell gate and require it to pass before injection.
+  # Add one unique temporary typo, then run the same gate.
+  # Require the gate to fail and report the exact canary token.
+  # Remove only that typo.
+  git diff -- <file> > "$canary_after"
+  cmp -s "$canary_before" "$canary_after"
+  ```
+
+  The canary file must already be tracked.
+  Stop if `git ls-files --error-unmatch` fails.
+  The unmodified cspell gate must pass before canary injection.
+  After injection, the same gate must fail and its output must name the exact canary token.
+  If `cmp` fails, restore the pre-existing diff manually before continuing.
   Never create or delete a file in a source directory to test a spell checker — in a Flutter repo, `lib/main.dart` is the conventional entry point, so both creating and removing it carry meaning far beyond this task, and `rm` in a tracked tree is not a scratch operation.
 - **Adding tokenization fragments.**
   `abli`, `alism`, `aliti`, `singl`, `failur` are stemmer output from a committed search index.

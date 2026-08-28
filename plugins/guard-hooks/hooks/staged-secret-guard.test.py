@@ -123,9 +123,45 @@ for label, command in (
     ("commit word in a later non-git segment", "git status --short && echo commit"),
     ("prose mentioning git commit", "echo 'run git commit next'"),
     ("unrelated command", "ls -la"),
+    ("malformed non-commit command", 'echo "'),
+    ("git help commit", "git help commit"),
+    ("git version", "git --version"),
+    ("quoted operator before git commit words", 'echo "|" git commit -m x'),
 ):
     rc, _ = check_hook(command, d)
     check(f"ignores {label}", rc == 0, f"exit={rc}")
+
+# An unparseable quote blocks only after the full token stream has located an
+# actual git commit invocation, including a shell builtin prefix or a later line.
+malformed_commit_repo = repo({"README.md": "# hello\n"})
+for label, command in (
+    ("command-prefixed malformed commit", 'command git commit "'),
+    ("newline-separated malformed commit", 'echo prepared\ngit commit "'),
+):
+    rc, _ = check_hook(command, malformed_commit_repo)
+    check(f"blocks {label}", rc == 2, f"exit={rc}")
+
+# A Bash line continuation joins `git` and `commit` into one command.
+continued_commit_repo = repo({"config.txt": f"{GITHUB}\n"})
+rc, _ = check_hook("git \\\ncommit -m x", continued_commit_repo)
+check("line-continuation commit scans the staged credential", rc == 2, f"exit={rc}")
+
+for label, command in (
+    ("env prefix", "env git commit -m x"),
+    ("absolute env prefix", "/usr/bin/env git commit -m x"),
+    ("env -i prefix", "env -i git commit -m x"),
+    ("env --ignore-environment prefix", "env --ignore-environment git commit -m x"),
+):
+    rc, _ = check_hook(command, continued_commit_repo)
+    check(f"{label} scans the staged credential", rc == 2, f"exit={rc}")
+
+for label, command in (
+    ("command -p prefix", "command -p git commit -m x"),
+    ("env -u prefix", "env -u NAME git commit -m x"),
+):
+    rc, err = check_hook(command, continued_commit_repo)
+    check(f"{label} is parsed, not refused", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
+    check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
 
 # --- honours git -C so the right repo is scanned ----------------------------
 dirty = repo({"config.txt": f"{GITHUB}\n"})

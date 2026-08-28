@@ -19,11 +19,6 @@ HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
 COMMAND=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 [[ -z "$COMMAND" ]] && exit 0
 
-# Only act when the command contains a plausible git commit invocation. The
-# tokenizer below then validates the form without executing the inspected text.
-GIT_COMMIT_RE='(^|[;|&(][[:space:]]*)(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*)?(/[^[:space:]]*/)?git[^;|&]*[[:space:]]commit([[:space:]]|$)'
-[[ "$COMMAND" =~ $GIT_COMMIT_RE ]] || exit 0
-
 block_unparsed() {
   echo "Blocked: could not safely parse this git commit command. Run a single git commit with explicit, conventionally quoted arguments so the effective commit candidate can be scanned." >&2
   exit 2
@@ -33,20 +28,25 @@ unsafe_value() {
   [[ "$1" == *'$'* || "$1" == *'`'* || "$1" == *'<'* || "$1" == *'>'* ]]
 }
 
-# Tokenize shell quoting without eval, expansion, or command execution. Shell
-# operators become boundary tokens; malformed quoting is rejected.
+# Tokenize the full input once without eval, expansion, or command execution.
+# Shell operators and newlines become boundary tokens. A malformed quote blocks
+# only if the token stream identifies an actual git commit invocation.
 TOKENS=()
 token=""
 quote=""
 escaped=""
 token_started=""
+TOKENIZATION_ERROR=""
+BOUNDARY_PREFIX=$'\034'
 command_len=${#COMMAND}
 command_pos=0
 while ((command_pos < command_len)); do
   char="${COMMAND:command_pos:1}"
   if [[ -n "$escaped" ]]; then
-    token="$token$char"
-    token_started=1
+    if [[ "$char" != $'\n' ]]; then
+      token="$token$char"
+      token_started=1
+    fi
     escaped=""
   elif [[ "$quote" == "'" ]]; then
     if [[ "$char" == "'" ]]; then quote=""; else token="$token$char"; fi
@@ -61,20 +61,24 @@ while ((command_pos < command_len)); do
   else
     case "$char" in
       "'" | '"') quote="$char"; token_started=1 ;;
-      "\\") escaped=1; token_started=1 ;;
-      " " | $'\t' | $'\n')
+      "\\") escaped=1 ;;
+      " " | $'\t')
         if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        ;;
+      $'\n')
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        TOKENS+=("$BOUNDARY_PREFIX;")
         ;;
       ";" | "|" | "&" | "(" | ")")
         if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
-        TOKENS+=("$char")
+        TOKENS+=("$BOUNDARY_PREFIX$char")
         ;;
       *) token="$token$char"; token_started=1 ;;
     esac
   fi
   ((command_pos += 1))
 done
-[[ -z "$quote" && -z "$escaped" ]] || block_unparsed
+[[ -z "$quote" && -z "$escaped" ]] || TOKENIZATION_ERROR=1
 [[ -z "$token_started" ]] || TOKENS+=("$token")
 
 REPO_ARGS=()
@@ -82,9 +86,62 @@ commit_index=-1
 commit_count=0
 token_count=${#TOKENS[@]}
 token_index=0
+at_command_start=1
+command_prefix=""
+env_prefix=""
 while ((token_index < token_count)); do
   current="${TOKENS[token_index]}"
-  if [[ "$current" == "git" || "$current" == */git ]]; then
+  if [[ "$current" == "$BOUNDARY_PREFIX"* ]]; then
+    at_command_start=1
+    command_prefix=""
+    env_prefix=""
+    token_index=$((token_index + 1))
+    continue
+  fi
+  if ((at_command_start)) && [[ "$current" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+    token_index=$((token_index + 1))
+    continue
+  fi
+  if ((at_command_start)) && [[ "$current" == "command" ]]; then
+    command_prefix=1
+    token_index=$((token_index + 1))
+    continue
+  fi
+  if ((at_command_start)) && [[ -n "$command_prefix" ]]; then
+    case "$current" in
+      -p) token_index=$((token_index + 1)); continue ;;
+      --) command_prefix=""; token_index=$((token_index + 1)); continue ;;
+    esac
+  fi
+  if ((at_command_start)) && [[ "$current" == "env" || "$current" == */env ]]; then
+    env_prefix=1
+    token_index=$((token_index + 1))
+    continue
+  fi
+  if ((at_command_start)) && [[ -n "$env_prefix" ]]; then
+    case "$current" in
+      -i | --ignore-environment)
+        token_index=$((token_index + 1))
+        continue
+        ;;
+      -u | --unset)
+        if ((token_index + 1 < token_count)) && [[ "${TOKENS[token_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
+          token_index=$((token_index + 2))
+          continue
+        fi
+        ;;
+      -u?* | --unset=*)
+        token_index=$((token_index + 1))
+        continue
+        ;;
+      --)
+        env_prefix=""
+        token_index=$((token_index + 1))
+        continue
+        ;;
+    esac
+  fi
+  if ((at_command_start)) && [[ "$current" == "git" || "$current" == */git ]]; then
     scan_index=$((token_index + 1))
     candidate_repo_args=()
     while ((scan_index < token_count)); do
@@ -102,6 +159,7 @@ while ((token_index < token_count)); do
           scan_index=$((scan_index + 1))
           ;;
         -c | -c?*) block_unparsed ;;
+        --version) break ;;
         commit)
           ((commit_count += 1))
           if ((commit_count == 1)); then
@@ -117,9 +175,11 @@ while ((token_index < token_count)); do
       esac
     done
   fi
+  at_command_start=0
   token_index=$((token_index + 1))
 done
-((commit_index >= 0)) || block_unparsed
+((commit_index >= 0)) || exit 0
+[[ -z "$TOKENIZATION_ERROR" ]] || block_unparsed
 ((commit_count == 1)) || block_unparsed
 
 ALL_MODE=""
@@ -128,9 +188,7 @@ after_separator=""
 token_index=$((commit_index + 1))
 while ((token_index < token_count)); do
   current="${TOKENS[token_index]}"
-  case "$current" in
-    ";" | "|" | "&" | "(" | ")") break ;;
-  esac
+  [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
   if [[ -n "$after_separator" ]]; then
     unsafe_value "$current" && block_unparsed
     [[ "$current" == *'*'* || "$current" == *'?'* || "$current" == *'['* ]] && block_unparsed

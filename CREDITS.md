@@ -1,7 +1,7 @@
 # Credits
 
-Provenance for everything shipped in this repository.
-This file is the single place attribution is recorded — a skill or hook never restates its own origin, it points here.
+This file is the repository's provenance index for shipped components.
+Attribution can also appear in component metadata and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Column meanings:
 
@@ -44,10 +44,11 @@ Column meanings:
 | `find-trunk-repos` | original | Apache-2.0 | Written for this repository. |
 | `cspell-dict-report` | original | Apache-2.0 | Written for this repository. |
 
-## MIT notice
+## MIT notices
 
 `wayfinder`, `context-budget`, and `config-gc` derive from MIT-licensed work.
-That licence permits redistribution with its copyright and permission notice preserved, which is the purpose of this file and of the `metadata.origin` key in each of those skills.
+The full copyright and permission notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+That licence permits redistribution when the copyright and permission notice is preserved.
 Copyright for the upstream portions remains with their authors — Matt Pocock and the `affaan-m/ecc` contributors respectively.
 The rest of this repository is Apache-2.0.
 
@@ -64,4 +65,4 @@ Before a derived component is committed here:
 
 1. Read the upstream licence directly — `gh api repos/OWNER/REPO/license -q .license.spdx_id` — rather than inferring it from a README badge.
 2. Record it as a row above, and add an `origin:` key to the component's own frontmatter pointing at the upstream repository.
-3. If the adaptation is thin enough that the result is effectively vendored upstream code, it does not belong here. Eight components that are clearly ours beat five whose provenance needs an argument.
+3. If the adaptation is thin enough that the result is effectively vendored upstream code, ship it only as a declared redistribution. Preserve the applicable notice in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Do not present upstream work as original work.
