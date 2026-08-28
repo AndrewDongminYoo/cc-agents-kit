@@ -13,6 +13,8 @@ set -euo pipefail
 
 FILE=".trunk/trunk.yaml"
 OWNER="$(gh api user -q .login)"
+ERROR_FILE="$(mktemp)"
+trap 'rm -f "$ERROR_FILE"' EXIT
 
 # list public repositories with their default branches
 gh repo list "$OWNER" --limit 1000 --visibility public --json nameWithOwner,defaultBranchRef --jq '.[] | [.nameWithOwner, .defaultBranchRef.name] | @tsv' |
@@ -25,8 +27,15 @@ while IFS=$'\t' read -r repo branch; do
   if url="$(
     gh api --method GET "repos/$repo/contents/$FILE" \
       -f ref="$branch" \
-      --jq '.html_url' 2>/dev/null
+      --jq '.html_url' 2>"$ERROR_FILE"
   )"; then
     printf '%s\t%s\t%s\n' "$repo" "$branch" "$url"
+  else
+    api_status=$?
+    if grep -qx 'gh: Not Found (HTTP 404)' "$ERROR_FILE"; then
+      continue
+    fi
+    printf 'Cannot inspect %s for %s\n' "$repo" "$FILE" >&2
+    exit "$api_status"
   fi
 done
