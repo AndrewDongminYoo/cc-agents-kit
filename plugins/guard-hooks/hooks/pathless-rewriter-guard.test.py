@@ -26,7 +26,15 @@ CASES = [
     (2, "shfmt -w", "shfmt -w"),
     # --- reached through a runner or an absolute path ---
     (2, "npx prefix", "npx prettier --write"),
+    (2, "npx --yes jsonsort", "npx --yes jsonsort"),
+    (2, "npx --yes separator jsonsort", "npx --yes -- jsonsort"),
+    (2, "npx -y jsonsort", "npx -y jsonsort"),
+    (2, "npx version-qualified jsonsort", "npx jsonsort@1"),
+    (2, "npx version-qualified ruff format", "npx ruff@0.8.0 format"),
     (2, "pnpm dlx prefix", "pnpm dlx prettier --write"),
+    (2, "pnpm exec jsonsort", "pnpm exec jsonsort"),
+    (2, "pnpm exec separator jsonsort", "pnpm exec -- jsonsort"),
+    (2, "pnpm exec version-qualified trunk fmt", "pnpm exec trunk@1.0.0 fmt"),
     (2, "absolute binary path", "/opt/homebrew/bin/jsonsort"),
     (2, "env assignment prefix", "NODE_ENV=production jsonsort"),
     # --- chained, so the rewriter is not the first command ---

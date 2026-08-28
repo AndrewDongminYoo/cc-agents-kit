@@ -30,7 +30,7 @@ REWRITERS=(
   'eslint|--fix'
   'shfmt|-w'
 )
-RUNNERS=(npx bunx uvx 'pnpm dlx' 'uv run' 'poetry run' 'yarn dlx')
+RUNNERS=('npx --yes' 'npx -y' npx bunx uvx 'pnpm dlx' 'pnpm exec' 'uv run' 'poetry run' 'yarn dlx')
 
 has_token() { # has_token "<haystack>" "<needle> [<needle>...]"
   local haystack=" $1 " needle
@@ -61,6 +61,11 @@ while IFS= read -r segment; do
   for runner in "${RUNNERS[@]}"; do
     [[ "$segment" == "$runner "* ]] && segment="${segment#"$runner" }"
   done
+  if [[ "$segment" == "--" ]]; then
+    segment=""
+  elif [[ "$segment" == "-- "* ]]; then
+    segment="${segment#-- }"
+  fi
   # Drop a leading directory on the binary: /opt/homebrew/bin/prettier -> prettier
   first="${segment%% *}"
   [[ "$first" == */* ]] && segment="${first##*/}${segment#"$first"}"
@@ -68,10 +73,16 @@ while IFS= read -r segment; do
   for entry in "${REWRITERS[@]}"; do
     tool="${entry%%|*}"
     write_flags="${entry#*|}"
+    candidate="$segment"
+    first="${candidate%% *}"
+    tool_command="${tool%% *}"
+    if [[ "$first" == "$tool_command"@* ]]; then
+      candidate="$tool_command${candidate#"$first"}"
+    fi
 
-    [[ "$segment" == "$tool" || "$segment" == "$tool "* ]] || continue
+    [[ "$candidate" == "$tool" || "$candidate" == "$tool "* ]] || continue
 
-    rest="${segment#"$tool"}"
+    rest="${candidate#"$tool"}"
     # A write-mode tool is only dangerous once it is actually writing.
     if [[ -n "$write_flags" ]] && ! has_token "$rest" "$write_flags"; then
       continue
