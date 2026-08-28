@@ -40,6 +40,7 @@ Require separate explicit authority for each commit and each push.
 
 ```bash
 branch_name=$(git branch --show-current)
+head_sha=$(git rev-parse HEAD)
 if ! pr_json=$(gh pr list --head "$branch_name" --state open --limit 2 --json number); then
   echo "Active pull-request lookup failed." >&2
   exit 1
@@ -56,7 +57,7 @@ pr_number=$(jq -r '.[0].number // empty' <<<"$pr_json")
 if [ -n "$pr_number" ]; then
   gh pr checks "$pr_number"
 else
-  gh run list --branch "$branch_name" --limit 5
+  gh run list --branch "$branch_name" --commit "$head_sha" --limit 100
 fi
 ```
 
@@ -127,15 +128,42 @@ trap 'rm -f "$checks_error"' EXIT
 while true; do
   checks=""
   checks_status=0
-  checks=$(gh pr checks "$pr_number" --json name,bucket 2>"$checks_error") || checks_status=$?
+  checks_source="gh pr checks"
+  if [ -n "$pr_number" ]; then
+    checks=$(gh pr checks "$pr_number" --json name,bucket 2>"$checks_error") || checks_status=$?
+  else
+    checks_source="gh run list"
+    runs=$(gh run list --branch "$branch_name" --commit "$head_sha" --limit 100 --json name,status,conclusion 2>"$checks_error") || checks_status=$?
+    if [ "$checks_status" -ne 0 ]; then
+      echo "gh run list failed with exit $checks_status." >&2
+      cat "$checks_error" >&2
+      exit 1
+    fi
+    if ! jq -e 'type == "array" and all(.[]; type == "object" and (.name | type == "string") and (.status | type == "string") and (.conclusion | type == "string"))' <<<"$runs" >/dev/null; then
+      echo "gh run list returned malformed JSON." >&2
+      exit 1
+    fi
+    checks=$(jq -c '[.[] | {
+      name: .name,
+      bucket: (
+        if .status == "completed" and .conclusion == "success" then "pass"
+        elif .status == "completed" and .conclusion == "skipped" then "skipping"
+        elif .status == "completed" and .conclusion == "cancelled" then "cancel"
+        elif .status == "completed" then "fail"
+        elif .status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending" then "pending"
+        else "fail"
+        end
+      )
+    }]' <<<"$runs")
+  fi
   if ! jq -e 'type == "array" and all(.[]; type == "object" and (.name | type == "string") and (.bucket | type == "string"))' <<<"$checks" >/dev/null; then
-    echo "gh pr checks returned malformed JSON with exit $checks_status." >&2
+    echo "$checks_source returned malformed JSON with exit $checks_status." >&2
     cat "$checks_error" >&2
     exit 1
   fi
   unknown_buckets=$(jq -r '.[] | select(.bucket != "pass" and .bucket != "fail" and .bucket != "pending" and .bucket != "skipping" and .bucket != "cancel") | "\(.name): \(.bucket)"' <<<"$checks")
   if [ -n "$unknown_buckets" ]; then
-    printf 'gh pr checks returned unknown buckets:\n%s\n' "$unknown_buckets" >&2
+    printf '%s returned unknown buckets:\n%s\n' "$checks_source" "$unknown_buckets" >&2
     exit 1
   fi
   terminal_failures=$(jq -r '.[] | select(.bucket == "fail" or .bucket == "cancel") | "\(.name): \(.bucket)"' <<<"$checks")
@@ -152,7 +180,7 @@ while true; do
       fi
       ;;
     *)
-      echo "gh pr checks failed with exit $checks_status." >&2
+      echo "$checks_source failed with exit $checks_status." >&2
       cat "$checks_error" >&2
       exit 1
       ;;
@@ -181,5 +209,5 @@ Only a non-empty set of `pass` and `skipping` buckets exits successfully.
 Malformed JSON and unknown buckets are explicit errors.
 After terminal failures are handled, a command failure with an exit other than 0 or 8 is also an explicit error.
 An exit of 8 is pending only when the command returned valid non-empty JSON that contains a `pending` bucket.
-For branch pushes without a PR, substitute `gh run list --branch <branch> --json databaseId,status,conclusion` state diffs and apply the same empty-poll cap.
+For branch pushes without a PR, the loop limits `gh run list` to the current head SHA and applies the same empty-poll cap and terminal criteria.
 Fallback only if the Monitor tool is unavailable: `gh run watch` (blocking) or re-check every 3–4 minutes — never hot-loop.
