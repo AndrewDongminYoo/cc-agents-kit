@@ -3,11 +3,17 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
-## [Unreleased]
+## [0.3.8] — 2026-08-31
+
+The output side of secret handling: the guards already refused to read or commit a credential; this release masks one that a command prints.
 
 ### Added
 
 - `guard-hooks` 0.2.6 adds `output-secret-mask`, a `PostToolUse` hook on `Bash` that runs gitleaks over the command's stdout and stderr and rewrites every credential-shaped value to `[REDACTED]` before the model sees the result. No-op without `gitleaks`; about 30 ms per call with it.
+
+### Fixed
+
+- `wayfinder`'s ticket-list template no longer renders its placeholder as a link to a file that does not exist.
 
 ## [0.3.7] — 2026-08-28
 
