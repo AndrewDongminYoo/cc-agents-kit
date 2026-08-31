@@ -44,7 +44,7 @@ Two placements are load-bearing:
 Enforced by the suites; break one and the corresponding case fails.
 
 - **Fail open.** Empty, malformed, or key-less input exits `0` with no output. `jq` is parsed with `|| true`, so a machine without `jq` makes every guard stop guarding *silently* — that is deliberate, and it is why `jq` is documented as a hard prerequisite rather than checked at runtime.
-- **`PreToolUse` guards exit `2` to block. `PostToolUse` hooks never block** — they emit `hookSpecificOutput.additionalContext` and exit `0`.
+- **`PreToolUse` guards exit `2` to block. `PostToolUse` hooks never block** — they emit `hookSpecificOutput.additionalContext` (a warning) or `hookSpecificOutput.updatedToolOutput` (`output-secret-mask` rewriting a Bash result) and exit `0`.
 - **The `CC_GUARD_DISABLE_*` opt-out is checked *after* `HOOK_INPUT=$(cat ...)`, never before.** A `Write` payload carries the whole file content, so exiting before draining stdin leaves the harness writing to a closed pipe and surfaces a hook error at exactly the moment the user asked for the hook to be off. Pinned by a 200KB-payload case in `hooks/_optout.py`, shared by every suite, that runs the hook behind a real pipe and reads the writer's `PIPESTATUS` — Python's `subprocess` swallows `BrokenPipeError`, so an `input=`-style test cannot see this bug.
 - Scripts must parse under macOS's system `/bin/bash` 3.2, not just a newer bash on `PATH`.
 

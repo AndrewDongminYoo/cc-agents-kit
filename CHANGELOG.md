@@ -3,6 +3,12 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
+## [Unreleased]
+
+### Added
+
+- `guard-hooks` 0.2.6 adds `output-secret-mask`, a `PostToolUse` hook on `Bash` that runs gitleaks over the command's stdout and stderr and rewrites every credential-shaped value to `[REDACTED]` before the model sees the result. No-op without `gitleaks`; about 30 ms per call with it.
+
 ## [0.3.7] — 2026-08-28
 
 A hardening release for marketplace installation, safety hooks, and repository workflow skills.

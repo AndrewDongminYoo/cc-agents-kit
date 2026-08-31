@@ -20,6 +20,7 @@ Column meanings:
 | `staged-secret-guard.sh` | original | Apache-2.0 | Written for this repository. |
 | `lockfile-drift-check.sh` | original | Apache-2.0 | Written for this repository. |
 | `shellcheck-on-edit.sh` | original | Apache-2.0 | Written for this repository. |
+| `output-secret-mask.sh` | original | Apache-2.0 | Written for this repository. The idea — rewrite a `PostToolUse` Bash result instead of blocking it — was seen in [JeongJaeSoon/agent-guard](https://github.com/JeongJaeSoon/agent-guard) (MIT); no text or code is shared. |
 
 ## context-handoff
 

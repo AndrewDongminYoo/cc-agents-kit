@@ -1,5 +1,5 @@
 {
-  "description": "Defensive PreToolUse blocks and PostToolUse warnings.",
+  "description": "Defensive PreToolUse blocks, PostToolUse warnings, and a PostToolUse output rewrite.",
   "hooks": {
     "PreToolUse": [
       {
@@ -50,6 +50,16 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/shellcheck-on-edit.sh\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/output-secret-mask.sh\"",
             "timeout": 10
           }
         ]
