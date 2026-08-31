@@ -53,7 +53,7 @@ A wall of `01, 02, 03` is illegible; the number rides inside the name, it never 
 
 ## Decisions so far
 
-- [<resolved ticket title>](tickets/NN-slug.md) — <one-line gist of the answer>
+- <resolved ticket title> (`tickets/<NN>-<slug>.md`) — <one-line gist of the answer>
 
 ## Not yet specified
 

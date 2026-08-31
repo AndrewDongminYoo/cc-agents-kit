@@ -18,7 +18,7 @@ Hooks are read when a session starts, so restart any session that is already ope
 
 | Plugin | What it does |
 | --- | --- |
-| [`guard-hooks`](#guard-hooks) | Seven defensive hooks — five block, two warn. |
+| [`guard-hooks`](#guard-hooks) | Eight defensive hooks — five block, two warn, one rewrites Bash output. |
 | [`context-handoff`](#context-handoff) | Carry work across sessions, and keep the context that carries it lean. |
 | [`repo-gate`](#repo-gate) | What runs between "the code works" and "it is pushed". |
 
@@ -65,14 +65,14 @@ These are the three properties that matter, and each is pinned by a case that fa
 
 - **A passing suite is not taken as evidence.** Delete the logic a regression covers — `exit 2` → `exit 0`, `-ot` → `-nt`, drop the reporting line — and confirm that regression fails. Mutants are parse-checked first, because `bash` exits `2` on a syntax error and an unparseable mutant would otherwise produce a vacuous pass.
 - **Guards fail open, never closed.** Empty, malformed, or key-less input exits `0` silently. A broken guard degrades to no guard, and never to a blocked tool call.
-- **The two `PostToolUse` hooks cannot block you.** They only attach a warning. Every hook also has its own kill switch, and a disabled hook still drains its input, so turning one off cannot itself break a large `Write`.
+- **The three `PostToolUse` hooks cannot block you.** Two only attach a warning; the third rewrites a Bash result to mask a credential-shaped value, and says so in the transcript. Every hook also has its own kill switch, and a disabled hook still drains its input, so turning one off cannot itself break a large `Write`.
 
 Nothing here is a sandbox — see [Known limits](#known-limits) for what these guards do not stop.
 
-### The seven hooks
+### The eight hooks
 
 Each hook is a standalone bash script reading the hook JSON on stdin.
-The five `PreToolUse` guards exit `2` to block; the two `PostToolUse` hooks never block and only attach a warning to the transcript.
+The five `PreToolUse` guards exit `2` to block; the three `PostToolUse` hooks never block — two attach a warning to the transcript, one rewrites the tool result.
 
 | Hook | Event / matcher | Blocks? | Disable with |
 | --- | --- | --- | --- |
@@ -83,6 +83,7 @@ The five `PreToolUse` guards exit `2` to block; the two `PostToolUse` hooks neve
 | `secrets-path-guard.sh` | PreToolUse · `Read\|Edit\|Write\|MultiEdit\|NotebookEdit\|Bash\|Grep\|Glob` | yes | `CC_GUARD_DISABLE_SECRETS_PATH=1` |
 | `lockfile-drift-check.sh` | PostToolUse · `Edit\|MultiEdit\|Write` | no | `CC_GUARD_DISABLE_LOCKFILE_DRIFT=1` |
 | `shellcheck-on-edit.sh` | PostToolUse · `Edit\|MultiEdit\|Write` | no | `CC_GUARD_DISABLE_SHELLCHECK=1` |
+| `output-secret-mask.sh` | PostToolUse · `Bash` | no | `CC_GUARD_DISABLE_OUTPUT_SECRET_MASK=1` |
 
 #### `dangerous-command-guard.sh`
 
@@ -145,6 +146,16 @@ Ecosystem-agnostic: `package.json`, `pubspec.yaml`, `Cargo.toml`, `pyproject.tom
 After a `.sh` / `.bash` file is edited, runs `shellcheck` and attaches its findings to the transcript.
 Silently does nothing when `shellcheck` is not installed.
 
+#### `output-secret-mask.sh`
+
+After a `Bash` command finishes, scans its stdout and stderr with gitleaks' default rules and replaces every credential-shaped value with `[REDACTED]` before the model sees the result, through `hookSpecificOutput.updatedToolOutput`.
+A `cat` of a config file, a `printenv`, or a verbose CLI that echoes its token would otherwise leave the live value in the transcript for the rest of the session and in the session log on disk.
+The transcript also gets a one-line note saying how many values were masked, so the agent treats `[REDACTED]` as deliberate rather than as missing data.
+
+This is the output-side counterpart to `secrets-path-guard.sh` (which blocks *reading* secret files) and `staged-secret-guard.sh` (which blocks *committing* them): a value that arrives through a command the other two allow is still caught on its way into the context.
+Silently does nothing when `gitleaks` is not installed, when the output is over 2 MB, or when the tool result is not the stdout/stderr object shape.
+Measured on an Apple Silicon Mac: about 30 ms per Bash call, including the gitleaks scan.
+
 ### Turning hooks off
 
 Every hook honours its own environment variable from the table above.
@@ -169,6 +180,7 @@ To turn the whole bundle off, use `/plugin` and disable `guard-hooks`.
 - **`bash`** — the hooks are invoked as `bash <script>` regardless of your interactive shell, and are written against macOS's system `/bin/bash` 3.2, the oldest bash they need to parse under. Verified on macOS (`GNU bash 3.2.57`, darwin arm64) and on Linux, where CI runs shellcheck and the full suite on `ubuntu-latest` for every push to `main` and every pull request.
 - **`git`** — only `staged-secret-guard.sh` uses it, to read the effective commit candidate; outside a repository the hook exits `0`.
 - **`shellcheck`** — optional; only `shellcheck-on-edit.sh` uses it, and that hook no-ops without it.
+- **`gitleaks`** (8.x) — optional; only `output-secret-mask.sh` uses it (`brew install gitleaks`), and that hook no-ops without it.
 - **`python3`** — tests only, not runtime.
 
 The guards target *zsh* command strings because that is the shell Claude Code runs commands under on macOS.
@@ -183,6 +195,7 @@ They match patterns in the tool input, so deliberate multi-step obfuscation (sym
 - **`staged-secret-guard` matches shapes, not entropy.** A credential with no recognisable prefix - a bare password, a random hex string, a private API host - is not detected. Treat it as a floor, not a scanner.
 - **`staged-secret-guard` reads `git commit` flags from an allowlist.** A flag it does not recognise is blocked rather than guessed at, because an unknown flag might take a value and mis-parsing one would scan the wrong candidate. The table matches whole flags, so a bundled short form (`-sq`) is refused too. Flags that change *which* content is committed (`-i`, `-p`, `--interactive`, `--pathspec-from-file`) and `-e`, which would open an editor with no TTY to open it on, are blocked deliberately.
 - **`pathless-rewriter-guard` only knows the tools it lists.** A rewriter outside that list, or one reached through a shell alias or a package script (`npm run format`), is invisible to it.
+- **`output-secret-mask` masks what gitleaks' default rules recognise, after the command has already run.** The value has still reached your terminal scrollback and any file the command wrote; only the model's copy is masked. A credential with no recognisable shape or with low entropy passes through, and so does anything printed by a tool other than `Bash` (`Read` of a file that holds a key is the job of `secrets-path-guard`).
 - **`zsh-quoting-guard` stops scanning at a quoted heredoc**, which also discards anything chained after the terminator. A deliberate fail-open.
 
 ### Tests
