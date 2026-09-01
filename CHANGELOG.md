@@ -3,6 +3,13 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
+## [Unreleased]
+
+### Changed
+
+- `repo-gate` `ci-babysit` names the zero-steps failure shape: a run that fails in seconds with an empty `steps` array is a billing or runner block upstream of the workflow, read from the run's annotation, not from a diff.
+- `repo-gate` `cspell-triage` warns that a local dictionary registered under a bundled dictionary's name silently masks the bundled one; check the name with `cspell trace` before registering it.
+
 ## [0.3.8] — 2026-08-31
 
 The output side of secret handling: the guards already refused to read or commit a credential; this release masks one that a command prints.
