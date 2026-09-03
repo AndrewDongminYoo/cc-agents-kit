@@ -134,6 +134,8 @@ for label, command in (
     ("git log with an escaped dollar in -C", 'git -C /tmp/\\$lit log -1'),
     # "$*" and "${name[*]}" join to one word, so they stay allowed.
     ("quoted star expansion is one word", 'git -C "${arr[*]}" log -1'),
+    # [@] is three ordinary characters in a path; only ${...[@]} is an array.
+    ("literal bracket-at in a quoted path", 'git -C "$root/project[@]" log -1'),
     ("git log with an unparsed --option", "git --no-pager log -1"),
     ("git log behind a long option carrying its own value", "git --git-dir=/repo/.git log -1"),
     ("git log behind a pathspec flag", "git --literal-pathspecs log -1"),
