@@ -113,15 +113,18 @@ if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token
 # here rather than mid-tokenizer keeps it one pass over finished tokens, where
 # the whole form is visible instead of one character at a time.
 #
-# The array form has to be matched as ${...[@]} rather than as a bare [@]: a
-# path can legitimately contain those three characters, and "$root/project[@]"
-# is one argument that the bare pattern refused.
+# The array form has to be matched as ${...[@]...}. A bare [@] also appears in
+# ordinary paths, and "$root/project[@]" is one argument that such a pattern
+# refused; requiring [@] to sit immediately before the closing brace then missed
+# every modified form, since "${args[@]:0}", "${args[@]%x}" and "${args[@]/a/b}"
+# each still emit one word per element. Anchoring on ${ before and } after keeps
+# both ends honest.
 for ((token_index = 0; token_index < ${#TOKENS[@]}; token_index++)); do
   [[ "${TOKEN_EXPANSION[token_index]-}" == "quoted" ]] || continue
   # shellcheck disable=SC2016  # the single quotes are the point: these are
   # literal spellings to match in the token, not expansions to perform.
   case "${TOKENS[token_index]}" in
-    *'$@'* | *'${@'* | *'${'*'[@]}'*) TOKEN_EXPANSION[token_index]="split" ;;
+    *'$@'* | *'${@'* | *'${'*'[@]'*'}'*) TOKEN_EXPANSION[token_index]="split" ;;
   esac
 done
 

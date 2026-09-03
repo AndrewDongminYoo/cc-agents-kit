@@ -136,6 +136,7 @@ for label, command in (
     ("quoted star expansion is one word", 'git -C "${arr[*]}" log -1'),
     # [@] is three ordinary characters in a path; only ${...[@]} is an array.
     ("literal bracket-at in a quoted path", 'git -C "$root/project[@]" log -1'),
+    ("braced scalar then a literal bracket-at", 'git -C "$root/${x}dir[@]" log -1'),
     ("git log with an unparsed --option", "git --no-pager log -1"),
     ("git log behind a long option carrying its own value", "git --git-dir=/repo/.git log -1"),
     ("git log behind a pathspec flag", "git --literal-pathspecs log -1"),
@@ -182,6 +183,11 @@ for label, command in (
     ("unquoted expansion as the subcommand", "git $cmd -m x"),
     # Quoted, and still several words: one per element.
     ("quoted array expansion", 'args=(/repo commit -m x --); git -C "${args[@]}" log'),
+    # Every modified form still expands to one word per element.
+    ("array expansion with an offset", 'args=(/repo commit -m x --); git -C "${args[@]:0}" log'),
+    ("array expansion with suffix removal", 'args=(/repo commit -m x --); git -C "${args[@]%x}" log'),
+    ("array expansion with a replacement", 'args=(/repo commit -m x --); git -C "${args[@]/a/b}" log'),
+    ("array indices expansion", 'args=(/repo commit -m x --); git -C "${!args[@]}" log'),
     ("quoted positional parameters", 'git -C "$@" log'),
     ("quoted braced positional parameters", 'git -C "${@}" log'),
     # git accepts a separate value for its long options, verified against the
