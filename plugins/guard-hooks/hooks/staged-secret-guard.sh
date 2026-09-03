@@ -149,6 +149,17 @@ while ((token_index < token_count)); do
     token_index=$((token_index + 1))
     continue
   fi
+  # A shell keyword introduces a command rather than being one, so the word after
+  # it is still at a command start. Without this, `if git commit ...` and the
+  # body of a `for ... do` loop are never recognised as git invocations at all.
+  if ((at_command_start)); then
+    case "$current" in
+      if | then | elif | else | do | while | until | "!" | "{")
+        token_index=$((token_index + 1))
+        continue
+        ;;
+    esac
+  fi
   if ((at_command_start)) && [[ "$current" == "command" ]]; then
     command_prefix=1
     token_index=$((token_index + 1))

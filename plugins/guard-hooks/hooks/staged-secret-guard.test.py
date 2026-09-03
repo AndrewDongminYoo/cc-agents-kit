@@ -216,6 +216,11 @@ check("line-continuation commit scans the staged credential", rc == 2, f"exit={r
 
 for label, command in (
     ("env prefix", "env git commit -m x"),
+    # A keyword introduces the command; the git after it is still a command.
+    ("commit after an if keyword", "if git commit -m x; then echo ok; fi"),
+    ("commit inside a for body", "for d in a b; do git -C \"$d\" commit -m x; done"),
+    ("commit after then", "if true; then git commit -m x; fi"),
+    ("commit after a negation", "! git commit -m x"),
     ("absolute env prefix", "/usr/bin/env git commit -m x"),
     ("env -i prefix", "env -i git commit -m x"),
     ("env --ignore-environment prefix", "env --ignore-environment git commit -m x"),
