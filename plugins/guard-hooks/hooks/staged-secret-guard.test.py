@@ -135,6 +135,8 @@ for label, command in (
     # "$*" and "${name[*]}" join to one word, so they stay allowed.
     ("quoted star expansion is one word", 'git -C "${arr[*]}" log -1'),
     ("git log with an unparsed --option", "git --no-pager log -1"),
+    ("git log behind a long option carrying its own value", "git --git-dir=/repo/.git log -1"),
+    ("git log behind a pathspec flag", "git --literal-pathspecs log -1"),
     # A subcommand argument whose value is the word commit is a search term, not
     # an invocation; the scan must stop at the subcommand to tell them apart.
     ("commit as a --grep value", "git --no-pager log --grep commit"),
@@ -180,6 +182,11 @@ for label, command in (
     ("quoted array expansion", 'args=(/repo commit -m x --); git -C "${args[@]}" log'),
     ("quoted positional parameters", 'git -C "$@" log'),
     ("quoted braced positional parameters", 'git -C "${@}" log'),
+    # git accepts a separate value for its long options, verified against the
+    # binary for --git-dir, --work-tree and --namespace, so the token after an
+    # unrecognised one is not necessarily the subcommand.
+    ("long option with a separate value then commit", "git --git-dir /repo/.git commit -m x"),
+    ("long option with a separate value then a read-only verb", "git --work-tree /repo log"),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")

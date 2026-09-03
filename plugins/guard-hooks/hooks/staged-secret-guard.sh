@@ -191,6 +191,7 @@ while ((token_index < token_count)); do
     pending_block=""
     config_override=""
     split_risk=""
+    opaque_option=""
     scanned_past_commit=1
     while ((scan_index < token_count)); do
       current="${TOKENS[scan_index]}"
@@ -232,8 +233,29 @@ while ((token_index < token_count)); do
           config_override=1
           scan_index=$((scan_index + 1))
           ;;
-        --*)
+        # The global options that take no value, from git's own synopsis. Naming
+        # the flags rather than the value-takers is the direction that fails
+        # safe: an option git adds later is unrecognised, and unrecognised means
+        # refuse rather than mistake its value for the subcommand.
+        -p | -P | --paginate | --no-pager | --bare | --exec-path | --html-path \
+          | --man-path | --info-path | --no-replace-objects | --no-lazy-fetch \
+          | --no-optional-locks | --no-advice | --literal-pathspecs \
+          | --no-literal-pathspecs | --glob-pathspecs | --noglob-pathspecs \
+          | --icase-pathspecs | --no-icase-pathspecs)
           pending_block=1
+          scan_index=$((scan_index + 1))
+          ;;
+        --*=*)
+          # The value rides along with the =, so nothing extra is consumed.
+          pending_block=1
+          scan_index=$((scan_index + 1))
+          ;;
+        --*)
+          # Unrecognised and without an =, so the next token may be its value.
+          # `git --git-dir /repo/.git commit -m x` is accepted by git and would
+          # otherwise read /repo/.git as the subcommand.
+          pending_block=1
+          opaque_option=1
           scan_index=$((scan_index + 1))
           ;;
         commit)
@@ -275,6 +297,7 @@ while ((token_index < token_count)); do
     if [[ -n "$scanned_past_commit" ]]; then
       [[ -z "$config_override" ]] || block_config_override
       [[ -z "$split_risk" ]] || block_unparsed
+      [[ -z "$opaque_option" ]] || block_unparsed
     fi
   fi
   at_command_start=0
