@@ -137,6 +137,10 @@ for label, command in (
     # [@] is three ordinary characters in a path; only ${...[@]} is an array.
     ("literal bracket-at in a quoted path", 'git -C "$root/project[@]" log -1'),
     ("braced scalar then a literal bracket-at", 'git -C "$root/${x}dir[@]" log -1'),
+    # The braces come from two different expansions, so no array is involved.
+    ("bracket-at between two expansions", 'git -C "$root/${x}dir[@]${suffix}" log'),
+    # Defining a function executes nothing.
+    ("a function definition containing a commit", 'f() { git commit -m x; }'),
     ("git log with an unparsed --option", "git --no-pager log -1"),
     ("git log behind a long option carrying its own value", "git --git-dir=/repo/.git log -1"),
     ("git log behind a pathspec flag", "git --literal-pathspecs log -1"),
@@ -221,6 +225,10 @@ for label, command in (
     ("commit inside a for body", "for d in a b; do git -C \"$d\" commit -m x; done"),
     ("commit after then", "if true; then git commit -m x; fi"),
     ("commit after a negation", "! git commit -m x"),
+    ("commit behind the time keyword", "time git commit -m x"),
+    ("commit behind time -p", "time -p git commit -m x"),
+    # A value that can add words can add -a, which commits unstaged tracked files.
+    ("multiword expansion as a commit option value", 'args=(msg -a); git commit -m "${args[@]}"'),
     ("absolute env prefix", "/usr/bin/env git commit -m x"),
     ("env -i prefix", "env -i git commit -m x"),
     ("env --ignore-environment prefix", "env --ignore-environment git commit -m x"),

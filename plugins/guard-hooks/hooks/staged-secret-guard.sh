@@ -113,18 +113,22 @@ if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token
 # here rather than mid-tokenizer keeps it one pass over finished tokens, where
 # the whole form is visible instead of one character at a time.
 #
-# The array form has to be matched as ${...[@]...}. A bare [@] also appears in
-# ordinary paths, and "$root/project[@]" is one argument that such a pattern
-# refused; requiring [@] to sit immediately before the closing brace then missed
-# every modified form, since "${args[@]:0}", "${args[@]%x}" and "${args[@]/a/b}"
-# each still emit one word per element. Anchoring on ${ before and } after keeps
-# both ends honest.
+# The array form has to be matched as ${...[@]...}, and inside ONE expansion. A
+# bare [@] also appears in ordinary paths, so "$root/project[@]" was refused;
+# requiring [@] immediately before the closing brace then missed every modified
+# form, since "${args[@]:0}", "${args[@]%x}" and "${args[@]/a/b}" still emit one
+# word per element; and a glob anchored on ${ and } separately took its opening
+# brace from one expansion and its closing brace from a later one, refusing
+# "$root/${x}dir[@]${suffix}". The regex says what all three attempts meant: a
+# [@] reached from a ${ without passing a } on the way.
+ARRAY_AT_RE='\$\{[^}]*\[@\]'
 for ((token_index = 0; token_index < ${#TOKENS[@]}; token_index++)); do
   [[ "${TOKEN_EXPANSION[token_index]-}" == "quoted" ]] || continue
   # shellcheck disable=SC2016  # the single quotes are the point: these are
   # literal spellings to match in the token, not expansions to perform.
   case "${TOKENS[token_index]}" in
-    *'$@'* | *'${@'* | *'${'*'[@]'*'}'*) TOKEN_EXPANSION[token_index]="split" ;;
+    *'$@'* | *'${@'*) TOKEN_EXPANSION[token_index]="split" ;;
+    *) [[ "${TOKENS[token_index]}" =~ $ARRAY_AT_RE ]] && TOKEN_EXPANSION[token_index]="split" ;;
   esac
 done
 
@@ -152,15 +156,17 @@ while ((token_index < token_count)); do
   # A shell keyword introduces a command rather than being one, so the word after
   # it is still at a command start. Without this, `if git commit ...` and the
   # body of a `for ... do` loop are never recognised as git invocations at all.
+  # `{` is deliberately not in the list: it opens a function body as often as a
+  # group, and a definition executes nothing.
   if ((at_command_start)); then
     case "$current" in
-      if | then | elif | else | do | while | until | "!" | "{")
+      if | then | elif | else | do | while | until | "!")
         token_index=$((token_index + 1))
         continue
         ;;
     esac
   fi
-  if ((at_command_start)) && [[ "$current" == "command" ]]; then
+  if ((at_command_start)) && [[ "$current" == "command" || "$current" == "time" ]]; then
     command_prefix=1
     token_index=$((token_index + 1))
     continue
@@ -332,6 +338,9 @@ token_index=$((commit_index + 1))
 while ((token_index < token_count)); do
   current="${TOKENS[token_index]}"
   [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
+  # A token that can add words is as dangerous here as before the subcommand:
+  # it can introduce -a, which commits tracked files the index scan never saw.
+  [[ "${TOKEN_EXPANSION[token_index]-}" != split ]] || block_unparsed
   if [[ -n "$after_separator" ]]; then
     unsafe_value "$current" && block_unparsed
     [[ "$current" == *'*'* || "$current" == *'?'* || "$current" == *'['* ]] && block_unparsed
@@ -345,6 +354,9 @@ while ((token_index < token_count)); do
     -am | -ma) ALL_MODE=1; token_index=$((token_index + 1)) ;;
     -m | --message | -F | --file | -C | --reuse-message | -c | --reedit-message | --author | --date | --cleanup | --fixup | --squash | -t | --template | --trailer)
       ((token_index + 1 < token_count)) || block_unparsed
+      # Checked here rather than at the top of the loop, because consuming the
+      # value is exactly what stops it from being seen there.
+      [[ "${TOKEN_EXPANSION[token_index + 1]-}" != split ]] || block_unparsed
       token_index=$((token_index + 1))
       ;;
     --message=* | --file=* | --reuse-message=* | --reedit-message=* | --author=* | --date=* | --cleanup=* | --fixup=* | --squash=* | --template=* | --trailer=* | --untracked-files=* | --gpg-sign=*) ;;
