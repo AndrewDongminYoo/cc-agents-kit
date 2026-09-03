@@ -3,6 +3,23 @@
 All notable, user-facing changes to this kit are recorded here.
 Entries are grouped by release; the topmost section collects work that has not yet been tagged.
 
+## [Unreleased]
+
+### Fixed
+
+- `guard-hooks` 0.2.7 stops `staged-secret-guard` from blocking read-only git commands. A global option the parser could not resolve — a shell variable in `-C`, a `--no-pager` — refused the command before the subcommand was known, so `for d in */; do git -C "$d" log; done` was rejected as an unparsable commit. The verdict now waits until the subcommand is identified and fires only on a real `git commit`.
+- `staged-secret-guard` no longer assumes a git long option carries its value with `=`. git accepts the separate form, so `git --git-dir /repo/.git commit -m x` had its path read as the subcommand. The options recognised as taking no value are git's own list; anything else is refused rather than guessed at.
+- `staged-secret-guard` treats `"$@"` and `"${name[@]}"` as multiword. Quoted, they still emit one word per element, so `git -C "${args[@]}" log` could carry a `commit` the hook never saw. `"$*"` and `"${name[*]}"` join to a single word and stay allowed, and the array form is matched as `${...[@]...}`, which covers the modified spellings such as `${args[@]:0}` while leaving a path that merely contains those characters alone.
+- `staged-secret-guard` scans a commit behind the `time` reserved word, and refuses a commit option value that can expand to several words. `time git commit` went unscanned, and `git commit -m "${args[@]}"` could smuggle `-a`, which commits tracked files the index scan never sees. Both were true before this release.
+- `staged-secret-guard` recognises a git command that follows a shell keyword. `if git commit ...`, and any invocation in the body of a `for`/`while` loop, were treated as though the keyword were the command and went unscanned. Present before this release; found by replaying every git command in a local transcript archive against both versions. A brace is not treated as such a keyword, so defining a function whose body contains a commit is not itself refused.
+- `staged-secret-guard` now refuses a git subcommand that is itself a shell expansion. `git "$cmd" -m x` and `git "$(printf commit)" -m x` run a commit while the hook sees only the unexpanded word, so the staged diff went unscanned. This was true before this release as well, not a regression.
+- `staged-secret-guard` still refuses `-c` and `--config-env` in front of a subcommand it cannot identify, and now says so in its own message rather than reporting an unparsable commit. Command-scoped config can rename `commit` through an alias, either directly or through an include, and no reading of the config key separates the safe case from the dangerous one. `git -c core.pager=cat log` is refused for that reason; the same command without `-c` is not.
+
+### Changed
+
+- `repo-gate` `ci-babysit` names the zero-steps failure shape: a run that fails in seconds with an empty `steps` array is a billing or runner block upstream of the workflow, read from the run's annotation, not from a diff.
+- `repo-gate` `cspell-triage` warns that a local dictionary registered under a bundled dictionary's name silently masks the bundled one; check the name with `cspell trace` before registering it.
+
 ## [0.3.8] — 2026-08-31
 
 The output side of secret handling: the guards already refused to read or commit a credential; this release masks one that a command prints.

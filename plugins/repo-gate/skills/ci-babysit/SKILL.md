@@ -89,6 +89,11 @@ Log inspection is read-only and is allowed in both authority modes.
 | Environmental | runner outage, flaky network, cache corruption                                    | Rerun once only with explicit rerun authority, then escalate. |
 | Logic         | failing assertions, type errors, broken behavior                                  | Stop and report — do not auto-patch test expectations  |
 
+**A run that fails in seconds with an empty `steps` array has not run.**
+`gh api repos/{owner}/{repo}/actions/runs/<id>/jobs` shows `steps: []`, `--log-failed` answers `log not found` because no log exists, and the annotation on `gh run view <id>` names the cause (for example "recent account payments have failed or your spending limit needs to be increased").
+That is a billing or runner block upstream of the workflow — Environmental, never Logic — and it can hold for days across every job in the repository (party-os 2026-07-23 → 07-30, blog-donminzzi-kr 2026-08-25 → 08-31, react-native-receipt-scanner from 2026-07-25).
+Read the annotation before diagnosing a diff that is fine, and treat anything merged through such a window as not CI-verified.
+
 A rerun changes remote state.
 Run `gh run rerun <run-id> --failed` only when the current request or an approved plan explicitly authorizes a rerun.
 

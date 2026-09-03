@@ -24,6 +24,13 @@ block_unparsed() {
   exit 2
 }
 
+# Separate message: the command above is usually not a commit at all, and the
+# parse advice would send the reader looking for one that is not there.
+block_config_override() {
+  echo "Blocked: this command sets git configuration with -c or --config-env before a subcommand this hook cannot identify. Command-scoped config can rename commit through an alias, directly or through an include, so the staged diff cannot be cleared. Drop the -c override, or name the subcommand's real work in a separate command." >&2
+  exit 2
+}
+
 unsafe_value() {
   [[ "$1" == *'$'* || "$1" == *'`'* || "$1" == *'<'* || "$1" == *'>'* ]]
 }
@@ -36,6 +43,13 @@ token=""
 quote=""
 escaped=""
 token_started=""
+# What kind of expansion the token being built carries: "" for none, "quoted"
+# for one that cannot add words, "split" for one outside quotes that can. Both
+# matter and they matter in different places -- "$x" is a single argument but
+# can still BE the subcommand, while $x can also carry extra words after it. An
+# escaped \$ and a '$x' in single quotes expand to nothing and stay empty.
+token_expansion=""
+TOKEN_EXPANSION=()
 TOKENIZATION_ERROR=""
 BOUNDARY_PREFIX=$'\034'
 command_len=${#COMMAND}
@@ -57,29 +71,66 @@ while ((command_pos < command_len)); do
       escaped=1
     else
       token="$token$char"
+      if [[ "$char" == '$' || "$char" == '`' ]] && [[ -z "$token_expansion" ]]; then
+        token_expansion="quoted"
+      fi
     fi
   else
     case "$char" in
       "'" | '"') quote="$char"; token_started=1 ;;
       "\\") escaped=1 ;;
       " " | $'\t')
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
         ;;
       $'\n')
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
         TOKENS+=("$BOUNDARY_PREFIX;")
+        TOKEN_EXPANSION+=("")
         ;;
       ";" | "|" | "&" | "(" | ")")
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
         TOKENS+=("$BOUNDARY_PREFIX$char")
+        TOKEN_EXPANSION+=("")
         ;;
-      *) token="$token$char"; token_started=1 ;;
+      *)
+        token="$token$char"
+        token_started=1
+        # Unquoted wins over a quoted expansion seen earlier in the token:
+        # "$base"$d splits, however the first half was written.
+        [[ "$char" == '$' || "$char" == '`' ]] && token_expansion="split"
+        ;;
     esac
   fi
   ((command_pos += 1))
 done
 [[ -z "$quote" && -z "$escaped" ]] || TOKENIZATION_ERROR=1
-[[ -z "$token_started" ]] || TOKENS+=("$token")
+if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); fi
+
+# "quoted" was shorthand for "one word", and for two forms that is wrong: "$@"
+# and "${name[@]}" emit one word per element even inside quotes, so
+# `args=(/repo commit -m x --); git -C "${args[@]}" log` really runs a commit.
+# "$*" and "${name[*]}" do join to a single word and stay as they are. Upgrading
+# here rather than mid-tokenizer keeps it one pass over finished tokens, where
+# the whole form is visible instead of one character at a time.
+#
+# The array form has to be matched as ${...[@]...}, and inside ONE expansion. A
+# bare [@] also appears in ordinary paths, so "$root/project[@]" was refused;
+# requiring [@] immediately before the closing brace then missed every modified
+# form, since "${args[@]:0}", "${args[@]%x}" and "${args[@]/a/b}" still emit one
+# word per element; and a glob anchored on ${ and } separately took its opening
+# brace from one expansion and its closing brace from a later one, refusing
+# "$root/${x}dir[@]${suffix}". The regex says what all three attempts meant: a
+# [@] reached from a ${ without passing a } on the way.
+ARRAY_AT_RE='\$\{[^}]*\[@\]'
+for ((token_index = 0; token_index < ${#TOKENS[@]}; token_index++)); do
+  [[ "${TOKEN_EXPANSION[token_index]-}" == "quoted" ]] || continue
+  # shellcheck disable=SC2016  # the single quotes are the point: these are
+  # literal spellings to match in the token, not expansions to perform.
+  case "${TOKENS[token_index]}" in
+    *'$@'* | *'${@'*) TOKEN_EXPANSION[token_index]="split" ;;
+    *) [[ "${TOKENS[token_index]}" =~ $ARRAY_AT_RE ]] && TOKEN_EXPANSION[token_index]="split" ;;
+  esac
+done
 
 REPO_ARGS=()
 commit_index=-1
@@ -102,7 +153,20 @@ while ((token_index < token_count)); do
     token_index=$((token_index + 1))
     continue
   fi
-  if ((at_command_start)) && [[ "$current" == "command" ]]; then
+  # A shell keyword introduces a command rather than being one, so the word after
+  # it is still at a command start. Without this, `if git commit ...` and the
+  # body of a `for ... do` loop are never recognised as git invocations at all.
+  # `{` is deliberately not in the list: it opens a function body as often as a
+  # group, and a definition executes nothing.
+  if ((at_command_start)); then
+    case "$current" in
+      if | then | elif | else | do | while | until | "!")
+        token_index=$((token_index + 1))
+        continue
+        ;;
+    esac
+  fi
+  if ((at_command_start)) && [[ "$current" == "command" || "$current" == "time" ]]; then
     command_prefix=1
     token_index=$((token_index + 1))
     continue
@@ -144,23 +208,83 @@ while ((token_index < token_count)); do
   if ((at_command_start)) && [[ "$current" == "git" || "$current" == */git ]]; then
     scan_index=$((token_index + 1))
     candidate_repo_args=()
+    # A global option this parser cannot resolve (-c, --no-pager, a -C value
+    # with shell syntax) is only a problem when the subcommand turns out to be
+    # `commit`. Defer the verdict: remember it, keep scanning for `commit`, and
+    # let `git -C "$d" log` / `git --no-pager log` through untouched.
+    pending_block=""
+    config_override=""
+    split_risk=""
+    opaque_option=""
+    scanned_past_commit=1
     while ((scan_index < token_count)); do
       current="${TOKENS[scan_index]}"
+      [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
+      # One splittable token anywhere ahead of the subcommand is enough: the
+      # words it expands to are git's arguments and never reach this parser, so
+      # nothing read after it can be trusted to be the subcommand.
+      [[ "${TOKEN_EXPANSION[scan_index]-}" != split ]] || split_risk=1
       case "$current" in
         -C)
-          ((scan_index + 1 < token_count)) || block_unparsed
-          unsafe_value "${TOKENS[scan_index + 1]}" && block_unparsed
-          candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
-          scan_index=$((scan_index + 2))
+          if ((scan_index + 1 < token_count)) && [[ "${TOKENS[scan_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
+            unsafe_value "${TOKENS[scan_index + 1]}" && pending_block=1
+            [[ "${TOKEN_EXPANSION[scan_index + 1]-}" != split ]] || split_risk=1
+            candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
+            scan_index=$((scan_index + 2))
+          else
+            pending_block=1
+            scan_index=$((scan_index + 1))
+          fi
           ;;
         -C?*)
-          unsafe_value "${current:2}" && block_unparsed
+          unsafe_value "${current:2}" && pending_block=1
           candidate_repo_args+=("${current:0:2}" "${current:2}")
           scan_index=$((scan_index + 1))
           ;;
-        -c | -c?*) block_unparsed ;;
         --version) break ;;
+        # `git --help` lists exactly two global options that take a separate
+        # value token: -C <path> and -c <name>=<value>. Every other long option
+        # carries its value with `=`. Consuming -c's value is what keeps the
+        # subcommand search honest: without it, `core.pager=cat` looks like the
+        # subcommand and the scan runs on into the subcommand's own arguments.
+        -c)
+          pending_block=1
+          config_override=1
+          scan_index=$((scan_index + 2))
+          ;;
+        -c?* | --config-env*)
+          pending_block=1
+          config_override=1
+          scan_index=$((scan_index + 1))
+          ;;
+        # The global options that take no value, from git's own synopsis. Naming
+        # the flags rather than the value-takers is the direction that fails
+        # safe: an option git adds later is unrecognised, and unrecognised means
+        # refuse rather than mistake its value for the subcommand.
+        -p | -P | --paginate | --no-pager | --bare | --exec-path | --html-path \
+          | --man-path | --info-path | --no-replace-objects | --no-lazy-fetch \
+          | --no-optional-locks | --no-advice | --literal-pathspecs \
+          | --no-literal-pathspecs | --glob-pathspecs | --noglob-pathspecs \
+          | --icase-pathspecs | --no-icase-pathspecs)
+          pending_block=1
+          scan_index=$((scan_index + 1))
+          ;;
+        --*=*)
+          # The value rides along with the =, so nothing extra is consumed.
+          pending_block=1
+          scan_index=$((scan_index + 1))
+          ;;
+        --*)
+          # Unrecognised and without an =, so the next token may be its value.
+          # `git --git-dir /repo/.git commit -m x` is accepted by git and would
+          # otherwise read /repo/.git as the subcommand.
+          pending_block=1
+          opaque_option=1
+          scan_index=$((scan_index + 1))
+          ;;
         commit)
+          [[ -z "$pending_block" ]] || block_unparsed
+          scanned_past_commit=""
           ((commit_count += 1))
           if ((commit_count == 1)); then
             commit_index=$scan_index
@@ -170,10 +294,35 @@ while ((token_index < token_count)); do
           fi
           break
           ;;
-        --*) block_unparsed ;;
-        *) break ;;
+        *)
+          # The first token that is not a global option is the subcommand -- if
+          # it is a literal. An expansion here resolves to a word this hook
+          # cannot see, and `git "$cmd" -m x` with cmd=commit is a commit, so it
+          # is refused whether or not it could also split. main has this hole
+          # too; it is closed here because this branch owns the question of when
+          # the scan may trust a token.
+          [[ -z "${TOKEN_EXPANSION[scan_index]-}" ]] || block_unparsed
+          # Scanning past it would read its own arguments, where a value such as
+          # `--grep commit` is a search term rather than an invocation.
+          #
+          # Unless command-scoped config was set: then this token's expansion is
+          # unknown and could be commit. Deciding that from the config key loses
+          # a race it cannot win — `alias.ci=commit` is the obvious spelling,
+          # `include.path` and `includeIf.*.path` reach the same place through a
+          # file, and the next key is one review away. So -c before an
+          # unidentified subcommand is refused whatever it sets.
+          break
+          ;;
       esac
     done
+    # Reached without identifying a commit. Command-scoped config could rename
+    # one, and an unquoted expansion could carry one in words this parser never
+    # saw, so neither may end the scan quietly.
+    if [[ -n "$scanned_past_commit" ]]; then
+      [[ -z "$config_override" ]] || block_config_override
+      [[ -z "$split_risk" ]] || block_unparsed
+      [[ -z "$opaque_option" ]] || block_unparsed
+    fi
   fi
   at_command_start=0
   token_index=$((token_index + 1))
@@ -189,6 +338,9 @@ token_index=$((commit_index + 1))
 while ((token_index < token_count)); do
   current="${TOKENS[token_index]}"
   [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
+  # A token that can add words is as dangerous here as before the subcommand:
+  # it can introduce -a, which commits tracked files the index scan never saw.
+  [[ "${TOKEN_EXPANSION[token_index]-}" != split ]] || block_unparsed
   if [[ -n "$after_separator" ]]; then
     unsafe_value "$current" && block_unparsed
     [[ "$current" == *'*'* || "$current" == *'?'* || "$current" == *'['* ]] && block_unparsed
@@ -202,6 +354,9 @@ while ((token_index < token_count)); do
     -am | -ma) ALL_MODE=1; token_index=$((token_index + 1)) ;;
     -m | --message | -F | --file | -C | --reuse-message | -c | --reedit-message | --author | --date | --cleanup | --fixup | --squash | -t | --template | --trailer)
       ((token_index + 1 < token_count)) || block_unparsed
+      # Checked here rather than at the top of the loop, because consuming the
+      # value is exactly what stops it from being seen there.
+      [[ "${TOKEN_EXPANSION[token_index + 1]-}" != split ]] || block_unparsed
       token_index=$((token_index + 1))
       ;;
     --message=* | --file=* | --reuse-message=* | --reedit-message=* | --author=* | --date=* | --cleanup=* | --fixup=* | --squash=* | --template=* | --trailer=* | --untracked-files=* | --gpg-sign=*) ;;

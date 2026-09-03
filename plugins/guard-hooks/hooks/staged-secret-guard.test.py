@@ -127,9 +127,81 @@ for label, command in (
     ("git help commit", "git help commit"),
     ("git version", "git --version"),
     ("quoted operator before git commit words", 'echo "|" git commit -m x'),
+    # Global options before a non-commit subcommand used to trip block_unparsed
+    # (2026-09-03: a `git -C "$d" log` loop was blocked as an unparsable commit).
+    ("git log with a quoted shell-variable -C", 'git -C "$d" log --oneline -1'),
+    ("git log with a fully quoted composite -C", 'git -C "$base/$d" log -1'),
+    ("git log with an escaped dollar in -C", 'git -C /tmp/\\$lit log -1'),
+    # "$*" and "${name[*]}" join to one word, so they stay allowed.
+    ("quoted star expansion is one word", 'git -C "${arr[*]}" log -1'),
+    # [@] is three ordinary characters in a path; only ${...[@]} is an array.
+    ("literal bracket-at in a quoted path", 'git -C "$root/project[@]" log -1'),
+    ("braced scalar then a literal bracket-at", 'git -C "$root/${x}dir[@]" log -1'),
+    # The braces come from two different expansions, so no array is involved.
+    ("bracket-at between two expansions", 'git -C "$root/${x}dir[@]${suffix}" log'),
+    # Defining a function executes nothing.
+    ("a function definition containing a commit", 'f() { git commit -m x; }'),
+    ("git log with an unparsed --option", "git --no-pager log -1"),
+    ("git log behind a long option carrying its own value", "git --git-dir=/repo/.git log -1"),
+    ("git log behind a pathspec flag", "git --literal-pathspecs log -1"),
+    # A subcommand argument whose value is the word commit is a search term, not
+    # an invocation; the scan must stop at the subcommand to tell them apart.
+    ("commit as a --grep value", "git --no-pager log --grep commit"),
+    ("commit inside a pathspec", "git --no-pager diff -- README.commit"),
+    ("git log inside command substitution", 'c=$(git -C "$HOME/x" log --since=30.days --oneline); echo "$c"'),
 ):
     rc, _ = check_hook(command, d)
     check(f"ignores {label}", rc == 0, f"exit={rc}")
+
+# The same unparsed options still block once the subcommand is a real commit.
+for label, command in (
+    ("shell-variable -C before commit", 'git -C "$d" commit -m x'),
+    ("unparsed --option before commit", "git --no-pager commit -m x"),
+    ("-c config before commit", "git -c core.pager=cat commit -m x"),
+    ("-c with its value before commit", "git -c x=y commit -m x"),
+    # A command-scoped alias can rename commit, and its expansion is invisible
+    # here, so an unknown subcommand behind one has to be refused.
+    ("commit behind a command-scoped alias", "git -c alias.ci=commit ci -m x"),
+    ("alias config with an unrelated subcommand", "git -c alias.st=status st"),
+    ("config-env, whose value cannot be read", "git --config-env=alias.ci=E ci"),
+    # An include reaches an alias through a file, so reading the config key is
+    # not a way to tell a safe -c from a dangerous one.
+    ("alias reachable through an include", "git -c include.path=/tmp/a ci -m x"),
+    # The cost of that: -c in front of a subcommand this hook cannot identify is
+    # refused even when it only sets a pager.
+    ("plain -c before a read-only subcommand", "git -c core.pager=cat log -1"),
+    # Unquoted, the value word-splits and the later words are git's own
+    # arguments, so a commit can ride in behind an apparently read-only verb.
+    ("unquoted -C expansion before a read-only subcommand", "git -C $d log"),
+    ("unquoted attached -C expansion", "git -C$d log"),
+    # Quoted on one half only: the unquoted half still splits, so "looks
+    # quoted" is not the test — an expansion outside quotes is.
+    ("partly quoted -C expansion", 'git -C "$base"$d log'),
+    ("command substitution outside quotes", "git -C $(pwd) log"),
+    # Any splittable token ahead of the subcommand does it, not just a -C value.
+    ("unquoted expansion as the option itself", "git --$opts log"),
+    ("unquoted expansion between options", "git --no-pager $flags log"),
+    # A quoted expansion adds no words but can still be the subcommand itself.
+    ("quoted expansion as the subcommand", 'git "$cmd" -m x'),
+    ("command substitution as the subcommand", 'git "$(printf commit)" -m x'),
+    ("unquoted expansion as the subcommand", "git $cmd -m x"),
+    # Quoted, and still several words: one per element.
+    ("quoted array expansion", 'args=(/repo commit -m x --); git -C "${args[@]}" log'),
+    # Every modified form still expands to one word per element.
+    ("array expansion with an offset", 'args=(/repo commit -m x --); git -C "${args[@]:0}" log'),
+    ("array expansion with suffix removal", 'args=(/repo commit -m x --); git -C "${args[@]%x}" log'),
+    ("array expansion with a replacement", 'args=(/repo commit -m x --); git -C "${args[@]/a/b}" log'),
+    ("array indices expansion", 'args=(/repo commit -m x --); git -C "${!args[@]}" log'),
+    ("quoted positional parameters", 'git -C "$@" log'),
+    ("quoted braced positional parameters", 'git -C "${@}" log'),
+    # git accepts a separate value for its long options, verified against the
+    # binary for --git-dir, --work-tree and --namespace, so the token after an
+    # unrecognised one is not necessarily the subcommand.
+    ("long option with a separate value then commit", "git --git-dir /repo/.git commit -m x"),
+    ("long option with a separate value then a read-only verb", "git --work-tree /repo log"),
+):
+    rc, _ = check_hook(command, d)
+    check(f"blocks {label}", rc == 2, f"exit={rc}")
 
 # An unparseable quote blocks only after the full token stream has located an
 # actual git commit invocation, including a shell builtin prefix or a later line.
@@ -148,6 +220,15 @@ check("line-continuation commit scans the staged credential", rc == 2, f"exit={r
 
 for label, command in (
     ("env prefix", "env git commit -m x"),
+    # A keyword introduces the command; the git after it is still a command.
+    ("commit after an if keyword", "if git commit -m x; then echo ok; fi"),
+    ("commit inside a for body", "for d in a b; do git -C \"$d\" commit -m x; done"),
+    ("commit after then", "if true; then git commit -m x; fi"),
+    ("commit after a negation", "! git commit -m x"),
+    ("commit behind the time keyword", "time git commit -m x"),
+    ("commit behind time -p", "time -p git commit -m x"),
+    # A value that can add words can add -a, which commits unstaged tracked files.
+    ("multiword expansion as a commit option value", 'args=(msg -a); git commit -m "${args[@]}"'),
     ("absolute env prefix", "/usr/bin/env git commit -m x"),
     ("env -i prefix", "env -i git commit -m x"),
     ("env --ignore-environment prefix", "env --ignore-environment git commit -m x"),
