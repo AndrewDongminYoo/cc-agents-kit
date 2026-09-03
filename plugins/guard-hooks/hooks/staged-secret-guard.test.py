@@ -132,6 +132,8 @@ for label, command in (
     ("git log with a quoted shell-variable -C", 'git -C "$d" log --oneline -1'),
     ("git log with a fully quoted composite -C", 'git -C "$base/$d" log -1'),
     ("git log with an escaped dollar in -C", 'git -C /tmp/\\$lit log -1'),
+    # "$*" and "${name[*]}" join to one word, so they stay allowed.
+    ("quoted star expansion is one word", 'git -C "${arr[*]}" log -1'),
     ("git log with an unparsed --option", "git --no-pager log -1"),
     # A subcommand argument whose value is the word commit is a search term, not
     # an invocation; the scan must stop at the subcommand to tell them apart.
@@ -174,6 +176,10 @@ for label, command in (
     ("quoted expansion as the subcommand", 'git "$cmd" -m x'),
     ("command substitution as the subcommand", 'git "$(printf commit)" -m x'),
     ("unquoted expansion as the subcommand", "git $cmd -m x"),
+    # Quoted, and still several words: one per element.
+    ("quoted array expansion", 'args=(/repo commit -m x --); git -C "${args[@]}" log'),
+    ("quoted positional parameters", 'git -C "$@" log'),
+    ("quoted braced positional parameters", 'git -C "${@}" log'),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")

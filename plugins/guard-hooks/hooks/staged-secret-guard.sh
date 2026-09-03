@@ -106,6 +106,21 @@ done
 [[ -z "$quote" && -z "$escaped" ]] || TOKENIZATION_ERROR=1
 if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); fi
 
+# "quoted" was shorthand for "one word", and for two forms that is wrong: "$@"
+# and "${name[@]}" emit one word per element even inside quotes, so
+# `args=(/repo commit -m x --); git -C "${args[@]}" log` really runs a commit.
+# "$*" and "${name[*]}" do join to a single word and stay as they are. Upgrading
+# here rather than mid-tokenizer keeps it one pass over finished tokens, where
+# the whole form is visible instead of one character at a time.
+for ((token_index = 0; token_index < ${#TOKENS[@]}; token_index++)); do
+  [[ "${TOKEN_EXPANSION[token_index]-}" == "quoted" ]] || continue
+  # shellcheck disable=SC2016  # the single quotes are the point: these are
+  # literal spellings to match in the token, not expansions to perform.
+  case "${TOKENS[token_index]}" in
+    *'$@'* | *'${@'* | *'[@]'*) TOKEN_EXPANSION[token_index]="split" ;;
+  esac
+done
+
 REPO_ARGS=()
 commit_index=-1
 commit_count=0
