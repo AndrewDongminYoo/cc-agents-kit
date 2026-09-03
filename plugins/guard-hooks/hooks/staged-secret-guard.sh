@@ -43,6 +43,11 @@ token=""
 quote=""
 escaped=""
 token_started=""
+# Whether the token being built had any quoted part. An unquoted $x word-splits
+# under bash, so the words after the first belong to git, not to the option that
+# appears to carry them; a quoted "$x" is always one argument.
+token_quoted=""
+TOKEN_QUOTED=()
 TOKENIZATION_ERROR=""
 BOUNDARY_PREFIX=$'\034'
 command_len=${#COMMAND}
@@ -67,18 +72,20 @@ while ((command_pos < command_len)); do
     fi
   else
     case "$char" in
-      "'" | '"') quote="$char"; token_started=1 ;;
+      "'" | '"') quote="$char"; token_started=1; token_quoted=1 ;;
       "\\") escaped=1 ;;
       " " | $'\t')
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_QUOTED+=("$token_quoted"); token=""; token_started=""; token_quoted=""; fi
         ;;
       $'\n')
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_QUOTED+=("$token_quoted"); token=""; token_started=""; token_quoted=""; fi
         TOKENS+=("$BOUNDARY_PREFIX;")
+        TOKEN_QUOTED+=("")
         ;;
       ";" | "|" | "&" | "(" | ")")
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); token=""; token_started=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_QUOTED+=("$token_quoted"); token=""; token_started=""; token_quoted=""; fi
         TOKENS+=("$BOUNDARY_PREFIX$char")
+        TOKEN_QUOTED+=("")
         ;;
       *) token="$token$char"; token_started=1 ;;
     esac
@@ -86,7 +93,7 @@ while ((command_pos < command_len)); do
   ((command_pos += 1))
 done
 [[ -z "$quote" && -z "$escaped" ]] || TOKENIZATION_ERROR=1
-[[ -z "$token_started" ]] || TOKENS+=("$token")
+if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_QUOTED+=("$token_quoted"); fi
 
 REPO_ARGS=()
 commit_index=-1
@@ -157,13 +164,20 @@ while ((token_index < token_count)); do
     # let `git -C "$d" log` / `git --no-pager log` through untouched.
     pending_block=""
     config_override=""
+    split_risk=""
     while ((scan_index < token_count)); do
       current="${TOKENS[scan_index]}"
       [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
       case "$current" in
         -C)
           if ((scan_index + 1 < token_count)) && [[ "${TOKENS[scan_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
-            unsafe_value "${TOKENS[scan_index + 1]}" && pending_block=1
+            if unsafe_value "${TOKENS[scan_index + 1]}"; then
+              pending_block=1
+              # `git -C $d log` with d='/repo commit -m x --' really runs a
+              # commit, because the unquoted value splits into further words
+              # that this parser never sees. Quoted, it cannot.
+              [[ -n "${TOKEN_QUOTED[scan_index + 1]-}" ]] || split_risk=1
+            fi
             candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
             scan_index=$((scan_index + 2))
           else
@@ -172,7 +186,10 @@ while ((token_index < token_count)); do
           fi
           ;;
         -C?*)
-          unsafe_value "${current:2}" && pending_block=1
+          if unsafe_value "${current:2}"; then
+            pending_block=1
+            [[ -n "${TOKEN_QUOTED[scan_index]-}" ]] || split_risk=1
+          fi
           candidate_repo_args+=("${current:0:2}" "${current:2}")
           scan_index=$((scan_index + 1))
           ;;
@@ -219,6 +236,9 @@ while ((token_index < token_count)); do
           # file, and the next key is one review away. So -c before an
           # unidentified subcommand is refused whatever it sets.
           [[ -z "$config_override" ]] || block_config_override
+          # An unquoted expansion may have carried the real subcommand with it,
+          # so what looks like the subcommand here proves nothing.
+          [[ -z "$split_risk" ]] || block_unparsed
           break
           ;;
       esac

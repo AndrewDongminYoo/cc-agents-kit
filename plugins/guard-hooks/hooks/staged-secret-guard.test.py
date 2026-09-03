@@ -129,7 +129,7 @@ for label, command in (
     ("quoted operator before git commit words", 'echo "|" git commit -m x'),
     # Global options before a non-commit subcommand used to trip block_unparsed
     # (2026-09-03: a `git -C "$d" log` loop was blocked as an unparsable commit).
-    ("git log with a shell-variable -C", 'git -C "$d" log --oneline -1'),
+    ("git log with a quoted shell-variable -C", 'git -C "$d" log --oneline -1'),
     ("git log with an unparsed --option", "git --no-pager log -1"),
     # A subcommand argument whose value is the word commit is a search term, not
     # an invocation; the scan must stop at the subcommand to tell them apart.
@@ -157,6 +157,10 @@ for label, command in (
     # The cost of that: -c in front of a subcommand this hook cannot identify is
     # refused even when it only sets a pager.
     ("plain -c before a read-only subcommand", "git -c core.pager=cat log -1"),
+    # Unquoted, the value word-splits and the later words are git's own
+    # arguments, so a commit can ride in behind an apparently read-only verb.
+    ("unquoted -C expansion before a read-only subcommand", "git -C $d log"),
+    ("unquoted attached -C expansion", "git -C$d log"),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")
