@@ -90,7 +90,7 @@ A language dictionary left to its own `languageId` activation only covers its ow
 
 **A local dictionary must not take a bundled dictionary's name.**
 A `.cspell/flutter.txt` registered as `flutter` masks cspell's own `flutter` dictionary: the bundled one appears enabled and the local file appears to do the work, and neither is true.
-Name local lists something that cannot collide (`project_terms`, `shared_software_terms`) and check a candidate name against the bundled set with `cspell trace <word>` before registering it (wellness_visualizer_demo, 2026-08-19).
+Name local lists something that cannot collide (`project_terms`, `shared_software_terms`) and check a candidate name against the bundled set with `cspell dictionaries` before registering it (wellness_visualizer_demo, 2026-08-19).
 
 Verify a specific word rather than guessing:
 
