@@ -43,13 +43,13 @@ token=""
 quote=""
 escaped=""
 token_started=""
-# Whether the token being built carries an expansion that sits outside quotes.
-# That is the property deciding word splitting, and nothing weaker survives:
-# "$x" is one argument, $x splits, and "$base"$d splits on its second half while
-# looking quoted. Only a $ or backtick read in the unquoted branch sets this, so
-# an escaped \$ and a '$x' in single quotes stay literal.
-token_splittable=""
-TOKEN_SPLITTABLE=()
+# What kind of expansion the token being built carries: "" for none, "quoted"
+# for one that cannot add words, "split" for one outside quotes that can. Both
+# matter and they matter in different places -- "$x" is a single argument but
+# can still BE the subcommand, while $x can also carry extra words after it. An
+# escaped \$ and a '$x' in single quotes expand to nothing and stay empty.
+token_expansion=""
+TOKEN_EXPANSION=()
 TOKENIZATION_ERROR=""
 BOUNDARY_PREFIX=$'\034'
 command_len=${#COMMAND}
@@ -71,35 +71,40 @@ while ((command_pos < command_len)); do
       escaped=1
     else
       token="$token$char"
+      if [[ "$char" == '$' || "$char" == '`' ]] && [[ -z "$token_expansion" ]]; then
+        token_expansion="quoted"
+      fi
     fi
   else
     case "$char" in
       "'" | '"') quote="$char"; token_started=1 ;;
       "\\") escaped=1 ;;
       " " | $'\t')
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_SPLITTABLE+=("$token_splittable"); token=""; token_started=""; token_splittable=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
         ;;
       $'\n')
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_SPLITTABLE+=("$token_splittable"); token=""; token_started=""; token_splittable=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
         TOKENS+=("$BOUNDARY_PREFIX;")
-        TOKEN_SPLITTABLE+=("")
+        TOKEN_EXPANSION+=("")
         ;;
       ";" | "|" | "&" | "(" | ")")
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_SPLITTABLE+=("$token_splittable"); token=""; token_started=""; token_splittable=""; fi
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
         TOKENS+=("$BOUNDARY_PREFIX$char")
-        TOKEN_SPLITTABLE+=("")
+        TOKEN_EXPANSION+=("")
         ;;
       *)
         token="$token$char"
         token_started=1
-        [[ "$char" == '$' || "$char" == '`' ]] && token_splittable=1
+        # Unquoted wins over a quoted expansion seen earlier in the token:
+        # "$base"$d splits, however the first half was written.
+        [[ "$char" == '$' || "$char" == '`' ]] && token_expansion="split"
         ;;
     esac
   fi
   ((command_pos += 1))
 done
 [[ -z "$quote" && -z "$escaped" ]] || TOKENIZATION_ERROR=1
-if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_SPLITTABLE+=("$token_splittable"); fi
+if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); fi
 
 REPO_ARGS=()
 commit_index=-1
@@ -178,12 +183,12 @@ while ((token_index < token_count)); do
       # One splittable token anywhere ahead of the subcommand is enough: the
       # words it expands to are git's arguments and never reach this parser, so
       # nothing read after it can be trusted to be the subcommand.
-      [[ -z "${TOKEN_SPLITTABLE[scan_index]-}" ]] || split_risk=1
+      [[ "${TOKEN_EXPANSION[scan_index]-}" != split ]] || split_risk=1
       case "$current" in
         -C)
           if ((scan_index + 1 < token_count)) && [[ "${TOKENS[scan_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
             unsafe_value "${TOKENS[scan_index + 1]}" && pending_block=1
-            [[ -z "${TOKEN_SPLITTABLE[scan_index + 1]-}" ]] || split_risk=1
+            [[ "${TOKEN_EXPANSION[scan_index + 1]-}" != split ]] || split_risk=1
             candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
             scan_index=$((scan_index + 2))
           else
@@ -229,7 +234,13 @@ while ((token_index < token_count)); do
           break
           ;;
         *)
-          # The first token that is not a global option is the subcommand.
+          # The first token that is not a global option is the subcommand -- if
+          # it is a literal. An expansion here resolves to a word this hook
+          # cannot see, and `git "$cmd" -m x` with cmd=commit is a commit, so it
+          # is refused whether or not it could also split. main has this hole
+          # too; it is closed here because this branch owns the question of when
+          # the scan may trust a token.
+          [[ -z "${TOKEN_EXPANSION[scan_index]-}" ]] || block_unparsed
           # Scanning past it would read its own arguments, where a value such as
           # `--grep commit` is a search term rather than an invocation.
           #

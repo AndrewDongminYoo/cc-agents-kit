@@ -170,6 +170,10 @@ for label, command in (
     # Any splittable token ahead of the subcommand does it, not just a -C value.
     ("unquoted expansion as the option itself", "git --$opts log"),
     ("unquoted expansion between options", "git --no-pager $flags log"),
+    # A quoted expansion adds no words but can still be the subcommand itself.
+    ("quoted expansion as the subcommand", 'git "$cmd" -m x'),
+    ("command substitution as the subcommand", 'git "$(printf commit)" -m x'),
+    ("unquoted expansion as the subcommand", "git $cmd -m x"),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")
