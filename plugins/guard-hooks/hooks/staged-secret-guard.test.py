@@ -132,6 +132,11 @@ for label, command in (
     ("git log with a shell-variable -C", 'git -C "$d" log --oneline -1'),
     ("git log with an unparsed --option", "git --no-pager log -1"),
     ("git log with -c config", "git -c core.pager=cat log -1"),
+    # A subcommand argument whose value is the word commit is a search term, not
+    # an invocation; the scan must stop at the subcommand to tell them apart.
+    ("commit as a --grep value", "git --no-pager log --grep commit"),
+    ("commit as a --format value", "git -c core.pager=cat log --format commit"),
+    ("commit inside a pathspec", "git --no-pager diff -- README.commit"),
     ("git log inside command substitution", 'c=$(git -C "$HOME/x" log --since=30.days --oneline); echo "$c"'),
 ):
     rc, _ = check_hook(command, d)
@@ -142,7 +147,7 @@ for label, command in (
     ("shell-variable -C before commit", 'git -C "$d" commit -m x'),
     ("unparsed --option before commit", "git --no-pager commit -m x"),
     ("-c config before commit", "git -c core.pager=cat commit -m x"),
-    ("-c value swallowed as subcommand before commit", "git -c x=y commit -m x"),
+    ("-c with its value before commit", "git -c x=y commit -m x"),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")

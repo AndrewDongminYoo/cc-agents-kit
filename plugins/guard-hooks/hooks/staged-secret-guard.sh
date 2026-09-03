@@ -169,7 +169,16 @@ while ((token_index < token_count)); do
           scan_index=$((scan_index + 1))
           ;;
         --version) break ;;
-        -c | -c?* | --*)
+        # `git --help` lists exactly two global options that take a separate
+        # value token: -C <path> and -c <name>=<value>. Every other long option
+        # carries its value with `=`. Consuming -c's value is what keeps the
+        # subcommand search honest: without it, `core.pager=cat` looks like the
+        # subcommand and the scan runs on into the subcommand's own arguments.
+        -c)
+          pending_block=1
+          scan_index=$((scan_index + 2))
+          ;;
+        -c?* | --*)
           pending_block=1
           scan_index=$((scan_index + 1))
           ;;
@@ -185,11 +194,11 @@ while ((token_index < token_count)); do
           break
           ;;
         *)
-          # Some other subcommand. With nothing pending there is nothing to
-          # scan; with a pending unparsed option keep looking, so that
-          # `git -c x=y commit` (value consumed as a subcommand) still blocks.
-          [[ -n "$pending_block" ]] || break
-          scan_index=$((scan_index + 1))
+          # The first token that is not a global option is the subcommand. It is
+          # not `commit`, so stop: scanning on would read the subcommand's own
+          # arguments, where a value such as `--grep commit` is a search term,
+          # not an invocation.
+          break
           ;;
       esac
     done
