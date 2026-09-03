@@ -19,6 +19,14 @@ HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
 COMMAND=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 [[ -z "$COMMAND" ]] && exit 0
 
+# A command-scoped `-c alias.<name>=<subcommand>` can make any subcommand a
+# commit, and the expansion is not visible from the command line alone. Written
+# as a bracket expression rather than ${var,,} so it also runs under the
+# /bin/bash 3.2 that ships with macOS.
+defines_alias() {
+  [[ "$1" == [aA][lL][iI][aA][sS].* ]]
+}
+
 block_unparsed() {
   echo "Blocked: could not safely parse this git commit command. Run a single git commit with explicit, conventionally quoted arguments so the effective commit candidate can be scanned." >&2
   exit 2
@@ -149,6 +157,7 @@ while ((token_index < token_count)); do
     # `commit`. Defer the verdict: remember it, keep scanning for `commit`, and
     # let `git -C "$d" log` / `git --no-pager log` through untouched.
     pending_block=""
+    alias_config=""
     while ((scan_index < token_count)); do
       current="${TOKENS[scan_index]}"
       [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
@@ -176,9 +185,22 @@ while ((token_index < token_count)); do
         # subcommand and the scan runs on into the subcommand's own arguments.
         -c)
           pending_block=1
+          defines_alias "${TOKENS[scan_index + 1]-}" && alias_config=1
           scan_index=$((scan_index + 2))
           ;;
-        -c?* | --*)
+        -c?*)
+          pending_block=1
+          defines_alias "${current:2}" && alias_config=1
+          scan_index=$((scan_index + 1))
+          ;;
+        --config-env*)
+          # The value names an environment variable whose contents are not
+          # readable from here, so assume it could carry an alias.
+          pending_block=1
+          alias_config=1
+          scan_index=$((scan_index + 1))
+          ;;
+        --*)
           pending_block=1
           scan_index=$((scan_index + 1))
           ;;
@@ -194,10 +216,12 @@ while ((token_index < token_count)); do
           break
           ;;
         *)
-          # The first token that is not a global option is the subcommand. It is
-          # not `commit`, so stop: scanning on would read the subcommand's own
-          # arguments, where a value such as `--grep commit` is a search term,
-          # not an invocation.
+          # The first token that is not a global option is the subcommand.
+          # Scanning past it would read its own arguments, where a value such as
+          # `--grep commit` is a search term rather than an invocation. But when
+          # a command-scoped alias may have been defined, this token's expansion
+          # is unknown and could itself be commit, so refuse instead.
+          [[ -z "$alias_config" ]] || block_unparsed
           break
           ;;
       esac

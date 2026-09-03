@@ -148,6 +148,11 @@ for label, command in (
     ("unparsed --option before commit", "git --no-pager commit -m x"),
     ("-c config before commit", "git -c core.pager=cat commit -m x"),
     ("-c with its value before commit", "git -c x=y commit -m x"),
+    # A command-scoped alias can rename commit, and its expansion is invisible
+    # here, so an unknown subcommand behind one has to be refused.
+    ("commit behind a command-scoped alias", "git -c alias.ci=commit ci -m x"),
+    ("alias config with an unrelated subcommand", "git -c alias.st=status st"),
+    ("config-env, whose value cannot be read", "git --config-env=alias.ci=E ci"),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")
