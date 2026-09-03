@@ -127,9 +127,25 @@ for label, command in (
     ("git help commit", "git help commit"),
     ("git version", "git --version"),
     ("quoted operator before git commit words", 'echo "|" git commit -m x'),
+    # Global options before a non-commit subcommand used to trip block_unparsed
+    # (2026-09-03: a `git -C "$d" log` loop was blocked as an unparsable commit).
+    ("git log with a shell-variable -C", 'git -C "$d" log --oneline -1'),
+    ("git log with an unparsed --option", "git --no-pager log -1"),
+    ("git log with -c config", "git -c core.pager=cat log -1"),
+    ("git log inside command substitution", 'c=$(git -C "$HOME/x" log --since=30.days --oneline); echo "$c"'),
 ):
     rc, _ = check_hook(command, d)
     check(f"ignores {label}", rc == 0, f"exit={rc}")
+
+# The same unparsed options still block once the subcommand is a real commit.
+for label, command in (
+    ("shell-variable -C before commit", 'git -C "$d" commit -m x'),
+    ("unparsed --option before commit", "git --no-pager commit -m x"),
+    ("-c config before commit", "git -c core.pager=cat commit -m x"),
+    ("-c value swallowed as subcommand before commit", "git -c x=y commit -m x"),
+):
+    rc, _ = check_hook(command, d)
+    check(f"blocks {label}", rc == 2, f"exit={rc}")
 
 # An unparseable quote blocks only after the full token stream has located an
 # actual git commit invocation, including a shell builtin prefix or a later line.

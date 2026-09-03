@@ -144,23 +144,37 @@ while ((token_index < token_count)); do
   if ((at_command_start)) && [[ "$current" == "git" || "$current" == */git ]]; then
     scan_index=$((token_index + 1))
     candidate_repo_args=()
+    # A global option this parser cannot resolve (-c, --no-pager, a -C value
+    # with shell syntax) is only a problem when the subcommand turns out to be
+    # `commit`. Defer the verdict: remember it, keep scanning for `commit`, and
+    # let `git -C "$d" log` / `git --no-pager log` through untouched.
+    pending_block=""
     while ((scan_index < token_count)); do
       current="${TOKENS[scan_index]}"
+      [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
       case "$current" in
         -C)
-          ((scan_index + 1 < token_count)) || block_unparsed
-          unsafe_value "${TOKENS[scan_index + 1]}" && block_unparsed
-          candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
-          scan_index=$((scan_index + 2))
+          if ((scan_index + 1 < token_count)) && [[ "${TOKENS[scan_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
+            unsafe_value "${TOKENS[scan_index + 1]}" && pending_block=1
+            candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
+            scan_index=$((scan_index + 2))
+          else
+            pending_block=1
+            scan_index=$((scan_index + 1))
+          fi
           ;;
         -C?*)
-          unsafe_value "${current:2}" && block_unparsed
+          unsafe_value "${current:2}" && pending_block=1
           candidate_repo_args+=("${current:0:2}" "${current:2}")
           scan_index=$((scan_index + 1))
           ;;
-        -c | -c?*) block_unparsed ;;
         --version) break ;;
+        -c | -c?* | --*)
+          pending_block=1
+          scan_index=$((scan_index + 1))
+          ;;
         commit)
+          [[ -z "$pending_block" ]] || block_unparsed
           ((commit_count += 1))
           if ((commit_count == 1)); then
             commit_index=$scan_index
@@ -170,8 +184,13 @@ while ((token_index < token_count)); do
           fi
           break
           ;;
-        --*) block_unparsed ;;
-        *) break ;;
+        *)
+          # Some other subcommand. With nothing pending there is nothing to
+          # scan; with a pending unparsed option keep looking, so that
+          # `git -c x=y commit` (value consumed as a subcommand) still blocks.
+          [[ -n "$pending_block" ]] || break
+          scan_index=$((scan_index + 1))
+          ;;
       esac
     done
   fi
