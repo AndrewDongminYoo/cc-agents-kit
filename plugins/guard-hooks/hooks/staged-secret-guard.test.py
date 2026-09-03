@@ -131,11 +131,9 @@ for label, command in (
     # (2026-09-03: a `git -C "$d" log` loop was blocked as an unparsable commit).
     ("git log with a shell-variable -C", 'git -C "$d" log --oneline -1'),
     ("git log with an unparsed --option", "git --no-pager log -1"),
-    ("git log with -c config", "git -c core.pager=cat log -1"),
     # A subcommand argument whose value is the word commit is a search term, not
     # an invocation; the scan must stop at the subcommand to tell them apart.
     ("commit as a --grep value", "git --no-pager log --grep commit"),
-    ("commit as a --format value", "git -c core.pager=cat log --format commit"),
     ("commit inside a pathspec", "git --no-pager diff -- README.commit"),
     ("git log inside command substitution", 'c=$(git -C "$HOME/x" log --since=30.days --oneline); echo "$c"'),
 ):
@@ -153,6 +151,12 @@ for label, command in (
     ("commit behind a command-scoped alias", "git -c alias.ci=commit ci -m x"),
     ("alias config with an unrelated subcommand", "git -c alias.st=status st"),
     ("config-env, whose value cannot be read", "git --config-env=alias.ci=E ci"),
+    # An include reaches an alias through a file, so reading the config key is
+    # not a way to tell a safe -c from a dangerous one.
+    ("alias reachable through an include", "git -c include.path=/tmp/a ci -m x"),
+    # The cost of that: -c in front of a subcommand this hook cannot identify is
+    # refused even when it only sets a pager.
+    ("plain -c before a read-only subcommand", "git -c core.pager=cat log -1"),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")

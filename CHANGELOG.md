@@ -7,7 +7,8 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Fixed
 
-- `guard-hooks` 0.2.7 stops `staged-secret-guard` from blocking read-only git commands. A global option the parser could not resolve — a shell variable in `-C`, a `--no-pager`, a `-c` override — refused the command before the subcommand was known, so `for d in */; do git -C "$d" log; done` was rejected as an unparsable commit. The verdict now waits until the subcommand is known and fires only on a real `git commit`.
+- `guard-hooks` 0.2.7 stops `staged-secret-guard` from blocking read-only git commands. A global option the parser could not resolve — a shell variable in `-C`, a `--no-pager` — refused the command before the subcommand was known, so `for d in */; do git -C "$d" log; done` was rejected as an unparsable commit. The verdict now waits until the subcommand is identified and fires only on a real `git commit`.
+- `staged-secret-guard` still refuses `-c` and `--config-env` in front of a subcommand it cannot identify, and now says so in its own message rather than reporting an unparsable commit. Command-scoped config can rename `commit` through an alias, either directly or through an include, and no reading of the config key separates the safe case from the dangerous one. `git -c core.pager=cat log` is refused for that reason; the same command without `-c` is not.
 
 ### Changed
 
