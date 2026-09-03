@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.3.9] — 2026-09-03
+
+The guard that scans a commit for credentials stops refusing read-only git commands, and closes six ways a real commit reached the scan unseen.
+`repo-gate` moves to 0.1.6 so that its two skill changes below, first written on 1 September without a bump, reach an installed copy: the client caches a plugin under its version string, so a change that leaves the version alone never arrives.
+
 ### Fixed
 
 - `guard-hooks` 0.2.7 stops `staged-secret-guard` from blocking read-only git commands. A global option the parser could not resolve — a shell variable in `-C`, a `--no-pager` — refused the command before the subcommand was known, so `for d in */; do git -C "$d" log; done` was rejected as an unparsable commit. The verdict now waits until the subcommand is identified and fires only on a real `git commit`.
@@ -18,7 +23,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 ### Changed
 
 - `repo-gate` `ci-babysit` names the zero-steps failure shape: a run that fails in seconds with an empty `steps` array is a billing or runner block upstream of the workflow, read from the run's annotation, not from a diff.
-- `repo-gate` `cspell-triage` warns that a local dictionary registered under a bundled dictionary's name silently masks the bundled one; check candidate names against `cspell dictionaries` before registering.
+- `repo-gate` `cspell-triage` warns that a local dictionary registered under a bundled dictionary's name silently masks the bundled one; check candidate names against `cspell dictionaries` before registering. The `cspell dictionaries` correction is #13, the first outside contribution.
 
 ## [0.3.8] — 2026-08-31
 
