@@ -175,16 +175,15 @@ while ((token_index < token_count)); do
     while ((scan_index < token_count)); do
       current="${TOKENS[scan_index]}"
       [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
+      # One splittable token anywhere ahead of the subcommand is enough: the
+      # words it expands to are git's arguments and never reach this parser, so
+      # nothing read after it can be trusted to be the subcommand.
+      [[ -z "${TOKEN_SPLITTABLE[scan_index]-}" ]] || split_risk=1
       case "$current" in
         -C)
           if ((scan_index + 1 < token_count)) && [[ "${TOKENS[scan_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
-            if unsafe_value "${TOKENS[scan_index + 1]}"; then
-              pending_block=1
-              # `git -C $d log` with d='/repo commit -m x --' really runs a
-              # commit, because the unquoted value splits into further words
-              # that this parser never sees. Quoted, it cannot.
-              [[ -z "${TOKEN_SPLITTABLE[scan_index + 1]-}" ]] || split_risk=1
-            fi
+            unsafe_value "${TOKENS[scan_index + 1]}" && pending_block=1
+            [[ -z "${TOKEN_SPLITTABLE[scan_index + 1]-}" ]] || split_risk=1
             candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
             scan_index=$((scan_index + 2))
           else
@@ -193,10 +192,7 @@ while ((token_index < token_count)); do
           fi
           ;;
         -C?*)
-          if unsafe_value "${current:2}"; then
-            pending_block=1
-            [[ -z "${TOKEN_SPLITTABLE[scan_index]-}" ]] || split_risk=1
-          fi
+          unsafe_value "${current:2}" && pending_block=1
           candidate_repo_args+=("${current:0:2}" "${current:2}")
           scan_index=$((scan_index + 1))
           ;;

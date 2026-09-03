@@ -167,6 +167,9 @@ for label, command in (
     # quoted" is not the test — an expansion outside quotes is.
     ("partly quoted -C expansion", 'git -C "$base"$d log'),
     ("command substitution outside quotes", "git -C $(pwd) log"),
+    # Any splittable token ahead of the subcommand does it, not just a -C value.
+    ("unquoted expansion as the option itself", "git --$opts log"),
+    ("unquoted expansion between options", "git --no-pager $flags log"),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")
