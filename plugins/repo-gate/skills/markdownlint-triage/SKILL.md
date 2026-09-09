@@ -54,13 +54,16 @@ set -o pipefail
 trunk check --no-fix --filter=markdownlint --all --color=false 2>&1 | tee markdownlint.log
 ```
 
-Without Trunk and without an installed `markdownlint`, run a pinned CLI yourself, after checking that the checkout carries no `.npmrc` that redirects the registry:
+Without Trunk, install the CLI outside the checkout first, then capture its output the same way:
 
 ```bash
-npx --yes --package markdownlint-cli@0.49.1 markdownlint -- docs/ README.md > markdownlint.log 2>&1
+npm install -g markdownlint-cli@0.49.1
+markdownlint -- docs/ README.md > markdownlint.log 2>&1
 echo "Linter exit: $?"
 markdownlint-summary --log markdownlint.log
 ```
+
+Do not run `npx` inside a checkout you do not control: it prefers the checkout's own `node_modules`, so a tracked package at the pinned version runs as you.
 
 For a new check with automatic runner selection, pass explicit target paths when the approved scope is narrow:
 
