@@ -228,6 +228,20 @@ lint:
     - yamllint
 ```
 
+### Markdown: seed the Prettier-compatible baseline
+
+When `markdownlint` is enabled next to `prettier`, replace the `.trunk/configs/.markdownlint.yaml` that `trunk init` wrote with the baseline gist, so every repository starts from the same file instead of a remembered rule list:
+
+```bash
+gh gist view d34ab86436fc18aa750f21818c1abe48 -f .markdownlint.yaml > .trunk/configs/.markdownlint.yaml
+trunk check --no-fix --filter=markdownlint --sample=5
+```
+
+Without the GitHub CLI, fetch the raw file from `https://gist.githubusercontent.com/AndrewDongminYoo/d34ab86436fc18aa750f21818c1abe48/raw/.markdownlint.yaml`.
+The baseline turns off only the rules Prettier already enforces — whitespace, indentation, blank lines, line length, and heading, list, fence, and emphasis style — and leaves every content rule on, `MD040` included.
+Relax a content rule only per repository, with the reason written beside it.
+An existing backlog is `markdownlint-triage`'s job, not a reason to turn rules off here.
+
 ### Next.js / TypeScript
 
 ```yaml
@@ -256,7 +270,7 @@ lint:
 | `oxipng`, `svgo` | SVG/PNG assets managed externally or with metadata | Disable unless you've reviewed output                                                            |
 | `svgo`           | Mobile (React Native/Flutter) repos with SVGs      | Disable — rarely useful, high risk                                                               |
 | `shellcheck`     | `android/gradlew`, `example/android/gradlew`       | Ignore only after confirming the generated wrapper is intentionally outside shell lint scope     |
-| `osv-scanner`    | Resolved dependency lockfiles                      | Scan supported targets directly; ignore only a proven unsupported or mis-mapped target            |
+| `osv-scanner`    | Resolved dependency lockfiles                      | Scan supported targets directly; ignore only a proven unsupported or mis-mapped target           |
 | `markdownlint`   | `.github/**/*.md` (PR templates, issue templates)  | Ignore — not user-authored prose                                                                 |
 | `dart`           | Flutter projects using a pinned SDK                | Disable; use `custom action` instead                                                             |
 | `dotenv-linter`  | `ios/.xcode.env`, `ios/.xcode.env.local`           | Ignore — Xcode requires `export VAR=VALUE`; dotenv-linter strips `export`, breaking Xcode builds |
@@ -379,6 +393,7 @@ Before inventing a config, look at one you already wrote. `find-trunk-repos` is 
 
 ```bash
 find-trunk-repos                    # your repos that already have a trunk config
+gh gist view d34ab86436fc18aa750f21818c1abe48 -f .markdownlint.yaml > .trunk/configs/.markdownlint.yaml  # seed the markdownlint baseline
 
 trunk init                          # Initialize trunk in repo
 trunk config hide                   # Keep .trunk/ local (not committed)
