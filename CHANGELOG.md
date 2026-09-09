@@ -6,6 +6,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 ## [Unreleased]
 
 `repo-gate` moves to 0.2.0: a sixth skill and a second `bin/` tool.
+`guard-hooks` moves to 0.2.8 for one more `rm` shape the home-directory guard now refuses.
 
 ### Added
 
@@ -14,6 +15,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 ### Changed
 
 - `repo-gate` `setup-trunk` seeds `.trunk/configs/.markdownlint.yaml` from the Prettier-compatible baseline gist instead of a remembered rule list, and routes an existing backlog to `markdownlint-triage`.
+- `repo-gate` `fix-osv-vulnerabilities` names the 0.x boundary: below 1.0.0 a caret stops at the minor, so an advisory patched only at `0.5.0` is a boundary crossing, not a patch bump. It also says how to prove a forced version loads before shipping it: load it from the consumer's own resolution path, with `require` for CommonJS or `import()` for ESM, and call what the consumer calls.
+
+### Fixed
+
+- `guard-hooks` 0.2.8 `dangerous-command-guard` refuses `rm -rf "${HOME%/}"` and the other suffix-trimmed spellings of the home directory, which slipped past the braced-expansion pattern. A `${HOMEWORK}`-shaped variable still passes.
 
 ## [0.3.9] — 2026-09-03
 
