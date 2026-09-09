@@ -169,7 +169,8 @@ Approval for cleanup does not authorize push or publication.
 ## Verify and Report
 
 Rerun the same linter against repaired files and summarize a fresh log.
-Then run the repository's whole gate on the changed files, not only Markdownlint: a fence language that Prettier has a parser for, such as `json`, `yaml`, or `markdown`, makes it format the block body, and a repaired table can trip MD060 alignment.
+On a checkout you trust, then run the repository's whole gate on the changed files, not only Markdownlint: a fence language that Prettier has a parser for, such as `json`, `yaml`, or `markdown`, makes it format the block body, and a repaired table can trip MD060 alignment.
+The whole gate executes the checkout's own `.trunk/trunk.yaml` definitions, so on a checkout you do not trust stay on log mode as above and leave the gate run to its owner.
 For an approved full-backlog cleanup, finish with the same full-scope check used for the baseline.
 Inspect the diff for content loss and unrelated formatting.
 Use the project's renderer or link checker when repairs change rendering or anchors.
