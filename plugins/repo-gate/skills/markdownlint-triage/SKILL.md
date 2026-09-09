@@ -21,9 +21,9 @@ Identify generated files and archives that require exact source preservation.
 Do not transfer settings or results from another repository merely because its rule counts look similar.
 
 `markdownlint-summary` is on PATH whenever this plugin is enabled.
-It selects `markdownlint` on PATH, then `npx --yes --package markdownlint-cli markdownlint`, then `trunk`.
+It selects `markdownlint` on PATH, then `trunk`.
+It downloads nothing: a checkout's own `.npmrc` can point an auto-installed package at a registry the checkout controls, so the helper never runs `npx`.
 It requires Bash, awk, and standard shell utilities.
-The npx fallback can download the package.
 A selected runner failure does not trigger another runner.
 Each runner uses its own configuration, ignore rules, and installed version.
 Run mode prints only the summary and discards the runner's output.
@@ -54,10 +54,10 @@ set -o pipefail
 trunk check --no-fix --filter=markdownlint --all --color=false 2>&1 | tee markdownlint.log
 ```
 
-Without Trunk, capture the CLI's output the same way:
+Without Trunk and without an installed `markdownlint`, run a pinned CLI yourself, after checking that the checkout carries no `.npmrc` that redirects the registry:
 
 ```bash
-npx --yes --package markdownlint-cli markdownlint -- docs/ README.md > markdownlint.log 2>&1
+npx --yes --package markdownlint-cli@0.49.1 markdownlint -- docs/ README.md > markdownlint.log 2>&1
 echo "Linter exit: $?"
 markdownlint-summary --log markdownlint.log
 ```

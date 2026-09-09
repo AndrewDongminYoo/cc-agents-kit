@@ -78,9 +78,9 @@ class SummaryTests(unittest.TestCase):
         )
 
     def test_priority_and_arguments(self):
-        for name in ("markdownlint", "npx", "trunk"):
+        for name in ("markdownlint", "trunk"):
             self.mock_tool(name)
-        for selected in ("markdownlint", "npx", "trunk"):
+        for selected in ("markdownlint", "trunk"):
             with self.subTest(selected=selected):
                 result = self.run_script("--fix", "docs with spaces/a.md")
                 self.assertEqual(result.returncode, 1)
@@ -90,12 +90,23 @@ class SummaryTests(unittest.TestCase):
                 self.assertEqual(invocation[0], str(self.bin_dir / selected))
                 self.assertIn("--fix", invocation)
                 self.assertEqual(invocation[-1], "docs with spaces/a.md")
-                if selected == "npx":
-                    self.assertEqual(
-                        invocation[1:5],
-                        ["--yes", "--package", "markdownlint-cli", "markdownlint"],
-                    )
                 (self.bin_dir / selected).unlink()
+
+    def test_npx_is_never_a_runner(self):
+        # A checkout's .npmrc can point npx at its own registry, so the helper
+        # must not auto-install even when npx is the only tool on PATH.
+        self.mock_tool("npx")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 127)
+        self.assertFalse((self.root / "invocation").exists())
+
+    def test_paths_after_separator_stay_paths(self):
+        self.mock_tool("markdownlint")
+        result = self.run_script("--", "report.log")
+        self.assertEqual(result.returncode, 1)
+        invocation = (self.root / "invocation").read_text().splitlines()
+        self.assertEqual(invocation[0], str(self.bin_dir / "markdownlint"))
+        self.assertEqual(invocation[-1], "report.log")
 
     def test_defaults_and_failure(self):
         self.mock_tool("trunk", code=2)

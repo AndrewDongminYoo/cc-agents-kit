@@ -9,7 +9,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Added
 
-- `repo-gate` `markdownlint-triage` turns a markdownlint log into a per-rule count, decides which content rules stay on, and fixes the remaining backlog one file per worker. Its helper `markdownlint-summary` is on PATH whenever the plugin is enabled; it runs `markdownlint`, `npx markdownlint-cli`, or `trunk` in that order, or summarizes an existing log, and its suite sits beside it in `bin/`.
+- `repo-gate` `markdownlint-triage` turns a markdownlint log into a per-rule count, decides which content rules stay on, and fixes the remaining backlog one file per worker. Its helper `markdownlint-summary` is on PATH whenever the plugin is enabled; it runs `markdownlint` or `trunk`, never an auto-installed package, or summarizes an existing log, and its suite sits beside it in `bin/`.
 
 ### Changed
 
