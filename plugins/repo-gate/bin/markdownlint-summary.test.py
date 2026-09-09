@@ -38,11 +38,14 @@ class SummaryTests(unittest.TestCase):
 
     def run_script(self, *arguments, input_text=None):
         # /bin/bash on purpose: macOS ships 3.2, the oldest bash this bin entry claims.
+        # stdin is closed unless a case feeds it, so a regression that makes
+        # the helper read stdin shows up as empty output instead of a hang.
         return subprocess.run(
             ["/bin/bash", str(SCRIPT), *arguments],
             cwd=self.root,
             env=self.environment,
             input=input_text,
+            stdin=None if input_text is not None else subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,
@@ -63,6 +66,15 @@ class SummaryTests(unittest.TestCase):
         log_file = self.root / "input.log"
         log_file.write_text(CLI_LOG)
         self.assertEqual(self.run_script(str(log_file)).stdout, EXPECTED)
+
+    def test_assignment_shaped_log_name_is_a_file(self):
+        # awk would read `markdownlint=errors.log` as a variable assignment
+        # and fall through to stdin, which the harness closes.
+        log_file = self.root / "markdownlint=errors.log"
+        log_file.write_text(CLI_LOG)
+        result = self.run_script("--log", "markdownlint=errors.log")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, EXPECTED)
 
     def test_trunk_ansi_and_noise(self):
         log_text = (

@@ -19,7 +19,18 @@ Each tool uses its own configuration and ignore rules.
 EOF
 }
 
+# The log is fed on stdin rather than as an awk operand: awk reads an operand
+# shaped like NAME=VALUE as a variable assignment, so a file called
+# markdownlint=errors.log would silently make it read stdin instead.
 summarize() {
+	if [[ $1 == - ]]; then
+		summarize_stream
+	else
+		summarize_stream <"$1"
+	fi
+}
+
+summarize_stream() {
 	LC_ALL=C awk '
 		{
 			gsub(/\033\[[0-9;?]*[ -\/]*[@-~]/, "")
@@ -47,7 +58,7 @@ summarize() {
 			for (rule in counts)
 				printf "%d\t%s\tmarkdownlint/%s\n", counts[rule], descriptions[rule], rule
 		}
-	' "$1" | LC_ALL=C sort -t $'\t' -k1,1nr -k3,3 | awk -F '\t' '
+	' | LC_ALL=C sort -t $'\t' -k1,1nr -k3,3 | awk -F '\t' '
 		{ printf "%3d\t%s\t%s\n", $1, $2, $3 }
 	'
 }
