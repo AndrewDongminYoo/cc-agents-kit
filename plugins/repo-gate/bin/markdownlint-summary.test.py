@@ -128,7 +128,9 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn(CLI_LOG, result.stderr)
         invocation = (self.root / "invocation").read_text().splitlines()
-        self.assertIn("--all", invocation)
+        # The current directory, never --all: --all is the whole repository.
+        self.assertNotIn("--all", invocation)
+        self.assertEqual(invocation[-2:], ["--", "."])
         self.assertIn("--no-fix", invocation)
         self.mock_tool("markdownlint", code=0)
         self.assertEqual(self.run_script().returncode, 0)
