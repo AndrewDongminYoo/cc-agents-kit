@@ -238,6 +238,7 @@ trunk check --no-fix --filter=markdownlint --sample=5
 ```
 
 Fetch into a separate file and move it into place only on success: a plain `> .trunk/configs/.markdownlint.yaml` truncates the existing config before `gh` runs, so an unauthenticated CLI or a failed request leaves an empty file that the next check silently accepts. With the two-step form a failed fetch leaves the old config untouched and an empty `.new` file to delete.
+The gist is a living baseline, so record which revision was seeded in the commit that adds the file: `gh api gists/d34ab86436fc18aa750f21818c1abe48 --jq '.history[0].version'`.
 Without the GitHub CLI, fetch the raw file from `https://gist.githubusercontent.com/AndrewDongminYoo/d34ab86436fc18aa750f21818c1abe48/raw/.markdownlint.yaml` the same way.
 The baseline turns off only the rules Prettier already enforces — whitespace, indentation, blank lines, line length, and heading, list, fence, and emphasis style — and leaves every content rule on, `MD040` included.
 Relax a content rule only per repository, with the reason written beside it.
@@ -394,9 +395,9 @@ Before inventing a config, look at one you already wrote. `find-trunk-repos` is 
 
 ```bash
 find-trunk-repos                    # your repos that already have a trunk config
-gh gist view d34ab86436fc18aa750f21818c1abe48 -f .markdownlint.yaml > .trunk/configs/.markdownlint.yaml.new && mv .trunk/configs/.markdownlint.yaml.new .trunk/configs/.markdownlint.yaml  # seed the markdownlint baseline
 
 trunk init                          # Initialize trunk in repo
+gh gist view d34ab86436fc18aa750f21818c1abe48 -f .markdownlint.yaml > .trunk/configs/.markdownlint.yaml.new && mv .trunk/configs/.markdownlint.yaml.new .trunk/configs/.markdownlint.yaml  # seed the markdownlint baseline (after init)
 trunk config hide                   # Keep .trunk/ local (not committed)
 trunk config share                  # Commit .trunk/ config to repo
 trunk actions list                  # View enabled/disabled actions
