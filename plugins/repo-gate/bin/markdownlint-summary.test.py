@@ -67,6 +67,30 @@ class SummaryTests(unittest.TestCase):
         log_file.write_text(CLI_LOG)
         self.assertEqual(self.run_script(str(log_file)).stdout, EXPECTED)
 
+    def test_cli_warning_severity_is_counted(self):
+        # markdownlint-cli prints `warning` for rules configured at that
+        # severity; the parser used to accept only `error` or no severity.
+        log_text = (
+            "docs/a.md:1:81 warning MD013/line-length Line length [Expected: 80; Actual: 103]\n"
+            "docs/a.md:3 error MD040/fenced-code-language Fenced code blocks should have a language specified\n"
+        )
+        result = self.run_script("--log", "-", input_text=log_text)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Equal counts sort by rule id, so MD013 precedes MD040.
+        self.assertEqual(
+            result.stdout,
+            "  1\tLine length\tmarkdownlint/MD013\n"
+            "  1\tFenced code blocks should have a language specified\tmarkdownlint/MD040\n",
+        )
+
+    def test_empty_log_value_is_rejected(self):
+        # `--log ""` must not fall through to run mode, least of all with --fix.
+        self.mock_tool("markdownlint")
+        for arguments in (("--log", ""), ("--fix", "--log", "")):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.run_script(*arguments).returncode, 2)
+                self.assertFalse((self.root / "invocation").exists())
+
     def test_assignment_shaped_log_name_is_a_file(self):
         # awk would read `markdownlint=errors.log` as a variable assignment
         # and fall through to stdin, which the harness closes.

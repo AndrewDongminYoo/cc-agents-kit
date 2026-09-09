@@ -16,6 +16,9 @@ A lone FILE.log argument before -- is read as --log FILE.log.
 Output: count<TAB>description<TAB>markdownlint/rule, sorted by count.
 Run mode preserves the linter exit code. Log mode returns 0 on success.
 Each tool uses its own configuration and ignore rules.
+Run mode executes the checkout's own trunk definitions, and --fix writes
+wherever the linter resolves a path, symlinks included: on a checkout you
+do not trust, use log mode and no --fix.
 EOF
 }
 
@@ -42,9 +45,9 @@ summarize_stream() {
 				if (!match(description, /[0-9]+:[0-9]+[[:space:]]+/)) next
 				description = substr(description, RSTART + RLENGTH)
 				sub(/^(warning|error|note|high|medium|low)[[:space:]]+/, "", description)
-			} else if (match($0, /:[0-9]+(:[0-9]+)?[[:space:]]+(error[[:space:]]+)?MD[0-9][0-9][0-9][\/[:space:]]/)) {
+			} else if (match($0, /:[0-9]+(:[0-9]+)?[[:space:]]+((error|warning)[[:space:]]+)?MD[0-9][0-9][0-9][\/[:space:]]/)) {
 				description = substr($0, RSTART + 1)
-				sub(/^[0-9]+(:[0-9]+)?[[:space:]]+(error[[:space:]]+)?/, "", description)
+				sub(/^[0-9]+(:[0-9]+)?[[:space:]]+((error|warning)[[:space:]]+)?/, "", description)
 				rule = substr(description, 1, 5)
 				sub(/^MD[0-9][0-9][0-9]([^[:space:]]*)[[:space:]]+/, "", description)
 				sub(/[[:space:]]+\[.*/, "", description)
@@ -77,7 +80,9 @@ while (($#)); do
 		shift
 		;;
 	--log)
-		[[ $# -eq 2 ]] || {
+		# An empty value must not fall through to run mode: with --fix that
+		# would rewrite the current directory instead of reading a log.
+		[[ $# -eq 2 && -n $2 ]] || {
 			usage >&2
 			exit 2
 		}
