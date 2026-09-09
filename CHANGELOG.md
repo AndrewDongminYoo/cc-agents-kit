@@ -5,6 +5,9 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-09
+
+A sixth `repo-gate` skill, markdownlint triage, with a `bin/` helper hardened through six hosted review rounds, and one more home-directory `rm` shape refused by `guard-hooks`.
 `repo-gate` moves to 0.2.0: a sixth skill and a second `bin/` tool.
 `guard-hooks` moves to 0.2.8 for one more `rm` shape the home-directory guard now refuses.
 
