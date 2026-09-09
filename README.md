@@ -237,7 +237,7 @@ Six skills for work that outlives one session, and for the config that work drag
 /plugin install repo-gate@cc-agents-kit
 ```
 
-Five skills for the stretch between "the code works" and "it is pushed".
+Six skills for the stretch between "the code works" and "it is pushed".
 
 | Skill | Use it when |
 | --- | --- |
@@ -246,6 +246,7 @@ Five skills for the stretch between "the code works" and "it is pushed".
 | `ci-babysit` | A pushed branch or open PR needs CI monitoring. Watch-only requests remain read-only. Reruns, repairs, commits, and pushes require explicit authority, and the skill stops for logic failures or human decisions. |
 | `fix-osv-vulnerabilities` | `osv-scanner` or `trunk check` reports GHSA advisories and they need triage rather than a blanket bump. |
 | `cspell-triage` | cspell is reporting unknown words, or its dictionaries need consolidating. |
+| `markdownlint-triage` | A markdownlint log needs summarizing by rule, the rule set needs trimming to what catches real defects, or an existing backlog needs fixing file by file. Ships `markdownlint-summary` on PATH. |
 
 These are ecosystem-agnostic where the task allows it: the commit and CI skills read the project's own declared scripts rather than assuming a stack.
 

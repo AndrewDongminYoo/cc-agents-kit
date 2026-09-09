@@ -21,7 +21,7 @@
     {
       "name": "repo-gate",
       "source": "./plugins/repo-gate",
-      "description": "What runs between \"the code works\" and \"it is pushed\": trunk setup, conventional-commit splitting, dependency vulnerability triage, spell-check triage, and babysitting CI until it is green.",
+      "description": "What runs between \"the code works\" and \"it is pushed\": trunk setup, conventional-commit splitting, dependency vulnerability triage, spell-check and markdownlint triage, and babysitting CI until it is green.",
       "category": "productivity"
     }
   ]
