@@ -18,6 +18,7 @@ Change rules or documents only within the requested scope.
 Verify the absolute repository root and account before inspecting its Git state.
 Read repository instructions, the selected runner configuration, and representative reported lines.
 Identify generated files and archives that require exact source preservation.
+Identify mirrored copies of the same document, such as per-profile duplicates: assign both copies to one worker and compare the pairs after repair.
 Do not transfer settings or results from another repository merely because its rule counts look similar.
 
 `markdownlint-summary` is on PATH whenever this plugin is enabled.
@@ -123,6 +124,15 @@ For ordinary documents, preserve meaning, frontmatter, links, examples, and data
 - MD040: use the actual language when known, `log` for output, and `plaintext` when the content is plain text or cannot be classified. Respect matching backtick or tilde fence lengths.
 - MD056: compare header, separator, and body cells. Account for escaped pipes. Do not delete or invent cell values to satisfy the count: a missing cell becomes an empty cell, and an extra cell goes back to the owner as a content question.
 
+Classify fence languages before workers start, not in a later audit; reclassifying afterwards costs a second pass over every fence.
+
+| Block content | Language |
+| --- | --- |
+| Slash-command lists, CLI output, shell transcripts, status dumps | `log` |
+| Shell commands meant to be run | `bash` |
+| Tool-call syntax, or config and data in a real syntax | that language: `python`, `dotenv`, `yaml`, `json` |
+| Paths, ASCII structure, pseudocode, prose samples | `plaintext` |
+
 Keep mechanical autofixes limited to approved files or filters and review their diff.
 Do not run a repository-wide formatter as a side effect of fixing Markdownlint findings.
 
@@ -146,6 +156,7 @@ Give each worker:
 
 - The verified absolute repository, account, exact owned paths, and relevant repository instructions.
 - The raw findings for those files, active configuration, and required content-preservation constraints.
+- The fence language table above.
 - One outcome: repair the assigned findings without changes to shared configuration or other files.
 - The explicit-path validation command and expected result.
 - The required response: changed paths, repairs, check command and exit code, remaining findings, and questions that need a content decision.
@@ -158,6 +169,8 @@ Approval for cleanup does not authorize push or publication.
 ## Verify and Report
 
 Rerun the same linter against repaired files and summarize a fresh log.
+On a checkout you trust, then run the repository's whole gate on the changed files, not only Markdownlint: a fence language that Prettier has a parser for, such as `json`, `yaml`, or `markdown`, makes it format the block body, and a repaired table can trip MD060 alignment.
+The whole gate executes the checkout's own `.trunk/trunk.yaml` definitions, so on a checkout you do not trust stay on log mode as above and leave the gate run to its owner.
 For an approved full-backlog cleanup, finish with the same full-scope check used for the baseline.
 Inspect the diff for content loss and unrelated formatting.
 Use the project's renderer or link checker when repairs change rendering or anchors.
