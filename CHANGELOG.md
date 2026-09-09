@@ -9,7 +9,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Added
 
-- `repo-gate` `markdownlint-triage` turns a markdownlint log into a per-rule count, decides which content rules stay on, and fixes the remaining backlog one file per worker. Its helper `markdownlint-summary` is on PATH whenever the plugin is enabled; it runs `markdownlint` or `trunk`, never an auto-installed package, or summarizes an existing log, and its suite sits beside it in `bin/`.
+- `repo-gate` `markdownlint-triage` turns a markdownlint log into a per-rule count, decides which content rules stay on, and fixes the remaining backlog one file per worker. Its helper `markdownlint-summary` is on PATH whenever the plugin is enabled; it runs `markdownlint` or `trunk`, never an auto-installed package, or summarizes an existing log, and its suite sits beside it in `bin/`. The skill also carries what the cleanup that produced it paid for twice: workers get a fence-language table up front, the whole gate reruns on changed files because a fence language wakes Prettier, and mirrored copies of a document go to one worker.
 
 ### Changed
 
