@@ -113,7 +113,7 @@ fi
 
 if [[ ${command_args[0]} == trunk ]]; then
 	if [[ ${fix} == true ]]; then command_args+=(--fix); else command_args+=(--no-fix); fi
-	if (($#)); then command_args+=("$@"); else command_args+=(--all); fi
+	if (($#)); then command_args+=(-- "$@"); else command_args+=(--all); fi
 else
 	if [[ ${fix} == true ]]; then command_args+=(--fix); fi
 	if (($#)); then

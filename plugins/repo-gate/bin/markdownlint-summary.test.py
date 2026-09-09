@@ -89,7 +89,9 @@ class SummaryTests(unittest.TestCase):
                 invocation = (self.root / "invocation").read_text().splitlines()
                 self.assertEqual(invocation[0], str(self.bin_dir / selected))
                 self.assertIn("--fix", invocation)
-                self.assertEqual(invocation[-1], "docs with spaces/a.md")
+                # Both runners get an end-of-options marker, so a path that
+                # starts with a dash is never read as the runner's option.
+                self.assertEqual(invocation[-2:], ["--", "docs with spaces/a.md"])
                 (self.bin_dir / selected).unlink()
 
     def test_npx_is_never_a_runner(self):
