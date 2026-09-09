@@ -26,6 +26,8 @@ It downloads nothing: a checkout's own `.npmrc` can point an auto-installed pack
 It requires Bash, awk, and standard shell utilities.
 A selected runner failure does not trigger another runner.
 Each runner uses its own configuration, ignore rules, and installed version.
+Running Trunk executes the checkout's own `.trunk/trunk.yaml` definitions, and `--fix` writes wherever the linter resolves a path, symlinks included.
+On a checkout you do not trust, use log mode and no `--fix`.
 Run mode prints only the summary and discards the runner's output.
 To keep the raw diagnostics, redirect the linter's own output to a log file and use log mode.
 For an existing Trunk backlog, capture Trunk output explicitly and use log mode so the runner does not change during comparison.
