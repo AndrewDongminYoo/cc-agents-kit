@@ -5,6 +5,16 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+`repo-gate` moves to 0.2.0: a sixth skill and a second `bin/` tool.
+
+### Added
+
+- `repo-gate` `markdownlint-triage` turns a markdownlint log into a per-rule count, decides which content rules stay on, and fixes the remaining backlog one file per worker. Its helper `markdownlint-summary` is on PATH whenever the plugin is enabled; it runs `markdownlint` or `trunk`, never an auto-installed package, or summarizes an existing log, and its suite sits beside it in `bin/`.
+
+### Changed
+
+- `repo-gate` `setup-trunk` seeds `.trunk/configs/.markdownlint.yaml` from the Prettier-compatible baseline gist instead of a remembered rule list, and routes an existing backlog to `markdownlint-triage`.
+
 ## [0.3.9] — 2026-09-03
 
 The guard that scans a commit for credentials stops refusing read-only git commands, and closes six ways a real commit reached the scan unseen.

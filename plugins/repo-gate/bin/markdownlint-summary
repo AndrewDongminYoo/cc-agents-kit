@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+	cat <<'EOF'
+Usage: markdownlint-summary [--fix] [--] [PATH...]
+       markdownlint-summary --log FILE
+       markdownlint-summary FILE.log
+
+Run markdownlint from PATH, or trunk when markdownlint is absent.
+Nothing is downloaded: install markdownlint-cli or use trunk.
+With no paths, check Markdown files under the current directory.
+Use --fix to apply fixes before the report.
+Use --log FILE to summarize an existing text log. Use - for standard input.
+A lone FILE.log argument before -- is read as --log FILE.log.
+Output: count<TAB>description<TAB>markdownlint/rule, sorted by count.
+Run mode preserves the linter exit code. Log mode returns 0 on success.
+Each tool uses its own configuration and ignore rules.
+Run mode executes the checkout's own trunk definitions, and --fix writes
+wherever the linter resolves a path, symlinks included: on a checkout you
+do not trust, use log mode and no --fix.
+EOF
+}
+
+# The log is fed on stdin rather than as an awk operand: awk reads an operand
+# shaped like NAME=VALUE as a variable assignment, so a file called
+# markdownlint=errors.log would silently make it read stdin instead.
+summarize() {
+	if [[ $1 == - ]]; then
+		summarize_stream
+	else
+		summarize_stream <"$1"
+	fi
+}
+
+summarize_stream() {
+	LC_ALL=C awk '
+		{
+			gsub(/\033\[[0-9;?]*[ -\/]*[@-~]/, "")
+			sub(/\r$/, "")
+			description = ""
+			if (match($0, /markdownlint\/MD[0-9][0-9][0-9][[:space:]]*$/)) {
+				rule = substr($0, RSTART + 13, 5)
+				description = substr($0, 1, RSTART - 1)
+				if (!match(description, /[0-9]+:[0-9]+[[:space:]]+/)) next
+				description = substr(description, RSTART + RLENGTH)
+				sub(/^(warning|error|note|high|medium|low)[[:space:]]+/, "", description)
+			} else if (match($0, /:[0-9]+(:[0-9]+)?[[:space:]]+((error|warning)[[:space:]]+)?MD[0-9][0-9][0-9][\/[:space:]]/)) {
+				description = substr($0, RSTART + 1)
+				sub(/^[0-9]+(:[0-9]+)?[[:space:]]+((error|warning)[[:space:]]+)?/, "", description)
+				rule = substr(description, 1, 5)
+				sub(/^MD[0-9][0-9][0-9]([^[:space:]]*)[[:space:]]+/, "", description)
+				sub(/[[:space:]]+\[.*/, "", description)
+			} else next
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", description)
+			if (description == "") next
+			counts[rule]++
+			if (!(rule in descriptions)) descriptions[rule] = description
+		}
+		END {
+			for (rule in counts)
+				printf "%d\t%s\tmarkdownlint/%s\n", counts[rule], descriptions[rule], rule
+		}
+	' | LC_ALL=C sort -t $'\t' -k1,1nr -k3,3 | awk -F '\t' '
+		{ printf "%3d\t%s\t%s\n", $1, $2, $3 }
+	'
+}
+
+fix=false
+log_file=
+paths_after_separator=false
+while (($#)); do
+	case "$1" in
+	-h | --help)
+		usage
+		exit 0
+		;;
+	--fix)
+		fix=true
+		shift
+		;;
+	--log)
+		# An empty value must not fall through to run mode: with --fix that
+		# would rewrite the current directory instead of reading a log.
+		[[ $# -eq 2 && -n $2 ]] || {
+			usage >&2
+			exit 2
+		}
+		log_file=$2
+		shift 2
+		;;
+	--)
+		paths_after_separator=true
+		shift
+		break
+		;;
+	-*)
+		printf 'Unknown option: %s\n' "$1" >&2
+		exit 2
+		;;
+	*) break ;;
+	esac
+done
+
+if [[ ${paths_after_separator} == false && $# -eq 1 && $1 == *.log && -z ${log_file} ]]; then
+	log_file=$1
+	shift
+fi
+if [[ -n ${log_file} ]]; then
+	[[ ${fix} == false && $# -eq 0 ]] || {
+		usage >&2
+		exit 2
+	}
+	summarize "${log_file}"
+	exit 0
+fi
+
+# No npx fallback on purpose: a checkout's own .npmrc can redirect an
+# auto-installed package to a registry the checkout controls, and a read-only
+# summary must not execute code the repository chose.
+if command -v markdownlint >/dev/null 2>&1; then
+	command_args=(markdownlint)
+elif command -v trunk >/dev/null 2>&1; then
+	command_args=(trunk check --filter=markdownlint --color=false)
+else
+	printf 'Cannot find markdownlint or trunk in PATH. Install markdownlint-cli, or run trunk in this repository.\n' >&2
+	exit 127
+fi
+
+if [[ ${command_args[0]} == trunk ]]; then
+	if [[ ${fix} == true ]]; then command_args+=(--fix); else command_args+=(--no-fix); fi
+	# `.` rather than --all: --all is the whole repository, and the usage
+	# promises the current directory, which matters with --fix.
+	if (($#)); then command_args+=(-- "$@"); else command_args+=(-- .); fi
+else
+	if [[ ${fix} == true ]]; then command_args+=(--fix); fi
+	if (($#)); then
+		command_args+=(-- "$@")
+	else
+		command_args+=(--dot --ignore node_modules --ignore .git -- '**/*.{md,markdown}')
+	fi
+fi
+
+run_log=$(mktemp)
+trap 'rm -f "${run_log}"' EXIT
+command_exit=0
+NO_COLOR=1 "${command_args[@]}" >"${run_log}" 2>&1 || command_exit=$?
+summary_output=$(summarize "${run_log}")
+if [[ -n ${summary_output} ]]; then
+	printf '%s\n' "${summary_output}"
+fi
+if ((command_exit != 0)) && { ((command_exit != 1)) || [[ -z ${summary_output} ]]; }; then
+	cat "${run_log}" >&2
+fi
+exit "${command_exit}"
