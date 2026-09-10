@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-{{script_hash}}'; style-src 'sha256-{{style_hash}}'; base-uri 'none'; form-action 'none'">
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #f8fafc;
+        --surface: #fff;
+        --text: #334155;
+        --heading: #0f172a;
+        --muted: #64748b;
+        --line: #e2e8f0;
+        --subtle: #f1f5f9;
+        --accent: #2563eb;
+        --accent-hover: #1d4ed8;
+        --tool-surface: #eff6ff;
+        --tool-line: #bfdbfe;
+        --tool-text: #1e40af;
+        --content-width: 800px;
+        --card-radius: 8px;
+        --control-radius: 6px;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      [hidden] { display: none !important; }
+      body {
+        padding: 48px 24px;
+        background: var(--page);
+        color: var(--text);
+        font: 14px/1.65 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .container { max-width: var(--content-width); margin: 0 auto; }
+      h1 {
+        margin-bottom: 8px;
+        color: var(--heading);
+        font-size: 32px;
+        font-weight: 700;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+      }
+      h2 { color: var(--heading); font-size: 20px; font-weight: 600; }
+      .metadata { color: var(--muted); font-size: 15px; overflow-wrap: anywhere; }
+      .nav-toc {
+        padding: 16px;
+        margin: 24px 0 32px;
+        border: 1px solid var(--line);
+        border-radius: var(--card-radius);
+        background: var(--surface);
+        max-height: 220px;
+        overflow: auto;
+      }
+      .nav-toc ol { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; }
+      .nav-toc a {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: var(--control-radius);
+        background: var(--subtle);
+        color: var(--muted);
+        font-size: 12px;
+        text-decoration: none;
+        overflow-wrap: anywhere;
+        transition: background-color .15s, color .15s;
+      }
+      .nav-toc a:hover { background: var(--line); color: var(--text); }
+      .stats-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+        padding: 20px 0;
+        margin-bottom: 24px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      .stat { min-width: 72px; text-align: center; }
+      .stat-value { color: var(--heading); font-size: 24px; font-weight: 700; }
+      .stat-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+      .notice { margin-bottom: 24px; color: var(--muted); font-size: 12px; }
+      .export-notes {
+        padding: 20px 24px;
+        margin-bottom: 24px;
+        border: 1px solid #f59e0b;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #fef3c7, #fde68a);
+        color: #78350f;
+      }
+      .export-notes h2 { margin-bottom: 12px; color: #92400e; font-size: 16px; font-weight: 700; }
+      .export-notes ul { padding-left: 20px; }
+      .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 24px 0 16px; }
+      .controls label { margin-left: 4px; color: var(--muted); font-size: 12px; }
+      input { accent-color: var(--accent); }
+      button {
+        padding: 6px 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--control-radius);
+        background: var(--surface);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color .15s;
+      }
+      button:hover:not(:disabled) { background: var(--subtle); }
+      #expand-tools { border-color: var(--accent); background: var(--accent); color: #fff; }
+      #expand-tools:hover:not(:disabled) { background: var(--accent-hover); }
+      button:disabled { opacity: .5; cursor: default; }
+      :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+      article {
+        margin-bottom: 16px;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: var(--card-radius);
+        background: var(--surface);
+        scroll-margin-top: 24px;
+      }
+      article h2 { margin-bottom: 12px; font-size: 15px; }
+      article.user { border-left: 3px solid var(--accent); }
+      article.tool { background: var(--tool-surface); border-color: var(--tool-line); }
+      article.thinking { background: #faf5ff; border-color: #e9d5ff; }
+      time { display: inline-block; margin-left: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+      .prose { font: inherit; line-height: 1.7; }
+      details pre { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+      .tool pre { border-color: var(--tool-line); }
+      code { font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      summary { cursor: pointer; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+      .tool summary { color: var(--tool-text); }
+      @media (max-width: 640px) {
+        body { padding: 28px 16px; }
+        h1 { font-size: 28px; }
+        .stats-row { justify-content: center; gap: 20px; }
+        article { padding: 16px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .nav-toc a, button { transition: none; }
+      }
+      @media print {
+        body { padding: 0; }
+        nav, .controls { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <main>
+        <header>
+          <h1>{{title}}</h1>
+          <p class="metadata">{{metadata}}</p>
+        </header>
+        <nav class="nav-toc" aria-label="Conversation turns">{{toc}}</nav>
+        <div class="stats-row" aria-label="Export contents">{{stats}}</div>
+        <p class="notice">{{notice}}</p>
+        {{notes}}
+        <div class="controls" hidden>
+          <button type="button" id="expand-tools">Expand tools</button>
+          <button type="button" id="collapse-tools">Collapse tools</button>
+          <label id="thinking-control" hidden><input type="checkbox" id="show-thinking" checked> Show thinking</label>
+        </div>
+        {{body}}
+      </main>
+    </div>
+    <script>
+      const tools = document.querySelectorAll(".tool details");
+      const thinking = document.querySelectorAll(".thinking");
+      document.querySelector(".controls").hidden = false;
+      document.getElementById("expand-tools").disabled = tools.length === 0;
+      document.getElementById("collapse-tools").disabled = tools.length === 0;
+      document.getElementById("thinking-control").hidden = thinking.length === 0;
+      document.getElementById("expand-tools").addEventListener("click", () => tools.forEach((tool) => { tool.open = true; }));
+      document.getElementById("collapse-tools").addEventListener("click", () => tools.forEach((tool) => { tool.open = false; }));
+      document.getElementById("show-thinking").addEventListener("change", (event) => thinking.forEach((record) => { record.hidden = !event.target.checked; }));
+    </script>
+  </body>
+</html>

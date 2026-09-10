@@ -223,7 +223,7 @@ Six skills for work that outlives one session, and for the config that work drag
 | Skill | Use it when |
 | --- | --- |
 | `handoff` | Context is long or degrading and the next session needs a self-contained brief — printed, or written to a file a fresh session can pick up. |
-| `session-export` | You want the transcript itself as readable markdown, tool calls collapsed. |
+| `session-export` | Save the transcript as Markdown, standalone HTML, or structured JSON, with optional tool details. |
 | `log-it` | A session found something non-obvious and it should outlive the window. Routes each fact by who has to read it. |
 | `wayfinder` | The effort is too big for one session. Charts it as decision tickets under `docs/plans/`, one resolved per session. |
 | `context-budget` | You want to know what is eating the context window — agents, skills, MCP servers, rules — ranked by what you would get back. |
