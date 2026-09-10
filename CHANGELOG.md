@@ -5,6 +5,35 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-10
+
+Session exports now support Markdown, standalone HTML, and structured JSON through the existing `session-to-md` command.
+`context-handoff` moves to 0.2.0 for the new formats, report theme, and record preservation.
+`guard-hooks` remains at 0.2.8, and `repo-gate` remains at 0.2.0.
+
+### Added
+
+- `context-handoff` 0.2.0 adds `session-to-md --format html` and `--format json` alongside the default Markdown export.
+  HTML includes a light report theme, a turn index, export counts, and tool expansion controls without external resources.
+  JSON uses a versioned, filtered record structure with export diagnostics.
+
+### Changed
+
+- `session-to-md` defaults to prose only.
+  Use `--tools collapsed` or `--tools full` to include complete tool inputs and results.
+  Folding no longer truncates content, and `--tool-limit` provides an explicit character limit.
+  Default filenames use the session ID instead of prompt text, and `--list` prints metadata without prompt previews.
+- `session-export` passes the current session ID through Claude's skill substitution instead of assuming the newest transcript is active.
+  Direct CLI calls without an ID still select by modification time and report that choice.
+
+### Fixed
+
+- All export formats preserve user text recorded alongside tool results, pair each call with all recorded results, and distinguish empty results from missing results.
+  Export notes report malformed lines, unsupported content, missing or ambiguous results, and explicit truncation.
+- Quoted command tags preserve their surrounding prose, and nested or unclosed internal wrappers are removed.
+- Exports use file mode `0600` and retain exclusive file creation.
+  HTML escapes transcript markup and restricts resource loading with a content security policy.
+
 ## [0.4.0] — 2026-09-09
 
 A sixth `repo-gate` skill, markdownlint triage, with a `bin/` helper hardened through six hosted review rounds, and one more home-directory `rm` shape refused by `guard-hooks`.
