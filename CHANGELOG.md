@@ -5,6 +5,13 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Fixed
+
+- `repo-gate` 0.2.1 `ci-babysit` no longer reads an empty `steps` array as a billing or runner block on its own.
+  This supersedes the 0.3.9 wording, "a billing or runner block upstream of the workflow, read from the run's annotation, not from a diff": the guidance now requires the annotation on `gh run view <id>` to name the upstream cause — billing, a spending limit, or the runner — before the failure is classified Environmental.
+  An annotation that names an ordinary cause is the diagnosis instead, and only when the annotation is absent or inconclusive does the reader move on to the run's other jobs and the normal failure diagnosis: a reusable-workflow caller fails with the same `steps: []` for an ordinary reason.
+  Raised by CodeRabbit on #9 and left out of that pull request; tracked as #10.
+
 ## [0.5.0] — 2026-09-10
 
 Session exports now support Markdown, standalone HTML, and structured JSON through the existing `session-to-md` command.
