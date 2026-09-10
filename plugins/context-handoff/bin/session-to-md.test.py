@@ -3,6 +3,9 @@
 
 import os
 import json
+import base64
+import hashlib
+import re
 import subprocess
 import tempfile
 import unittest
@@ -281,6 +284,14 @@ class ExportTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;", html)
         self.assertIn("Content-Security-Policy", html)
         self.assertIn("default-src 'none'", html)
+        policy = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)"', html)
+        self.assertIsNotNone(policy)
+        directives = {parts[0]: parts[1:] for directive in policy.group(1).split(";") if (parts := directive.split())}
+        for tag in ("style", "script"):
+            blocks = re.findall(rf"<{tag}>(.*?)</{tag}>", html, re.DOTALL)
+            self.assertEqual(len(blocks), 1)
+            expected = ["'sha256-" + base64.b64encode(hashlib.sha256(block.encode("utf-8")).digest()).decode("ascii") + "'" for block in blocks]
+            self.assertEqual(directives[f"{tag}-src"], expected, f"{tag} CSP hash must match the emitted block")
         self.assertIn("<details open>", html)
         self.assertIn('id="expand-tools"', html)
         self.assertIn('href="#record-1"', html)
