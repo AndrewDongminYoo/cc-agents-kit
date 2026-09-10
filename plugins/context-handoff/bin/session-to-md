@@ -1,347 +1,389 @@
 #!/usr/bin/env node
-// Render a Claude Code session .jsonl transcript as readable markdown.
-// Usage: session-to-md [sessionIdOrJsonlPath] [--out <file|dir>] [--tools collapsed|none|full] [--thinking] [--list] [--last N]
-// Defaults: latest session of the project for $PWD, tools collapsed, thinking omitted, output to ~/Downloads.
-
+// Export a Claude Code JSONL transcript as Markdown, standalone HTML, or JSON.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 
-const RESULT_LIMIT = 1200; // chars kept per tool result in collapsed mode
-const INPUT_VALUE_LIMIT = 400; // chars kept per tool-input string value
-
-function mungeCwd(p) {
-  return p.replace(/[^A-Za-z0-9]/g, "-");
-}
+const NOTICE = "Local transcript export. Review secrets and personal paths before sharing. Text is not automatically redacted.";
+const FORMATS = new Set(["md", "html", "json"]);
 
 function projectDir() {
-  // Transcripts live under the active config dir, which CLAUDE_CONFIG_DIR may
-  // move off $HOME. Falling back to ~/.claude reads a stale directory there.
   return path.join(
     process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"),
     "projects",
-    mungeCwd(process.cwd()),
+    process.cwd().replace(/[^A-Za-z0-9]/g, "-"),
   );
 }
 
 function listSessions(dir) {
   if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith(".jsonl"))
-    .map((f) => {
-      const full = path.join(dir, f);
-      const st = fs.statSync(full);
-      return {
-        file: full,
-        id: f.replace(/\.jsonl$/, ""),
-        mtime: st.mtime,
-        size: st.size,
-      };
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+    .map((entry) => {
+      const file = path.join(dir, entry.name);
+      const stat = fs.statSync(file);
+      return { file, id: path.basename(file, ".jsonl"), mtime: stat.mtime, size: stat.size };
     })
-    .sort((a, b) => b.mtime - a.mtime);
+    .sort((a, b) => b.mtime - a.mtime || a.id.localeCompare(b.id));
 }
 
 function readEntries(file) {
-  const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
   const entries = [];
-  for (const line of lines) {
+  let malformed = 0;
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
     try {
       entries.push(JSON.parse(line));
     } catch {
-      /* skip malformed line */
+      malformed += 1;
     }
   }
-  return entries;
+  return { entries, malformed };
 }
 
-function fmtTime(ts) {
-  if (!ts) return "";
-  const d = new Date(ts);
+function object(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isoTime(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function fmtTime(value) {
+  const iso = isoTime(value instanceof Date ? value.toISOString() : value);
+  if (!iso) return "";
+  const date = new Date(iso);
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function truncate(s, limit) {
-  if (typeof s !== "string" || s.length <= limit) return s;
-  let cut = s.slice(0, limit);
-  // Don't split a surrogate pair — a lone surrogate becomes U+FFFD on write.
-  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
-  return `${cut}\n… (+${s.length - cut.length} chars truncated)`;
-}
-
-// Tool results carry raw terminal output; ANSI CSI/OSC sequences and stray
-// control chars render as mojibake in markdown viewers.
-function stripAnsi(s) {
-  return s
-    .replace(
-      /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_])/g,
-      "",
-    )
+function stripAnsi(text) {
+  return text.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_])/g, "")
     .replace(/\r\n?/g, "\n")
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
 }
 
-function stripReminders(text) {
-  return text
-    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
-    .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "")
-    .replace(/^Caveat: The messages below were generated.*$/m, "")
-    .trim();
+function stripWrapper(text, tag) {
+  let depth = 0;
+  let cursor = 0;
+  let result = "";
+  for (const match of text.matchAll(new RegExp(`<(/?)${tag}>`, "g"))) {
+    if (!match[1]) {
+      if (depth === 0) result += text.slice(cursor, match.index);
+      depth += 1;
+    } else if (depth > 0) {
+      depth -= 1;
+      if (depth === 0) cursor = match.index + match[0].length;
+    }
+  }
+  // An unclosed wrapper contains the remainder of this message.
+  return result + (depth === 0 ? text.slice(cursor) : "");
 }
 
-function userTextOf(entry) {
-  const c = entry.message?.content;
-  if (typeof c === "string") return stripReminders(c);
-  if (Array.isArray(c)) {
-    const texts = c.filter((b) => b.type === "text").map((b) => b.text);
-    if (texts.length) return stripReminders(texts.join("\n\n"));
-  }
-  return null;
+function stripReminders(text) {
+  // Preserve indentation and trailing newlines in ordinary message text.
+  return stripWrapper(stripWrapper(text, "system-reminder"), "local-command-stdout")
+    .replace(/^Caveat: The messages below were generated.*$/m, "");
 }
 
 function commandLineOf(text) {
-  const name = text
-    .match(/<command-name>([\s\S]*?)<\/command-name>/)?.[1]
-    ?.trim();
-  if (!name) return null;
-  const cmdArgs = text
-    .match(/<command-args>([\s\S]*?)<\/command-args>/)?.[1]
-    ?.trim();
-  return `\`${name}${cmdArgs ? ` ${cmdArgs}` : ""}\``;
+  const pattern = /<(command-name|command-message|command-args)>([\s\S]*?)<\/\1>/g;
+  const fields = [...text.matchAll(pattern)];
+  if (text.replace(pattern, "").trim() || new Set(fields.map((field) => field[1])).size !== fields.length) return text;
+  const name = fields.find((field) => field[1] === "command-name")?.[2].trim();
+  if (!name?.startsWith("/") || /\s/.test(name)) return text;
+  const args = fields.find((field) => field[1] === "command-args")?.[2].trim();
+  const command = `${name}${args ? ` ${args}` : ""}`;
+  const fence = "`".repeat(Math.max(0, ...(command.match(/`+/g) || []).map((s) => s.length)) + 1);
+  return `${fence} ${command} ${fence}`;
 }
 
-function compactInput(input) {
-  const shrink = (v) => {
-    if (typeof v === "string") return truncate(v, INPUT_VALUE_LIMIT);
-    if (Array.isArray(v)) return v.map(shrink);
-    if (v && typeof v === "object")
-      return Object.fromEntries(
-        Object.entries(v).map(([k, x]) => [k, shrink(x)]),
-      );
-    return v;
+function visible(entry) {
+  return object(entry) && !entry.isSidechain && !entry.isMeta && !entry.isCompactSummary
+    && (entry.type === "user" || entry.type === "assistant");
+}
+
+function blocksOf(entry) {
+  const content = entry.message?.content;
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  return Array.isArray(content) ? content : [];
+}
+
+function contentText(content, diagnostics, clean = false) {
+  if (typeof content === "string") return clean ? stripAnsi(content) : content;
+  if (!Array.isArray(content)) {
+    if (content == null) return "";
+    diagnostics.omitted_content_blocks += 1;
+    return "[Unsupported content omitted]";
+  }
+  return content.map((block) => {
+    if (object(block) && block.type === "text" && typeof block.text === "string") {
+      return clean ? stripAnsi(block.text) : block.text;
+    }
+    diagnostics.omitted_content_blocks += 1;
+    const label = { image: "Image", audio: "Audio", document: "Document", file: "File" }[block?.type] || "Unsupported content";
+    return `[${label} omitted]`;
+  }).join("\n\n");
+}
+
+function normalize(entries, opts, malformed) {
+  const records = [];
+  const diagnostics = {
+    malformed_lines: malformed, unsupported_records: 0, omitted_content_blocks: 0,
+    missing_tool_outputs: 0, orphan_tool_outputs: 0, ambiguous_tool_outputs: 0,
+    truncated_values: 0,
   };
-  return JSON.stringify(shrink(input ?? {}), null, 2);
-}
-
-function resultTextOf(block) {
-  const c = block.content;
-  if (typeof c === "string") return stripAnsi(c);
-  if (Array.isArray(c))
-    return stripAnsi(
-      c
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("\n"),
-    );
-  return "";
-}
-
-function render(entries, opts) {
-  const out = [];
-  let sectionRole = null; // 'user' | 'assistant'
-  const openSection = (role, ts) => {
-    if (sectionRole === role) return;
-    sectionRole = role;
-    const head = role === "user" ? "## 👤 User" : "## 🤖 Claude";
-    out.push(`${head} · ${fmtTime(ts)}`, "");
-  };
-
-  for (const e of entries) {
-    if (e.isSidechain) continue;
-    if (e.type === "assistant") {
-      for (const block of e.message?.content ?? []) {
-        if (block.type === "text" && block.text?.trim()) {
-          openSection("assistant", e.timestamp);
-          out.push(block.text.trim(), "");
-        } else if (
-          block.type === "thinking" &&
-          opts.thinking &&
-          block.thinking?.trim()
-        ) {
-          openSection("assistant", e.timestamp);
-          out.push("> 💭 " + block.thinking.trim().replace(/\n/g, "\n> "), "");
-        } else if (block.type === "tool_use" && opts.tools !== "none") {
-          openSection("assistant", e.timestamp);
-          out.push(
-            `<details><summary>🔧 ${block.name}</summary>`,
-            "",
-            "```json",
-            compactInput(block.input),
-            "```",
-            "",
-            "</details>",
-            "",
-          );
+  const calls = new Map();
+  const outputs = new Map();
+  // Count all call owners, including excluded entries, before pairing results.
+  if (opts.tools !== "none") {
+    for (const entry of entries) {
+      if (!object(entry)) continue;
+      for (const block of blocksOf(entry)) {
+        if (!object(block)) continue;
+        if (block.type === "tool_use" && typeof block.id === "string") {
+          calls.set(block.id, (calls.get(block.id) || 0) + 1);
+        } else if (visible(entry) && entry.type === "user" && block.type === "tool_result") {
+          const id = typeof block.tool_use_id === "string" ? block.tool_use_id : null;
+          if (!outputs.has(id)) outputs.set(id, []);
+          outputs.get(id).push({ block, timestamp: isoTime(entry.timestamp) });
         }
       }
-    } else if (e.type === "user") {
-      const content = e.message?.content;
-      if (
-        Array.isArray(content) &&
-        content.some((b) => b.type === "tool_result")
-      ) {
-        if (opts.tools === "none") continue;
-        for (const block of content.filter((b) => b.type === "tool_result")) {
-          const text = resultTextOf(block).trim();
-          if (!text) continue;
-          const label = block.is_error ? "↳ Error" : "↳ Result";
-          const body =
-            opts.tools === "full" ? text : truncate(text, RESULT_LIMIT);
-          out.push(
-            `<details><summary>${label}</summary>`,
-            "",
-            body,
-            "",
-            "</details>",
-            "",
-          );
-        }
-        continue;
-      }
-      const text = userTextOf(e);
-      if (!text) continue;
-      openSection("user", e.timestamp);
-      out.push(commandLineOf(text) ?? text, "");
     }
   }
-  return out.join("\n");
+  let turn = 0;
+  const add = (record, entry) => {
+    records.push({ id: `record-${records.length + 1}`, turn, timestamp: isoTime(entry.timestamp), ...record });
+  };
+  const limit = (text) => {
+    if (!opts["tool-limit"]) return text;
+    const chars = Array.from(text);
+    if (chars.length <= opts["tool-limit"]) return text;
+    diagnostics.truncated_values += 1;
+    return `${chars.slice(0, opts["tool-limit"]).join("")}\n… (+${chars.length - opts["tool-limit"]} chars truncated)`;
+  };
+  for (const entry of entries) {
+    if (!object(entry)) {
+      diagnostics.unsupported_records += 1;
+      continue;
+    }
+    if (!visible(entry)) {
+      if (!entry.isSidechain && !entry.isMeta && !entry.isCompactSummary &&
+          !["system", "progress", "summary", "file-history-snapshot", "queue-operation", "ai-title", "custom-title", "last-prompt"].includes(entry.type)) {
+        diagnostics.unsupported_records += 1;
+      }
+      continue;
+    }
+    const blocks = blocksOf(entry);
+    if (!blocks.length) diagnostics.unsupported_records += 1;
+    let startedTurn = false;
+    let text = [];
+    const flush = () => {
+      const body = text.join("\n\n");
+      text = [];
+      if (!body.trim()) return;
+      if (entry.type === "user" && !startedTurn) {
+        turn += 1;
+        startedTurn = true;
+      }
+      add({ type: "message", role: entry.type, text: entry.type === "user" ? commandLineOf(body) : body }, entry);
+    };
+    for (const block of blocks) {
+      if (object(block) && block.type === "text" && typeof block.text === "string") {
+        text.push(entry.type === "user" ? stripReminders(block.text) : block.text);
+      } else if (block?.type === "thinking" || block?.type === "redacted_thinking") {
+        if (opts.thinking && entry.type === "assistant" && typeof block.thinking === "string" && block.thinking.trim()) {
+          flush();
+          add({ type: "thinking", role: "assistant", text: block.thinking }, entry);
+        }
+      } else if (block?.type === "tool_use" && entry.type === "assistant") {
+        flush();
+        if (opts.tools === "none") continue;
+        const id = typeof block.id === "string" ? block.id : null;
+        const ambiguous = id !== null && calls.get(id) > 1;
+        const results = id === null ? [] : outputs.get(id) || [];
+        const before = diagnostics.truncated_values;
+        const input = limit(JSON.stringify(block.input ?? {}, null, 2));
+        const included = ambiguous ? [] : results.map((result) => ({
+          text: limit(contentText(result.block.content, diagnostics, true)),
+          timestamp: result.timestamp, is_error: result.block.is_error === true,
+        }));
+        const state = ambiguous ? "excluded" : included.length ? "recorded" : "missing";
+        if (state === "missing") diagnostics.missing_tool_outputs += 1;
+        add({ type: "tool", name: typeof block.name === "string" ? block.name : "unknown",
+          call_id: id, input, outputs: included, output_state: state,
+          truncated_values: diagnostics.truncated_values - before }, entry);
+      } else if (block?.type !== "tool_result" || entry.type !== "user") {
+        text.push(contentText([block], diagnostics));
+      }
+    }
+    flush();
+  }
+  for (const [id, results] of outputs) {
+    if (!calls.has(id)) diagnostics.orphan_tool_outputs += results.length;
+    else if (calls.get(id) > 1) diagnostics.ambiguous_tool_outputs += results.length;
+  }
+  if (!records.length) throw new Error("Transcript has no exportable conversation records");
+  return { records, diagnostics };
+}
+
+function buildExport(entries, opts, malformed, file) {
+  const { records, diagnostics } = normalize(entries, opts, malformed);
+  const publicEntries = entries.filter(visible);
+  const firstUser = records.find((r) => r.type === "message" && r.role === "user");
+  const aiTitle = entries.filter((e) => object(e) && !e.isSidechain && !e.isMeta && !e.isCompactSummary && ["ai-title", "custom-title"].includes(e.type))
+    .map((e) => e.aiTitle ?? e.customTitle ?? e.title ?? e.sessionTitle)
+    .filter((title) => typeof title === "string" && title.trim()).pop();
+  const session = path.basename(file, ".jsonl");
+  const title = (aiTitle || firstUser?.text.split("\n").find((line) => line.trim()) || session).slice(0, 160);
+  const times = publicEntries.map((e) => isoTime(e.timestamp)).filter(Boolean).sort();
+  const models = publicEntries.map((e) => e.type === "assistant" ? e.message?.model : null).filter((model) => typeof model === "string");
+  const metadata = {
+    title, session, cwd: publicEntries.find((e) => typeof e.cwd === "string")?.cwd || process.cwd(),
+    model: [...new Set(models)].join(", ") || "unknown", create_time: times[0] || "",
+    update_time: times.at(-1) || "", exported_at: new Date().toISOString(),
+    tools: opts.tools, thinking: opts.thinking, tool_limit: opts["tool-limit"] || null,
+  };
+  const labels = {
+    malformed_lines: "Malformed JSONL lines skipped", unsupported_records: "Unsupported records omitted",
+    omitted_content_blocks: "Attachment or unsupported content placeholders",
+    missing_tool_outputs: "Tool calls with no recorded output", orphan_tool_outputs: "Unmatched tool outputs omitted",
+    ambiguous_tool_outputs: "Ambiguous tool outputs omitted", truncated_values: "Tool values explicitly truncated",
+  };
+  const notes = Object.entries(diagnostics).filter(([, count]) => count > 0).map(([key, count]) => `${labels[key]}: ${count}.`);
+  return { schema_version: 1, metadata, privacy_notice: NOTICE, diagnostics, notes, records };
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function markdownLabel(text) {
+  return escapeHtml(text.replace(/[\r\n]/g, " ")).replace(/[\\`*_{}\[\]()#+.!|~-]/g, "\\$&");
+}
+
+function turnLinks(records) {
+  const seen = new Set();
+  return records.filter((record) => {
+    if (seen.has(record.turn)) return false;
+    seen.add(record.turn);
+    return true;
+  }).map((record) => ({ id: record.id, label: record.turn ? `Turn ${record.turn}` : "Before first user message" }));
+}
+
+function heading(record) {
+  if (record.type === "tool") return `🔧 ${record.name}`;
+  if (record.type === "thinking") return "Thinking (opt-in)";
+  return record.role === "user" ? "👤 User" : "🤖 Claude";
+}
+
+function toolBody(record) {
+  const chunks = [`Input\n${record.input}`];
+  record.outputs.forEach((output, index) => chunks.push(`${output.is_error ? "Error" : "Output"} ${index + 1} · ${fmtTime(output.timestamp)}\n${output.text}`));
+  if (record.output_state === "missing") chunks.push("No output recorded. The call may be pending or interrupted.");
+  if (record.output_state === "excluded") chunks.push("Output omitted because the call ID has multiple owners.");
+  return chunks.join("\n\n");
+}
+
+function renderMarkdown(doc) {
+  const lines = ["---", ...Object.entries(doc.metadata).map(([key, value]) => `${key}: ${JSON.stringify(value)}`), "---", "", `# ${markdownLabel(doc.metadata.title)}`, "", `> ${NOTICE}`, ""];
+  if (doc.notes.length) lines.push("## Export notes", "", ...doc.notes.map((note) => `- ${note}`), "");
+  lines.push("## Conversation", "", ...turnLinks(doc.records).map((link) => `- [${link.label}](#${link.id})`), "");
+  for (const record of doc.records) {
+    lines.push(`<a id="${record.id}"></a>`, "");
+    if (record.type === "tool" || record.type === "thinking") {
+      lines.push(`<details${record.type === "tool" && doc.metadata.tools === "full" ? " open" : ""}><summary>${escapeHtml(heading(record))} · ${fmtTime(record.timestamp)}</summary>`, "",
+        `<pre><code>${escapeHtml(record.type === "tool" ? toolBody(record) : record.text)}</code></pre>`, "", "</details>", "");
+    } else lines.push(`## ${heading(record)} · ${fmtTime(record.timestamp)}`, "", record.text, "");
+  }
+  return lines.join("\n") + "\n";
+}
+
+function renderHtml(doc) {
+  const template = fs.readFileSync(new URL("../skills/session-export/templates/session.html", import.meta.url), "utf8");
+  const inlineHash = (tag) => createHash("sha256").update(template.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))[1]).digest("base64");
+  const body = doc.records.map((record) => {
+    const title = `${escapeHtml(heading(record))} <time datetime="${record.timestamp}">${fmtTime(record.timestamp)}</time>`;
+    if (record.type === "tool" || record.type === "thinking") {
+      return `<article id="${record.id}" class="${record.type}"><details${record.type === "tool" && doc.metadata.tools === "full" ? " open" : ""}><summary>${title}</summary><pre><code>${escapeHtml(record.type === "tool" ? toolBody(record) : record.text)}</code></pre></details></article>`;
+    }
+    return `<article id="${record.id}" class="${record.role}"><h2>${title}</h2><pre class="prose">${escapeHtml(record.text)}</pre></article>`;
+  }).join("\n");
+  const values = {
+    title: escapeHtml(doc.metadata.title), notice: escapeHtml(NOTICE), body,
+    stats: [
+      ["turns", new Set(doc.records.map((record) => record.turn).filter((turn) => turn > 0)).size, "Turns"],
+      ["messages", doc.records.filter((record) => record.type === "message").length, "Messages"],
+      ["tools", doc.records.filter((record) => record.type === "tool").length, "Tool calls included"],
+    ].map(([key, count, label]) => `<div class="stat"><div class="stat-value" data-stat="${key}">${count}</div><div class="stat-label">${label}</div></div>`).join(""),
+    toc: `<ol>${turnLinks(doc.records).map((link) => `<li><a href="#${link.id}">${link.label}</a></li>`).join("")}</ol>`,
+    metadata: [doc.metadata.model, `Started: ${fmtTime(doc.metadata.create_time)}`, `Updated: ${fmtTime(doc.metadata.update_time)}`, `Session: ${doc.metadata.session}`].map(escapeHtml).join("<br>"),
+    notes: doc.notes.length ? `<section class="export-notes" aria-label="Export notes"><h2>Export notes</h2><ul>${doc.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul></section>` : "",
+    style_hash: inlineHash("style"), script_hash: inlineHash("script"),
+  };
+  return template.replace(/\{\{([a-z_]+)\}\}/g, (_, key) => values[key]);
 }
 
 function main() {
-  // Strict by default, so a mistyped flag errors instead of being taken as a
-  // session id, the way the hand-rolled loop this replaced did. Reported as one
-  // line — a stack trace reads as a broken tool.
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: process.argv.slice(2),
-      options: {
-        out: { type: "string" },
-        tools: { type: "string", default: "collapsed" },
-        thinking: { type: "boolean", default: false },
-        list: { type: "boolean", default: false },
-        last: { type: "string", default: "1" },
-      },
-      allowPositionals: true,
-    });
-  } catch (e) {
-    console.error(e.message);
-    process.exit(1);
+  const { values, positionals } = parseArgs({
+    options: {
+      out: { type: "string" }, format: { type: "string", default: "md" },
+      tools: { type: "string", default: "none" }, "tool-limit": { type: "string" },
+      thinking: { type: "boolean", default: false }, list: { type: "boolean", default: false },
+      last: { type: "string", default: "1" },
+    }, allowPositionals: true,
+  });
+  for (const key of ["last", "tool-limit"]) {
+    if (values[key] === undefined) continue;
+    if (!/^[1-9][0-9]*$/.test(values[key]) || !Number.isSafeInteger(Number(values[key]))) throw new Error(`--${key} must be a positive integer`);
+    values[key] = Number(values[key]);
   }
-  const { values, positionals } = parsed;
-  if (!/^[1-9][0-9]*$/.test(values.last)) {
-    console.error("--last must be a positive integer");
-    process.exit(1);
-  }
-  if (!new Set(["collapsed", "none", "full"]).has(values.tools)) {
-    console.error("--tools must be collapsed, none, or full");
-    process.exit(1);
-  }
-  if (positionals.length > 1) {
-    console.error("Only one session identifier is allowed");
-    process.exit(1);
-  }
-  const args = { ...values, last: Number(values.last), target: positionals[0] };
+  if (!FORMATS.has(values.format)) throw new Error("--format must be md, html, or json");
+  if (!["none", "collapsed", "full"].includes(values.tools)) throw new Error("--tools must be collapsed, none, or full");
+  if (positionals.length > 1) throw new Error("Only one session identifier is allowed");
   const dir = projectDir();
-
-  if (args.list) {
-    for (const s of listSessions(dir)) {
-      const first = readEntries(s.file).find(
-        (e) => e.type === "user" && userTextOf(e),
-      );
-      const preview = (first ? userTextOf(first) : "")
-        .split("\n")[0]
-        .slice(0, 80);
-      console.log(
-        `${s.id}  ${fmtTime(s.mtime)}  ${(s.size / 1024).toFixed(0)}KB  ${preview}`,
-      );
-    }
+  if (values.list) {
+    for (const session of listSessions(dir)) console.log(`${session.id}  ${fmtTime(session.mtime)}  ${(session.size / 1024).toFixed(0)}KB`);
     return;
   }
-
-  let file = args.target;
-  if (file && !file.endsWith(".jsonl")) file = path.join(dir, `${file}.jsonl`);
+  let file = positionals[0];
+  if (file && !file.endsWith(".jsonl")) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(file)) throw new Error("Invalid session identifier. Use an ID or a JSONL path");
+    file = path.join(dir, `${file}.jsonl`);
+  }
   if (!file) {
     const sessions = listSessions(dir);
-    if (!sessions.length) {
-      console.error(`No sessions found under ${dir}`);
-      process.exit(1);
-    }
-    if (
-      !Number.isInteger(args.last) ||
-      args.last < 1 ||
-      args.last > sessions.length
-    ) {
-      console.error(
-        `--last must be 1..${sessions.length} (this project has ${sessions.length} sessions)`,
-      );
-      process.exit(1);
-    }
-    file = sessions[args.last - 1].file;
+    if (!sessions.length) throw new Error(`No sessions found under ${dir}`);
+    if (values.last > sessions.length) throw new Error(`--last must be 1..${sessions.length} (this project has ${sessions.length} sessions)`);
+    file = sessions[values.last - 1].file;
+    console.error("Selected by modification time. Pass a session ID to select an exact session.");
   }
-  if (!fs.existsSync(file)) {
-    console.error(`Transcript not found: ${file}`);
-    process.exit(1);
-  }
-
-  const entries = readEntries(file);
-  const sessionId = path.basename(file, ".jsonl");
-  const aiTitle = entries
-    .filter((e) => e.type === "ai-title")
-    .map((e) => e.aiTitle ?? e.title ?? e.sessionTitle)
-    .filter(Boolean)
-    .pop();
-  const firstUser = entries.find(
-    (e) => e.type === "user" && !e.isSidechain && userTextOf(e),
-  );
-  const title =
-    aiTitle ||
-    (firstUser ? userTextOf(firstUser).split("\n")[0].slice(0, 80) : sessionId);
-  const model =
-    entries.find((e) => e.type === "assistant" && e.message?.model)?.message
-      ?.model ?? "unknown";
-  const times = entries
-    .map((e) => e.timestamp)
-    .filter(Boolean)
-    .sort();
-
-  const body = render(entries, args);
-  const fm = [
-    "---",
-    `title: ${JSON.stringify(title)}`,
-    `session: "${sessionId}"`,
-    `cwd: ${JSON.stringify(firstUser?.cwd ?? process.cwd())}`,
-    `model: "${model}"`,
-    `create_time: "${times[0] ?? ""}"`,
-    `update_time: "${times[times.length - 1] ?? ""}"`,
-    `exported_at: "${new Date().toISOString()}"`,
-    "---",
-  ].join("\n");
-
-  const doc = `${fm}\n\n# ${title}\n\n${body}\n`;
-
-  let outPath = args.out;
-  const slug =
-    title
-      .replace(/[\\/:*?"<>|]/g, "-")
-      .slice(0, 60)
-      .trim() || sessionId;
-  // Local date, matching the section headers — a UTC slice would file
-  // KST early-morning sessions under the previous day.
-  const localDate = times[0] ? fmtTime(times[0]).slice(0, 10) : "session";
-  const defaultName = `${localDate}-${slug}.md`;
+  if (!fs.existsSync(file)) throw new Error(`Transcript not found: ${file}`);
+  const { entries, malformed } = readEntries(file);
+  const doc = buildExport(entries, values, malformed, file);
+  const rendered = values.format === "json" ? JSON.stringify(doc, null, 2) + "\n" : values.format === "html" ? renderHtml(doc) : renderMarkdown(doc);
+  const safeId = doc.metadata.session.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 100) || "session";
+  const defaultName = `${fmtTime(doc.metadata.create_time).slice(0, 10) || "session"}-${safeId}.${values.format}`;
+  let output = values.out || path.join(os.homedir(), "Downloads", defaultName);
+  if (fs.existsSync(output) && fs.statSync(output).isDirectory()) output = path.join(output, defaultName);
+  const extension = path.extname(output).slice(1).toLowerCase();
+  if (FORMATS.has(extension) && extension !== values.format) throw new Error(`Output extension does not match --format ${values.format}`);
   try {
-    if (!outPath) outPath = path.join(os.homedir(), "Downloads", defaultName);
-    else if (fs.existsSync(outPath) && fs.statSync(outPath).isDirectory())
-      outPath = path.join(outPath, defaultName);
-    fs.writeFileSync(outPath, doc, { flag: "wx" });
+    fs.writeFileSync(output, rendered, { flag: "wx", mode: 0o600 });
   } catch {
-    console.error(`Cannot create output file: ${outPath}`);
-    process.exit(1);
+    throw new Error(`Cannot create output file: ${output}`);
   }
-  console.log(outPath);
+  console.log(output);
+  for (const note of doc.notes) console.error(note);
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+}
