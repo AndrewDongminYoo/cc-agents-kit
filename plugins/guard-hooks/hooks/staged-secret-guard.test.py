@@ -305,6 +305,32 @@ rc, err = check_hook('git -C "$repo" commit -m x', clean)
 check("dynamic git -C path is blocked instead of mis-scanned", rc == 2, f"exit={rc}")
 check("unsafe commit form explains the parse failure", "could not safely parse" in err, f"stderr={err.strip()[:160]}")
 
+# --- a refusal must name the reason it was actually refused for -------------
+# An unquoted expansion can carry extra words, so a command that never mentions
+# commit still cannot be cleared -- but the old message called every one of
+# these a "git commit command" and sent the reader looking for a commit that is
+# not there. Refusal stays; only the advice changes, so each case below asserts
+# BOTH that it is still blocked and that the message points at quoting.
+for label, command in (
+    ("read-only log behind an unquoted path", "repo=/tmp; git -C $repo log --oneline -1"),
+    ("read-only status behind an unquoted path", "repo=/tmp; git -C $repo status --porcelain"),
+    ("a git call inside a loop over unquoted words", "for d in a b; do git -C /tmp/$d status -s; done"),
+    ("an expansion standing where the subcommand goes", "sub=log; git $sub --oneline -1"),
+):
+    rc, err = check_hook(command, clean)
+    check(f"{label} is still refused", rc == 2, f"exit={rc}")
+    check(f"{label} is not called a commit", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
+    check(f"{label} advises quoting", "unquoted expansion" in err, f"stderr={err.strip()[:160]}")
+
+# The same shape with the expansion quoted carries no extra words, so the
+# subcommand is trustworthy and a read-only call must pass untouched.
+rc, err = check_hook('repo=/tmp; git -C "$repo" status --porcelain', clean)
+check("a quoted expansion leaves a read-only call alone", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
+# A real commit keeps the parse message: quoting is not the fix there.
+rc, err = check_hook("dir=/tmp; git commit -F $dir/msg.txt", dirty)
+check("a commit whose -F cannot be resolved still names the commit", "could not safely parse" in err, f"stderr={err.strip()[:160]}")
+
 # --- the commit flag table must match git's own grammar ---------------------
 # Every case below distinguishes "parsed, scanned, found the credential" from
 # "refused to parse". Both exit 2, so exit code alone proves nothing.
