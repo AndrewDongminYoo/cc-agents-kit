@@ -316,8 +316,13 @@ while ((token_index < token_count)); do
           # cannot see, and `git "$cmd" -m x` with cmd=commit is a commit, so it
           # is refused whether or not it could also split. main has this hole
           # too; it is closed here because this branch owns the question of when
-          # the scan may trust a token.
-          [[ -z "${TOKEN_EXPANSION[scan_index]-}" ]] || block_unquoted_expansion
+          # the scan may trust a token. Only a splittable expansion earns the
+          # quoting advice: `git "$sub"` is already quoted and still cannot be
+          # identified, so telling it to quote would send it in a circle.
+          case "${TOKEN_EXPANSION[scan_index]-}" in
+            split) block_unquoted_expansion ;;
+            quoted) block_unparsed ;;
+          esac
           # Scanning past it would read its own arguments, where a value such as
           # `--grep commit` is a search term rather than an invocation.
           #

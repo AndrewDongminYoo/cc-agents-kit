@@ -327,9 +327,22 @@ for label, command in (
 rc, err = check_hook('repo=/tmp; git -C "$repo" status --porcelain', clean)
 check("a quoted expansion leaves a read-only call alone", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
 
-# A real commit keeps the parse message: quoting is not the fix there.
+# A quoted expansion AS the subcommand is a different case: it cannot split,
+# but it still resolves to a word this hook never sees, so it is refused -- and
+# telling it to quote would send it in a circle. It keeps the parse message.
+rc, err = check_hook('sub=log; git "$sub" --oneline -1', clean)
+check("a quoted expansion as the subcommand is still refused", rc == 2, f"exit={rc}")
+check("a quoted expansion as the subcommand is not told to quote", "unquoted expansion" not in err, f"stderr={err.strip()[:160]}")
+check("a quoted expansion as the subcommand keeps the parse message", "could not safely parse" in err, f"stderr={err.strip()[:160]}")
+
+# A real commit keeps the parse message: quoting is not the fix there. Both
+# halves are asserted -- a message with exit 0 would be a hook that fails open.
 rc, err = check_hook("dir=/tmp; git commit -F $dir/msg.txt", dirty)
-check("a commit whose -F cannot be resolved still names the commit", "could not safely parse" in err, f"stderr={err.strip()[:160]}")
+check(
+    "a commit whose -F cannot be resolved is blocked with the commit message",
+    rc == 2 and "could not safely parse" in err,
+    f"exit={rc} stderr={err.strip()[:160]}",
+)
 
 # --- the commit flag table must match git's own grammar ---------------------
 # Every case below distinguishes "parsed, scanned, found the credential" from
