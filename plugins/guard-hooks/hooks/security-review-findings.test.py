@@ -3,12 +3,13 @@
 
 The fixtures are transcript files laid out the way Claude Code writes them:
 one JSONL per session under <config>/projects/<slug>/, where the slug is the
-repository's full path with `/`, `.` and `_` dashed. CLAUDE_CONFIG_DIR points
+repository's full path with every non-alphanumeric character dashed. CLAUDE_CONFIG_DIR points
 the hook at a temporary tree so no real transcript is read.
 """
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -30,7 +31,8 @@ def check(label, condition, detail=""):
 
 
 def slug(path):
-    return str(path).translate(str.maketrans("/._", "---"))
+    """The rule context-handoff/bin/session-to-md uses: every non-alphanumeric character becomes a dash."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
 def dumps(obj):
@@ -107,15 +109,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the message says it does not block", ctx is not None and "nothing is blocked" in ctx)
     check("the category and explanation come through", ctx is not None and "trust-boundary" in ctx and "unvalidated header" in ctx)
 
-    # Any global option may sit between `git` and `commit`; the recognizer is
-    # loose on purpose because the hook only warns, so an over-match costs a
-    # lookup that finds nothing while a miss loses the one moment it exists for.
+    # Global options between `git` and `commit` are consumed, so the subcommand
+    # is identified by position rather than by the word appearing anywhere.
     for label, command in (
-        ("git -C <path> commit is recognised as a commit", "git -C /somewhere/else commit -F msg.txt"),
-        ("a quoted -C path with whitespace is recognised", 'git -C "/some where/else" commit -m x'),
+        ("git -C <this repo> commit is recognised as a commit", f"git -C {r} commit -F msg.txt"),
         ("git -c key=value commit is recognised", "git -c commit.gpgSign=false commit -m x"),
+        ("git -ckey=value (attached) commit is recognised", "git -ccommit.gpgSign=false commit -m x"),
         ("git --no-pager commit is recognised", "git --no-pager commit -m x"),
+        ("git --git-dir=<x> commit is recognised", f"git --git-dir={r}/.git commit -m x"),
         ("a commit after && is recognised", "git add a.txt && git commit -m x"),
+        ("a commit after ; is recognised", "git add a.txt; git commit -m x"),
+        ("a commit inside a subshell is recognised", "(git commit -m x)"),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, ctx is not None, f"ctx={ctx}")
@@ -123,12 +127,44 @@ with tempfile.TemporaryDirectory() as tmp:
     for label, command in (
         ("git status is not a commit", "git status --porcelain"),
         ("git log is not a commit", "git log --oneline -3"),
+        ("git log --grep commit is not a commit (the word is an argument)", "git log --grep commit"),
+        ("git show HEAD -- commit.txt is not a commit", "git show HEAD -- commit.txt"),
         ("a non-git command is ignored", "ls -la"),
         ("gitk commit is not git commit", "gitk commit"),
         ("git commitx is not git commit", "git commitx"),
+        ("a -C path that does not exist is silence, not the cwd's findings", "git -C /no/such/dir commit -m x"),
+        ("a -C path carrying an expansion is silence", "git -C $R commit -m x"),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, rc == 0 and ctx is None, f"exit={rc} ctx={ctx}")
+
+# --- -C and cd select the repository, not the hook's cwd ---------------------
+with tempfile.TemporaryDirectory() as tmp:
+    cfg = Path(tmp) / "cfg"
+    target = repo(tmp, "target")
+    elsewhere = repo(tmp, "elsewhere")
+    other_finding = dict(FINDING, filePath="target/only.ts")
+    transcript(cfg, target, [user(AUTO_PROMPT), verdict([other_finding])])
+    transcript(cfg, elsewhere, [user(AUTO_PROMPT), verdict([FINDING])])
+
+    rc, ctx, _ = run(cfg, elsewhere, command=f"git -C {target} commit -m x")
+    check("git -C <other repo> commit reports THAT repository's findings", ctx is not None and "target/only.ts" in ctx and "src/auth.ts" not in ctx, f"ctx={ctx}")
+    rc, ctx, _ = run(cfg, elsewhere, command=f'git -C "{target}" commit -m x')
+    check("a quoted -C path is honoured", ctx is not None and "target/only.ts" in ctx, f"ctx={ctx}")
+    rc, ctx, _ = run(cfg, elsewhere, command=f"git -C{target} commit -m x")
+    check("the attached -C<path> form is honoured", ctx is not None and "target/only.ts" in ctx, f"ctx={ctx}")
+    rc, ctx, _ = run(cfg, elsewhere, command=f"cd {target} && git commit -m x")
+    check("cd <path> && git commit reports the cd target's findings", ctx is not None and "target/only.ts" in ctx, f"ctx={ctx}")
+    rc, ctx, _ = run(cfg, Path(tmp), command="git -C target commit -m x")
+    check("a relative -C path resolves against the cwd", ctx is not None and "target/only.ts" in ctx, f"ctx={ctx}")
+
+# --- a repository path with spaces maps to its slug -----------------------------
+with tempfile.TemporaryDirectory() as tmp:
+    cfg = Path(tmp) / "cfg"
+    r = repo(tmp, "my repo (v2)")
+    transcript(cfg, r, [user(AUTO_PROMPT), verdict([FINDING])])
+    rc, ctx, _ = run(cfg, r)
+    check("a path with spaces and parentheses maps to its slug", ctx is not None, f"ctx={ctx}")
 
 # --- the nested verdict shape is unwrapped, not lost -------------------------
 with tempfile.TemporaryDirectory() as tmp:
