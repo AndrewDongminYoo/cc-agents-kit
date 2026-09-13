@@ -121,16 +121,33 @@ segment_is_git_commit() {
 # so a `;` inside `-C "/a;b"` stays inside its token instead of cutting the
 # command before `commit`. Line continuations are joined first, and the
 # operators are padded with spaces before tokenising so `x;git` splits too.
+# A heredoc body is data: the lines after `<<EOF` up to the `EOF` line are
+# skipped, so writing a script that contains `git commit` is not a commit,
+# while `git commit -m "$(cat <<'EOF'` is still read from the line that
+# opens the heredoc.
 has_git_commit() {
-  local command=$1 line tok
+  local command=$1 line tok heredoc="" opens probe
   local -a words
+  local heredoc_re="<<-?[[:space:]]*[\"']?([A-Za-z_][A-Za-z0-9_]*)"
   # `git -C /repo \` + newline + `commit`: one logical line.
   command=${command//\\$'\n'/ }
   while IFS= read -r line; do
+    if [[ -n "$heredoc" ]]; then
+      # `<<-` lets the terminator carry leading tabs.
+      [[ "${line#"${line%%[!$'\t']*}"}" == "$heredoc" ]] && heredoc=""
+      continue
+    fi
+    # Does this line open a heredoc? A here-string `<<<` is not one.
+    opens=""
+    probe=${line//<<</ }
+    [[ "$probe" =~ $heredoc_re ]] && opens=${BASH_REMATCH[1]}
     # Only a line that names git is worth tokenising: xargs costs ~8 ms per
     # call, and a heredoc body of a thousand lines would otherwise hold the
     # hook for eight seconds after a command that merely contains the word.
-    [[ "$line" == *git* ]] || continue
+    if [[ "$line" != *git* ]]; then
+      heredoc=$opens
+      continue
+    fi
     # One token per line, collected without a second round of word splitting
     # so a quoted `-C "/a b"` stays one token (bash 3.2: no mapfile). -n1, one
     # printf per token, is deliberate: when a line ends inside a quote — the
@@ -148,6 +165,7 @@ has_git_commit() {
       esac
     done < <(printf '%s\n' "$line" | sed -E 's/(&&|\|\||;|\|)/ \1 /g' | xargs -n1 printf '%s\n' 2>/dev/null)
     ((${#words[@]})) && segment_is_git_commit "${words[@]}" && return 0
+    heredoc=$opens
   done <<<"$command"
   return 1
 }

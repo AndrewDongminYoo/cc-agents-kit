@@ -151,6 +151,10 @@ with tempfile.TemporaryDirectory() as tmp:
         # tokens before it must still be read (xargs -n1, not a batched printf).
         ("a message fed through a heredoc in command substitution is recognised", 'git commit -m "$(cat <<\'EOF\'\ntitle\n\nbody; with && operators | inside\nEOF\n)"'),
         ("a multi-line quoted message is recognised", 'git commit -m "line one\nline two"'),
+        # …and a commit after a heredoc has closed is read again.
+        ("a commit on the line after a heredoc closes is recognised", "cat > f <<'EOF'\nnothing\nEOF\ngit commit -m x"),
+        ("a commit after a <<- heredoc with a tab-indented terminator is recognised", "cat <<-EOF\n\tbody\n\tEOF\ngit commit -m x"),
+        ("a here-string is not a heredoc and does not swallow the next line", 'cat <<<"x"\ngit commit -m x'),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, ctx is not None, f"ctx={ctx}")
@@ -164,6 +168,11 @@ with tempfile.TemporaryDirectory() as tmp:
         ("gitk commit is not git commit", "gitk commit"),
         ("git commitx is not git commit", "git commitx"),
         ("an assignment alone is not a commit", "COMMIT=1"),
+        # A heredoc body is data: a script written through one is not a commit.
+        ("git commit inside a heredoc body is not a commit", "cat > run.sh <<'EOF'\ngit commit -m x\nEOF"),
+        ("an unquoted heredoc delimiter is tracked too", "cat <<EOF > run.sh\n  git commit -m x\nEOF\ngit status"),
+        ("a <<- heredoc with a tab-indented terminator is tracked", "cat <<-EOF\n\tgit commit -m x\n\tEOF\n\tgit status"),
+        ("a double-quoted heredoc delimiter is tracked", 'cat <<"EOF"\ngit commit -m x\nEOF'),
         ("git --version commit prints the version, not a commit", "git --version commit"),
         ("git --help commit prints help, not a commit", "git --help commit"),
         ("git -h commit prints usage, not a commit", "git -h commit"),
