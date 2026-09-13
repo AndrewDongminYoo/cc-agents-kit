@@ -89,9 +89,12 @@ def repo(tmp, name):
     return r.resolve()
 
 
-def run(config_dir, cwd, command="git commit -m x", env_extra=None):
+def run(config_dir, cwd, command="git commit -m x", env_extra=None, session=None):
     """Return (exit_code, additionalContext or None, stderr)."""
-    payload = json.dumps({"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": command}})
+    payload = {"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": command}}
+    if session:
+        payload["session_id"] = session
+    payload = json.dumps(payload)
     env = dict(os.environ, CLAUDE_CONFIG_DIR=str(config_dir))
     env.pop(DISABLE_VAR, None)
     if env_extra:
@@ -102,10 +105,11 @@ def run(config_dir, cwd, command="git commit -m x", env_extra=None):
     return proc.returncode, ctx, proc.stderr
 
 
-def run_print(config_dir, cwd):
+def run_print(config_dir, cwd, full=False):
     env = dict(os.environ, CLAUDE_CONFIG_DIR=str(config_dir))
     env.pop(DISABLE_VAR, None)
-    proc = subprocess.run(["/bin/bash", HOOK, "--print", str(cwd)], capture_output=True, text=True, env=env)
+    args = ["/bin/bash", HOOK, "--print"] + (["--full"] if full else []) + [str(cwd)]
+    proc = subprocess.run(args, capture_output=True, text=True, env=env)
     return proc.returncode, proc.stdout
 
 
@@ -304,9 +308,41 @@ with tempfile.TemporaryDirectory() as tmp:
     check("600 findings are still delivered", ctx is not None and "src/f0.ts" in ctx, f"ctx={str(ctx)[:120]}")
     check("the report is capped with a pointer to --print", ctx is not None and "more line(s) not shown" in ctx and "--print" in ctx)
     check("the cap keeps the report under ARG_MAX territory", ctx is not None and len(ctx) < 100_000, f"len={len(ctx) if ctx else 0}")
-    # --print is the full list the cap points at, so it is never cut.
+    # --print runs before every terminal commit through the pre-commit action,
+    # so it is cut the same way; --print --full is the list the cap points at.
     rc, out = run_print(cfg, r)
-    check("--print delivers all 600 findings uncut", rc == 0 and "src/f599.ts" in out and "more line(s) not shown" not in out, f"exit={rc} len={len(out)}")
+    check("--print is capped like the hook report", rc == 0 and "src/f0.ts" in out and "src/f599.ts" not in out and "--print --full" in out, f"exit={rc} len={len(out)}")
+    rc, out = run_print(cfg, r, full=True)
+    check("--print --full delivers all 600 findings uncut", rc == 0 and "src/f599.ts" in out and "more line(s) not shown" not in out, f"exit={rc} len={len(out)}")
+
+# --- the same report is shown once per session ---------------------------------
+# Semantic-commit splitting makes three to five commits per session; the
+# identical report must not be injected after each of them.
+with tempfile.TemporaryDirectory() as tmp:
+    cfg = Path(tmp) / "cfg"
+    r = repo(tmp, "app")
+    transcript(cfg, r, [user(AUTO_PROMPT), verdict([FINDING])])
+    state = Path(tmp) / "state"
+    state.mkdir()
+    env = {"TMPDIR": str(state)}
+    sid = f"test-{os.getpid()}-a"
+    rc, first, _ = run(cfg, r, session=sid, env_extra=env)
+    rc, second, _ = run(cfg, r, session=sid, env_extra=env)
+    check("the first commit of a session gets the report", first is not None, f"ctx={first}")
+    check("the second commit of the same session with the same findings is silent", rc == 0 and second is None, f"ctx={second}")
+    rc, other, _ = run(cfg, r, session=f"test-{os.getpid()}-b", env_extra=env)
+    check("another session gets the report", other is not None, f"ctx={other}")
+    transcript(cfg, r, [user(AUTO_PROMPT), verdict([dict(FINDING, filePath="src/new.ts")])])
+    rc, changed, _ = run(cfg, r, session=sid, env_extra=env)
+    check("a changed report is shown to the same session again", changed is not None and "src/new.ts" in changed, f"ctx={changed}")
+    rc, again, _ = run(cfg, r, session=sid, env_extra=env)
+    check("…and then held again", again is None, f"ctx={again}")
+    rc, no_sid_1, _ = run(cfg, r, env_extra=env)
+    rc, no_sid_2, _ = run(cfg, r, env_extra=env)
+    check("a hook input without a session id is reported every time", no_sid_1 is not None and no_sid_2 is not None)
+    rc, unwritable, err = run(cfg, r, session=f"test-{os.getpid()}-c", env_extra={"TMPDIR": str(Path(tmp) / "missing" / "dir")})
+    check("a state directory that cannot be created still reports, with no error", rc == 0 and unwritable is not None and not err, f"exit={rc} err={err[:120]}")
+    check("state files live under TMPDIR, keyed by session id", (state / "cc-guard-security-findings" / f"{sid}.last").is_file())
 
 # --- the slug is per character, whatever the locale ------------------------------
 # Claude Code dashes per character (JS replace); `tr -c` dashes per BYTE under

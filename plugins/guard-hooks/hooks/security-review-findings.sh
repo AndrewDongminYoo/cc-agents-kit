@@ -20,8 +20,15 @@
 # additionalContext channel — only PostToolUse does — and the timing costs
 # nothing for findings about already-committed work.
 #
-# `--print [cwd]` runs the same lookup from a terminal (no hook JSON on stdin)
-# and prints plain text; a git pre-commit action can call it that way.
+# `--print [--full] [cwd]` runs the same lookup from a terminal (no hook JSON
+# on stdin) and prints plain text; a git pre-commit action calls it that way,
+# so it is cut at the same 200 lines as the hook report unless `--full` asks
+# for everything.
+#
+# The same report is not repeated: a session that has already been shown it
+# is silent on its next commit until the findings change (state under
+# $TMPDIR, keyed by the hook's session_id), so semantic-commit splitting does
+# not inject the identical text three to five times per session.
 #
 # Two things must be handled or findings are silently lost: the verdict nests
 # as {"findings": {"findings": [...]}} in roughly 7% of calls; and the project
@@ -32,12 +39,18 @@
 set -euo pipefail
 
 PRINT_MODE=""
+PRINT_FULL=""
 if [[ "${1:-}" == "--print" ]]; then
   PRINT_MODE=1
+  shift
+  if [[ "${1:-}" == "--full" ]]; then
+    PRINT_FULL=1
+    shift
+  fi
   # The physical path: Claude Code keys projects/ by process.cwd(), which has
   # symlinks resolved, so a logical $PWD under a symlink would miss the
   # directory (`/tmp` is `/private/tmp` on macOS). Also drops a trailing slash.
-  CWD=$(cd "${2:-.}" 2>/dev/null && pwd -P) || exit 0
+  CWD=$(cd "${1:-.}" 2>/dev/null && pwd -P) || exit 0
 else
   HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
 fi
@@ -183,6 +196,7 @@ if [[ -z "$PRINT_MODE" ]]; then
   has_git_commit "$COMMAND" || exit 0
   CWD=$(printf '%s' "$HOOK_INPUT" | jq -r '.cwd // empty' 2>/dev/null || true)
   [[ -n "$CWD" ]] || exit 0
+  SESSION_ID=$(printf '%s' "$HOOK_INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 fi
 
 # The findings belong to the SESSION, not to a repository. Claude Code stores
@@ -232,19 +246,20 @@ done < <(find "$PROJECT_DIR" -maxdepth 1 -name '*.jsonl' -mtime -2 2>/dev/null)
 
 [[ -n "$FINDINGS" ]] || exit 0
 
-# Cap the hook report: a session with hundreds of findings would otherwise
-# push the whole text through one argument, and past ARG_MAX that turns a
-# warning into a hook error after every commit. The report goes through stdin
-# as well, so the cap is a courtesy to the reader rather than the only guard.
-# --print is the full list the cap points at, so it is never cut.
+# Cap the report: a session with hundreds of findings would otherwise push
+# the whole text through one argument, and past ARG_MAX that turns a warning
+# into a hook error after every commit. The report goes through stdin as
+# well, so the cap is a courtesy to the reader rather than the only guard —
+# and --print, which a pre-commit action runs before every terminal commit,
+# is cut the same way unless --full asks for the whole list.
 MAX_LINES=200
 TOTAL_LINES=$(printf '%s\n' "$FINDINGS" | wc -l | tr -d ' ')
-if [[ -z "$PRINT_MODE" ]] && ((TOTAL_LINES > MAX_LINES)); then
+if [[ -z "$PRINT_FULL" ]] && ((TOTAL_LINES > MAX_LINES)); then
   # sed, not head: head closes the pipe after MAX_LINES and the printf behind
   # it dies of SIGPIPE, which pipefail then turns into a hook error.
   FINDINGS=$(printf '%s\n' "$FINDINGS" | sed -n "1,${MAX_LINES}p")
   FINDINGS="$FINDINGS
-    … $((TOTAL_LINES - MAX_LINES)) more line(s) not shown; run with --print for the full list"
+    … $((TOTAL_LINES - MAX_LINES)) more line(s) not shown; run security-review-findings.sh --print --full for the full list"
 fi
 
 MSG="Automatic security review flagged this session's project in the last two days (warning only — nothing is blocked):
@@ -253,6 +268,18 @@ $FINDINGS"
 if [[ -n "$PRINT_MODE" ]]; then
   printf '%s\n' "$MSG"
 else
+  # Once per session: the report is written under $TMPDIR keyed by the
+  # session id, and an identical report on the next commit is not repeated.
+  # A session without an id, or a state directory that cannot be written,
+  # simply gets the report every time.
+  if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    STATE_DIR="${TMPDIR:-/tmp}/cc-guard-security-findings"
+    STATE="$STATE_DIR/$SESSION_ID.last"
+    if [[ -f "$STATE" ]] && printf '%s' "$MSG" | cmp -s - "$STATE" 2>/dev/null; then
+      exit 0
+    fi
+    { mkdir -p "$STATE_DIR" && printf '%s' "$MSG" >"$STATE"; } 2>/dev/null || true
+  fi
   # stdin, not --arg: the report is not an argument, so it cannot hit ARG_MAX.
   # A jq failure here must not become a hook error — fail open, like every
   # other exit in this file.

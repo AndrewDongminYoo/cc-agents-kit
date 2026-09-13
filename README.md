@@ -168,9 +168,11 @@ Warns only, never blocks: the findings describe work that is already committed o
 It runs after the commit rather than before because `PreToolUse` has no `additionalContext` channel; for findings about already-committed work the timing costs nothing.
 The lookup is keyed by the cwd the hook input reports, the way Claude Code keys its `projects/` directories; the hook reads no `-C`, `cd`, or `--git-dir` out of the command, because the findings belong to the session's work, wherever the commit lands.
 Each finding prints its path, category, severity and confidence.
-`security-review-findings.sh --print [dir]` runs the same lookup from a terminal (on the physical path, the way Claude Code keys it) and prints plain text, so a git pre-commit action can call it too.
+`security-review-findings.sh --print [--full] [dir]` runs the same lookup from a terminal (on the physical path, the way Claude Code keys it) and prints plain text, so a git pre-commit action can call it too.
 Reads `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude/projects/`) and silently does nothing when that directory, the session's slug, or `jq` is absent.
-A report longer than 200 lines is cut with a pointer to `--print`, which is itself never cut.
+A report longer than 200 lines is cut with a pointer to `--print --full`; plain `--print` is cut the same way, because a pre-commit action runs it before every terminal commit.
+The same report is shown once per session: the hook keeps the last report under `$TMPDIR/cc-guard-security-findings/<session_id>.last` and stays silent on the next commit until the findings change, so splitting a session's work into several commits does not inject the identical text after each one.
+The commit recognizer covers the shapes Claude Code's own Bash calls produce — `git … commit` behind git's global options, an assignment or `env` prefix, a subshell, an operator chain, a heredoc-fed message — and is deliberately not extended to every shape a shell accepts: the hook warns only, and a commit it does not recognise costs nothing but a warning that the next recognised commit delivers.
 
 ### Turning hooks off
 
