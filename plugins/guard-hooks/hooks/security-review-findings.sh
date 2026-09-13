@@ -105,8 +105,9 @@ segment_is_git_commit() {
   ((${#words[@]})) || return 1
   # `(git commit …)`: the subshell paren rides on the first token.
   words[0]=${words[0]#"${words[0]%%[!(]*}"}
-  # `GIT_EDITOR=true git commit`, `command git commit`: skip the prefix.
-  while ((${#words[@]})) && [[ "${words[0]}" == command || "${words[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
+  # `GIT_EDITOR=true git commit`, `env GIT_EDITOR=true git commit`,
+  # `command git commit`, `exec git commit`: skip the prefix words.
+  while ((${#words[@]})) && [[ "${words[0]}" =~ ^(command|env|exec|time|nohup)$ || "${words[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
     words=("${words[@]:1}")
   done
   ((${#words[@]})) || return 1

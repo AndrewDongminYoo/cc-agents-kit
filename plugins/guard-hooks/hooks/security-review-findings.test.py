@@ -135,6 +135,8 @@ with tempfile.TemporaryDirectory() as tmp:
         ("an environment-assignment prefix is skipped", "GIT_EDITOR=true git commit -m x"),
         ("two assignment prefixes are skipped", "A=1 B='x y' git commit -m x"),
         ("command git commit is recognised", "command git commit -m x"),
+        ("env NAME=value git commit is recognised", "env GIT_EDITOR=true git commit -m x"),
+        ("exec git commit is recognised", "exec git commit -m x"),
         ("an absolute git path is recognised", "/usr/bin/git commit -m x"),
         ("--exec-path=<dir> sets the path and the commit runs", "git --exec-path=/opt/git/libexec commit -m x"),
         # Control operators are cut after tokenising, so one inside a quoted
