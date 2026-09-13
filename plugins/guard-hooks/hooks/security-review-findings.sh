@@ -252,6 +252,9 @@ done < <(find "$PROJECT_DIR" -maxdepth 1 -name '*.jsonl' -mtime -2 2>/dev/null)
 # well, so the cap is a courtesy to the reader rather than the only guard —
 # and --print, which a pre-commit action runs before every terminal commit,
 # is cut the same way unless --full asks for the whole list.
+# The dedupe below compares the UNCUT findings, so a change past the cap in
+# a report of the same length is still shown.
+FINDINGS_SUM=$(printf '%s' "$FINDINGS" | cksum 2>/dev/null || true)
 MAX_LINES=200
 TOTAL_LINES=$(printf '%s\n' "$FINDINGS" | wc -l | tr -d ' ')
 if [[ -z "$PRINT_FULL" ]] && ((TOTAL_LINES > MAX_LINES)); then
@@ -268,17 +271,15 @@ $FINDINGS"
 if [[ -n "$PRINT_MODE" ]]; then
   printf '%s\n' "$MSG"
 else
-  # Once per session: the report is written under $TMPDIR keyed by the
-  # session id, and an identical report on the next commit is not repeated.
-  # A session without an id, or a state directory that cannot be written,
-  # simply gets the report every time.
-  if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  # Once per session: a checksum of the uncut findings is kept under $TMPDIR
+  # keyed by the session id, and the same findings on the next commit are not
+  # repeated. A session without an id, or a state directory that cannot be
+  # written, simply gets the report every time.
+  if [[ -n "${SESSION_ID:-}" && -n "$FINDINGS_SUM" && "$SESSION_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
     STATE_DIR="${TMPDIR:-/tmp}/cc-guard-security-findings"
     STATE="$STATE_DIR/$SESSION_ID.last"
-    if [[ -f "$STATE" ]] && printf '%s' "$MSG" | cmp -s - "$STATE" 2>/dev/null; then
-      exit 0
-    fi
-    { mkdir -p "$STATE_DIR" && printf '%s' "$MSG" >"$STATE"; } 2>/dev/null || true
+    [[ "$(cat "$STATE" 2>/dev/null || true)" == "$FINDINGS_SUM" ]] && exit 0
+    { mkdir -p "$STATE_DIR" && printf '%s' "$FINDINGS_SUM" >"$STATE"; } 2>/dev/null || true
   fi
   # stdin, not --arg: the report is not an argument, so it cannot hit ARG_MAX.
   # A jq failure here must not become a hook error — fail open, like every

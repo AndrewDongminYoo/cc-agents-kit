@@ -343,6 +343,21 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, unwritable, err = run(cfg, r, session=f"test-{os.getpid()}-c", env_extra={"TMPDIR": str(Path(tmp) / "missing" / "dir")})
     check("a state directory that cannot be created still reports, with no error", rc == 0 and unwritable is not None and not err, f"exit={rc} err={err[:120]}")
     check("state files live under TMPDIR, keyed by session id", (state / "cc-guard-security-findings" / f"{sid}.last").is_file())
+    # The comparison is on the uncut findings: a change past the 200-line cap
+    # in a report of the same length is still a new report.
+    big = repo(tmp, "big")
+    many = [dict(FINDING, filePath=f"src/f{i}.ts") for i in range(300)]
+    transcript(cfg, big, [user(AUTO_PROMPT), verdict(many)])
+    sid = f"test-{os.getpid()}-d"
+    rc, first, _ = run(cfg, big, session=sid, env_extra=env)
+    rc, held, _ = run(cfg, big, session=sid, env_extra=env)
+    check("a capped report is shown once", first is not None and "more line(s)" in first and held is None, f"held={held}")
+    many[250] = dict(FINDING, filePath="src/changed-past-the-cap.ts")
+    for f in (Path(cfg) / "projects" / slug(big)).iterdir():
+        f.unlink()
+    transcript(cfg, big, [user(AUTO_PROMPT), verdict(many)])
+    rc, changed, _ = run(cfg, big, session=sid, env_extra=env)
+    check("a change past the cap in a same-length report is shown again", changed is not None, f"ctx={str(changed)[:80]}")
 
 # --- the slug is per character, whatever the locale ------------------------------
 # Claude Code dashes per character (JS replace); `tr -c` dashes per BYTE under
