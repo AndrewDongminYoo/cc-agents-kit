@@ -18,7 +18,7 @@ Hooks are read when a session starts, so restart any session that is already ope
 
 | Plugin | What it does |
 | --- | --- |
-| [`guard-hooks`](#guard-hooks) | Eight defensive hooks — five block, two warn, one rewrites Bash output. |
+| [`guard-hooks`](#guard-hooks) | Nine defensive hooks — five block, three warn, one rewrites Bash output. |
 | [`context-handoff`](#context-handoff) | Carry work across sessions, and keep the context that carries it lean. |
 | [`repo-gate`](#repo-gate) | What runs between "the code works" and "it is pushed". |
 
@@ -69,10 +69,10 @@ These are the three properties that matter, and each is pinned by a case that fa
 
 Nothing here is a sandbox — see [Known limits](#known-limits) for what these guards do not stop.
 
-### The eight hooks
+### The nine hooks
 
 Each hook is a standalone bash script reading the hook JSON on stdin.
-The five `PreToolUse` guards exit `2` to block; the three `PostToolUse` hooks never block — two attach a warning to the transcript, one rewrites the tool result.
+The five `PreToolUse` guards exit `2` to block; the four `PostToolUse` hooks never block — three attach a warning to the transcript, one rewrites the tool result.
 
 | Hook | Event / matcher | Blocks? | Disable with |
 | --- | --- | --- | --- |
@@ -84,6 +84,7 @@ The five `PreToolUse` guards exit `2` to block; the three `PostToolUse` hooks ne
 | `lockfile-drift-check.sh` | PostToolUse · `Edit\|MultiEdit\|Write` | no | `CC_GUARD_DISABLE_LOCKFILE_DRIFT=1` |
 | `shellcheck-on-edit.sh` | PostToolUse · `Edit\|MultiEdit\|Write` | no | `CC_GUARD_DISABLE_SHELLCHECK=1` |
 | `output-secret-mask.sh` | PostToolUse · `Bash` | no | `CC_GUARD_DISABLE_OUTPUT_SECRET_MASK=1` |
+| `security-review-findings.sh` | PostToolUse · `Bash` | no | `CC_GUARD_DISABLE_SECURITY_FINDINGS=1` |
 
 #### `dangerous-command-guard.sh`
 
@@ -155,6 +156,23 @@ The transcript also gets a one-line note saying how many values were masked, so 
 This is the output-side counterpart to `secrets-path-guard.sh` (which blocks *reading* secret files) and `staged-secret-guard.sh` (which blocks *committing* them): a value that arrives through a command the other two allow is still caught on its way into the context.
 Silently does nothing when `gitleaks` is not installed, when the output is over 2 MB, or when the tool result is not the stdout/stderr object shape.
 Measured on an Apple Silicon Mac: about 30 ms per Bash call, including the gitleaks scan.
+
+#### `security-review-findings.sh`
+
+After a `git commit`, surfaces any finding that Claude Code's automatic security-review subsessions produced for this session's project in the last two days.
+When the harness reviews an edit, it does so in a background session stored beside the session that made the edit (its first prompt is `Review this change for security vulnerabilities.`); those sessions commit nothing and modify nothing, so a finding they produce otherwise reaches no one.
+Measured over seven weeks on one machine, 448 such sessions ran, 437 of 450 verdicts were empty, and the 12 unique findings in the rest — a prompt-injection path in a workflow, a secret-exposure regression in `settings.json`, an account-separation bypass — had never been surfaced anywhere a session could read them.
+Not every edit gets a review — the same machine went a whole session of dozens of edits with none — so the hook is often silent.
+
+Warns only, never blocks: the findings describe work that is already committed or already discarded, and some are false positives.
+It runs after the commit rather than before because `PreToolUse` has no `additionalContext` channel; for findings about already-committed work the timing costs nothing.
+The lookup is keyed by the cwd the hook input reports, the way Claude Code keys its `projects/` directories; the hook reads no `-C`, `cd`, or `--git-dir` out of the command, because the findings belong to the session's work, wherever the commit lands.
+Each finding prints its path, category, severity and confidence.
+`security-review-findings.sh --print [--full] [dir]` runs the same lookup from a terminal (on the physical path, the way Claude Code keys it) and prints plain text, so a git pre-commit action can call it too.
+Reads `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude/projects/`) and silently does nothing when that directory, the session's slug, or `jq` is absent.
+A report longer than 200 lines is cut with a pointer to `--print --full`; plain `--print` is cut the same way, because a pre-commit action runs it before every terminal commit.
+The same report is shown once per session: the hook keeps the last report under `$TMPDIR/cc-guard-security-findings/<session_id>.last` and stays silent on the next commit until the findings change, so splitting a session's work into several commits does not inject the identical text after each one.
+The commit recognizer covers the shapes Claude Code's own Bash calls produce — `git … commit` behind git's global options, an assignment or `env` prefix, a subshell, an operator chain, a heredoc-fed message — and is deliberately not extended to every shape a shell accepts: the hook warns only, and a commit it does not recognise costs nothing but a warning that the next recognised commit delivers.
 
 ### Turning hooks off
 

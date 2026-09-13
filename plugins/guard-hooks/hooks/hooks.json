@@ -61,6 +61,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/output-secret-mask.sh\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/security-review-findings.sh\"",
+            "timeout": 10
           }
         ]
       }
