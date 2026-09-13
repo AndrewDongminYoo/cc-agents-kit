@@ -166,8 +166,9 @@ Not every edit gets a review — the same machine went a whole session of dozens
 
 Warns only, never blocks: the findings describe work that is already committed or already discarded, and some are false positives.
 It runs after the commit rather than before because `PreToolUse` has no `additionalContext` channel; for findings about already-committed work the timing costs nothing.
-The lookup is keyed by the session's cwd, the way Claude Code keys its `projects/` directories, so a `-C`, `cd`, or `--git-dir` in the commit command changes nothing: the findings belong to the session's work, wherever the commit lands.
-`security-review-findings.sh --print [dir]` runs the same lookup from a terminal and prints plain text, so a git pre-commit action can call it too.
+The lookup is keyed by the cwd the hook input reports, the way Claude Code keys its `projects/` directories; the hook reads no `-C`, `cd`, or `--git-dir` out of the command, because the findings belong to the session's work, wherever the commit lands.
+Each finding prints its path, category, severity and confidence.
+`security-review-findings.sh --print [dir]` runs the same lookup from a terminal (on the physical path, the way Claude Code keys it) and prints plain text, so a git pre-commit action can call it too.
 Reads `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude/projects/`) and silently does nothing when that directory, the session's slug, or `jq` is absent.
 A report longer than 200 lines is cut with a pointer to `--print`.
 

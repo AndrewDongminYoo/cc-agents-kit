@@ -67,7 +67,13 @@ def verdict(findings):
     }
 
 
-FINDING = {"filePath": "src/auth.ts", "category": "trust-boundary", "explanation": "Token is read from an unvalidated header."}
+FINDING = {
+    "filePath": "src/auth.ts",
+    "category": "trust-boundary",
+    "severity": "high",
+    "confidence": "medium",
+    "explanation": "Token is read from an unvalidated header.",
+}
 
 
 def repo(tmp, name):
@@ -108,6 +114,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a finding is surfaced after git commit", rc == 0 and ctx is not None and "src/auth.ts" in ctx, f"exit={rc} ctx={ctx} err={err[:120]}")
     check("the message says it does not block", ctx is not None and "nothing is blocked" in ctx)
     check("the category and explanation come through", ctx is not None and "trust-boundary" in ctx and "unvalidated header" in ctx)
+    check("severity and confidence come through", ctx is not None and "high/medium" in ctx, f"ctx={ctx}")
 
     # Global options between `git` and `commit` are consumed, so the subcommand
     # is identified by position rather than by the word appearing anywhere.
@@ -120,6 +127,10 @@ with tempfile.TemporaryDirectory() as tmp:
         ("a commit after && is recognised", "git add a.txt && git commit -m x"),
         ("a commit after ; is recognised", "git add a.txt; git commit -m x"),
         ("a commit inside a subshell is recognised", "(git commit -m x)"),
+        ("an environment-assignment prefix is skipped", "GIT_EDITOR=true git commit -m x"),
+        ("two assignment prefixes are skipped", "A=1 B='x y' git commit -m x"),
+        ("command git commit is recognised", "command git commit -m x"),
+        ("an absolute git path is recognised", "/usr/bin/git commit -m x"),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, ctx is not None, f"ctx={ctx}")
@@ -132,6 +143,8 @@ with tempfile.TemporaryDirectory() as tmp:
         ("a non-git command is ignored", "ls -la"),
         ("gitk commit is not git commit", "gitk commit"),
         ("git commitx is not git commit", "git commitx"),
+        ("an assignment alone is not a commit", "COMMIT=1"),
+        ("a prefix in front of a non-git command is ignored", "GIT_DIR=x ls commit"),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, rc == 0 and ctx is None, f"exit={rc} ctx={ctx}")
@@ -224,6 +237,26 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, ctx, _ = run(other, r)
     check("a basename-only slug is not matched", ctx is None, f"ctx={ctx}")
 
+# --- a command larger than the pipe buffer still counts ------------------------
+# The pre-filter used to pipe the command into `grep -q`, which exits at the
+# first match; on a multi-line command past the 64 KiB pipe buffer the printf
+# behind it took SIGPIPE and pipefail turned a TRUE match into a silent exit.
+with tempfile.TemporaryDirectory() as tmp:
+    cfg = Path(tmp) / "cfg"
+    r = repo(tmp, "app")
+    transcript(cfg, r, [user(AUTO_PROMPT), verdict([FINDING])])
+    big = "git commit -m x\n" + "echo padding line\n" * 12000  # ~200 KB
+    rc, ctx, err = run(cfg, r, command=big)
+    check("a 200 KB multi-line command with the commit on line 1 still reports", rc == 0 and ctx is not None and "src/auth.ts" in ctx, f"exit={rc} ctx={str(ctx)[:80]} err={err[:120]}")
+    # Segments without `git` are skipped before tokenising: at ~8 ms per xargs
+    # call, 12000 segments would otherwise hold the hook for a minute and a
+    # half, past Claude Code's hook timeout.
+    started = time.time()
+    rc, ctx, err = run(cfg, r, command="echo padding line\n" * 12000 + "git commit -m x")
+    elapsed = time.time() - started
+    check("the same with the commit on the last line", rc == 0 and ctx is not None, f"exit={rc} err={err[:120]}")
+    check("12000 git-less lines are skipped in well under the hook timeout", elapsed < 5, f"{elapsed:.1f}s")
+
 # --- a huge report is capped and still delivered, never a hook error ---------
 with tempfile.TemporaryDirectory() as tmp:
     cfg = Path(tmp) / "cfg"
@@ -235,6 +268,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("600 findings are still delivered", ctx is not None and "src/f0.ts" in ctx, f"ctx={str(ctx)[:120]}")
     check("the report is capped with a pointer to --print", ctx is not None and "more line(s) not shown" in ctx and "--print" in ctx)
     check("the cap keeps the report under ARG_MAX territory", ctx is not None and len(ctx) < 100_000, f"len={len(ctx) if ctx else 0}")
+
+# --- the slug is per character, whatever the locale ------------------------------
+# Claude Code dashes per character (JS replace); `tr -c` dashes per BYTE under
+# a C locale, which would turn one Korean character into three dashes.
+with tempfile.TemporaryDirectory() as tmp:
+    cfg = Path(tmp) / "cfg"
+    r = repo(tmp, "\ud504\ub85c\uc81d\ud2b8")  # 프로젝트
+    transcript(cfg, r, [user(AUTO_PROMPT), verdict([FINDING])])
+    check("the fixture slug has one dash per Korean character", slug(r).endswith("-" * 4), slug(r))
+    rc, ctx, err = run(cfg, r, env_extra={"LC_ALL": "C", "LANG": "C"})
+    check("a Korean cwd is found under LC_ALL=C", rc == 0 and ctx is not None, f"exit={rc} ctx={ctx} err={err[:120]}")
+    rc, ctx, err = run(cfg, r, env_extra={"LC_ALL": "en_US.UTF-8"})
+    check("a Korean cwd is found under a UTF-8 locale", rc == 0 and ctx is not None, f"exit={rc} ctx={ctx} err={err[:120]}")
 
 # --- fail-open: every missing precondition is silence, never an error ------
 with tempfile.TemporaryDirectory() as tmp:
@@ -256,6 +302,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("--print prints the finding as plain text", rc == 0 and "src/auth.ts" in out and not out.startswith("{"), f"exit={rc} out={out[:120]}")
     rc, out = run_print(cfg, Path(tmp) / "not-a-repo")
     check("--print for a cwd with no session directory prints nothing", rc == 0 and not out, f"exit={rc} out={out[:120]}")
+    # Claude Code keys projects/ by process.cwd(), the physical path, so a
+    # symlinked or trailing-slash argument must land on the same slug.
+    link = Path(tmp) / "app-link"
+    link.symlink_to(r)
+    rc, out = run_print(cfg, link)
+    check("--print through a symlink resolves to the physical path's slug", rc == 0 and "src/auth.ts" in out, f"exit={rc} out={out[:120]}")
+    rc, out = run_print(cfg, str(r) + "/")
+    check("--print with a trailing slash finds the same slug", rc == 0 and "src/auth.ts" in out, f"exit={rc} out={out[:120]}")
+    rc, out = run_print(cfg, Path(tmp) / "does-not-exist")
+    check("--print for a path that does not exist prints nothing", rc == 0 and not out, f"exit={rc} out={out[:120]}")
 
 # --- opt-out contract -------------------------------------------------------
 # This hook warns rather than blocks, so the shared blocking cases do not apply;

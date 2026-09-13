@@ -34,7 +34,10 @@ set -euo pipefail
 PRINT_MODE=""
 if [[ "${1:-}" == "--print" ]]; then
   PRINT_MODE=1
-  CWD="${2:-$PWD}"
+  # The physical path: Claude Code keys projects/ by process.cwd(), which has
+  # symlinks resolved, so a logical $PWD under a symlink would miss the
+  # directory (`/tmp` is `/private/tmp` on macOS). Also drops a trailing slash.
+  CWD=$(cd "${2:-.}" 2>/dev/null && pwd -P) || exit 0
 else
   HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
 fi
@@ -92,6 +95,10 @@ has_git_commit() {
   while IFS= read -r seg; do
     seg=${seg#"${seg%%[![:space:]]*}"}
     [[ -n "$seg" ]] || continue
+    # Only a segment that names git is worth tokenising: xargs costs ~8 ms per
+    # segment, and a heredoc body of a thousand lines would otherwise hold the
+    # hook for eight seconds after a command that merely contains the word.
+    [[ "$seg" == *git* ]] || continue
     # One token per line, collected without a second round of word splitting
     # so a quoted `-C "/a b"` stays one token (bash 3.2: no mapfile).
     words=()
@@ -100,7 +107,13 @@ has_git_commit() {
     # `(git commit …)`: the subshell paren rides on the first token. Splitting
     # segments on parens instead would cut a `-m "fix (x)"` in half.
     words[0]=${words[0]#"${words[0]%%[!(]*}"}
-    [[ "${words[0]}" == git ]] || continue
+    # `GIT_EDITOR=true git commit`, `command git commit`: skip the prefix.
+    while ((${#words[@]})) && [[ "${words[0]}" == command || "${words[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
+      words=("${words[@]:1}")
+    done
+    ((${#words[@]})) || continue
+    # `/usr/bin/git commit`: compare the basename.
+    [[ "${words[0]##*/}" == git ]] || continue
     is_git_commit_segment "${words[@]:1}" && return 0
   done < <(printf '%s\n' "$command" | sed -E 's/&&|\|\||;|\|/\
 /g')
@@ -111,8 +124,11 @@ if [[ -z "$PRINT_MODE" ]]; then
   COMMAND=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
   [[ -n "$COMMAND" ]] || exit 0
   # Cheap pre-filter so every Bash call that is nowhere near a commit exits
-  # after one grep; the real decision is the parse below.
-  printf '%s' "$COMMAND" | grep -q commit || exit 0
+  # here; the real decision is the parse below. A shell match, not a pipe
+  # into grep: on a multi-line command past the pipe buffer, grep -q would
+  # exit at the first match, the printf would take SIGPIPE, and pipefail
+  # would turn that TRUE match into a silent exit.
+  [[ "$COMMAND" == *commit* ]] || exit 0
   has_git_commit "$COMMAND" || exit 0
   CWD=$(printf '%s' "$HOOK_INPUT" | jq -r '.cwd // empty' 2>/dev/null || true)
   [[ -n "$CWD" ]] || exit 0
@@ -120,14 +136,17 @@ fi
 
 # The findings belong to the SESSION, not to a repository. Claude Code stores
 # every session — the automatic reviews included — under a directory named for
-# the session's cwd, so that cwd is the lookup key, untouched by `-C`, `cd`, or
-# `--git-dir` in the commit command and not walked up to the repository root:
-# a session opened in /repo/subdir lives under `-repo-subdir`. The rule is the
-# one context-handoff/bin/session-to-md already uses — every character that is
-# not a letter or digit becomes a dash — so a path with spaces or any other
-# punctuation still lands on the directory Claude Code actually wrote.
+# the session's cwd, so the cwd the hook input reports is the lookup key: the
+# hook reads no `-C`, `cd`, or `--git-dir` out of the command, and does not
+# walk up to the repository root — a session opened in /repo/subdir lives
+# under `-repo-subdir`. The rule is the one context-handoff/bin/session-to-md
+# already uses — every character that is not a letter or digit becomes a dash —
+# applied per character in jq rather than per byte in `tr`, which under a C
+# locale would turn one Korean character into three dashes and miss the
+# directory Claude Code actually wrote.
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SLUG=$(printf '%s' "$CWD" | tr -c 'A-Za-z0-9' '-')
+SLUG=$(printf '%s' "$CWD" | jq -Rr 'gsub("[^A-Za-z0-9]"; "-")' 2>/dev/null || true)
+[[ -n "$SLUG" ]] || exit 0
 PROJECT_DIR="$CONFIG_DIR/projects/$SLUG"
 [[ -d "$PROJECT_DIR" ]] || exit 0
 
@@ -148,7 +167,7 @@ while IFS= read -r file; do
     | select(type == "array")
     | .[]
     | select(type == "object")
-    | "\($d)  \(.filePath // "?")  [\(.category // "?")]\n    \((.explanation // .description // "") | gsub("\\s+"; " ") | .[0:300])"
+    | "\($d)  \(.filePath // "?")  [\(.category // "?")] \(.severity // "?")/\(.confidence // "?")\n    \((.explanation // .description // "") | gsub("\\s+"; " ") | .[0:300])"
   ' 2>/dev/null || true)
   [[ -n "$rows" ]] && FINDINGS="${FINDINGS:+$FINDINGS
 }$rows"
