@@ -1,7 +1,7 @@
 {
   "name": "guard-hooks",
-  "version": "0.2.9",
-  "description": "Eight defensive hooks: blocks recursive rm on $HOME, download-and-execute pipelines, secrets-file access, path-less formatter runs, credentials in the staged diff, and the two zsh quoting mistakes that fail silently; warns on stale lockfiles and shellcheck findings; masks credential-shaped values out of Bash output before the model sees them.",
+  "version": "0.3.0",
+  "description": "Nine defensive hooks: blocks recursive rm on $HOME, download-and-execute pipelines, secrets-file access, path-less formatter runs, credentials in the staged diff, and the two zsh quoting mistakes that fail silently; warns on stale lockfiles, shellcheck findings, and automatic security-review findings after a commit; masks credential-shaped values out of Bash output before the model sees them.",
   "author": {
     "name": "Dongmin Yu"
   },
