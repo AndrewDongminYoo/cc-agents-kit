@@ -24,6 +24,22 @@ block_unparsed() {
   exit 2
 }
 
+# Separate message for the same reason as block_config_override below: the
+# command that lands here is usually not a commit, and naming one sends the
+# reader hunting for a commit that is not there. It is reached when an unquoted
+# expansion sits where the subcommand could be -- `git -C $R log`, or a git call
+# inside a `for` loop over an unquoted path -- so the actionable fix is quoting,
+# not rewriting a commit. 0.2.7 already narrowed which `-C` expansions are
+# judged, and read-only calls kept being refused after it: over 2026-09-04..12,
+# 18 refusals carried no `commit` token at all, on status, log, rev-parse,
+# diff, ls-files, branch and worktree. Refusal is correct -- an unquoted
+# expansion can still carry `commit` in words this parser never sees -- so only
+# the advice changes here.
+block_unquoted_expansion() {
+  echo "Blocked: an unquoted expansion sits where git's subcommand could be, so this hook cannot tell whether the command commits — it is not necessarily a commit at all. Quote the expansion (\"\$VAR\") so it cannot split into extra words, or write the value literally." >&2
+  exit 2
+}
+
 # Separate message: the command above is usually not a commit at all, and the
 # parse advice would send the reader looking for one that is not there.
 block_config_override() {
@@ -300,8 +316,13 @@ while ((token_index < token_count)); do
           # cannot see, and `git "$cmd" -m x` with cmd=commit is a commit, so it
           # is refused whether or not it could also split. main has this hole
           # too; it is closed here because this branch owns the question of when
-          # the scan may trust a token.
-          [[ -z "${TOKEN_EXPANSION[scan_index]-}" ]] || block_unparsed
+          # the scan may trust a token. Only a splittable expansion earns the
+          # quoting advice: `git "$sub"` is already quoted and still cannot be
+          # identified, so telling it to quote would send it in a circle.
+          case "${TOKEN_EXPANSION[scan_index]-}" in
+            split) block_unquoted_expansion ;;
+            quoted) block_unparsed ;;
+          esac
           # Scanning past it would read its own arguments, where a value such as
           # `--grep commit` is a search term rather than an invocation.
           #
@@ -320,7 +341,7 @@ while ((token_index < token_count)); do
     # saw, so neither may end the scan quietly.
     if [[ -n "$scanned_past_commit" ]]; then
       [[ -z "$config_override" ]] || block_config_override
-      [[ -z "$split_risk" ]] || block_unparsed
+      [[ -z "$split_risk" ]] || block_unquoted_expansion
       [[ -z "$opaque_option" ]] || block_unparsed
     fi
   fi
