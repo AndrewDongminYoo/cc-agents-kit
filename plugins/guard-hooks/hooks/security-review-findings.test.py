@@ -137,6 +137,20 @@ with tempfile.TemporaryDirectory() as tmp:
         ("command git commit is recognised", "command git commit -m x"),
         ("an absolute git path is recognised", "/usr/bin/git commit -m x"),
         ("--exec-path=<dir> sets the path and the commit runs", "git --exec-path=/opt/git/libexec commit -m x"),
+        # Control operators are cut after tokenising, so one inside a quoted
+        # value before `commit` does not end the segment early.
+        ("a quoted ; in a -C value does not cut the command", 'git -C "/tmp/a;b" commit -m x'),
+        ("a quoted && in a -C value does not cut the command", "git -C '/tmp/a && b' commit -m x"),
+        ("a quoted | in a -c value does not cut the command", 'git -c core.pager="less | cat" commit -m x'),
+        ("a glued ;git commit is still cut at the operator", "echo x;git commit -m x"),
+        ("a glued &&git commit is still cut at the operator", "git add a&&git commit -m x"),
+        # A line continuation between git's options and the subcommand is one
+        # logical line.
+        ("a backslash-newline between -C and commit is joined", "git -C /tmp/repo \\\ncommit -m x"),
+        # The first line of a heredoc-fed message ends inside a quote; the
+        # tokens before it must still be read (xargs -n1, not a batched printf).
+        ("a message fed through a heredoc in command substitution is recognised", 'git commit -m "$(cat <<\'EOF\'\ntitle\n\nbody; with && operators | inside\nEOF\n)"'),
+        ("a multi-line quoted message is recognised", 'git commit -m "line one\nline two"'),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, ctx is not None, f"ctx={ctx}")

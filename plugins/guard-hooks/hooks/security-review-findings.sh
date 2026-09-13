@@ -97,37 +97,58 @@ is_git_commit_segment() {
   return 1
 }
 
-# Does the command contain a `git … commit`? Segments are split on shell
-# control operators and each is tokenised through xargs, which honours shell
-# quoting without evaluating anything; a segment it cannot tokenise is skipped.
+# One shell segment (`git …`) as an array of tokens: strip a subshell paren,
+# an environment-assignment prefix and `command`, compare the basename of
+# what is left with `git`, and hand the rest to the option walk.
+segment_is_git_commit() {
+  local -a words=("$@")
+  ((${#words[@]})) || return 1
+  # `(git commit …)`: the subshell paren rides on the first token.
+  words[0]=${words[0]#"${words[0]%%[!(]*}"}
+  # `GIT_EDITOR=true git commit`, `command git commit`: skip the prefix.
+  while ((${#words[@]})) && [[ "${words[0]}" == command || "${words[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
+    words=("${words[@]:1}")
+  done
+  ((${#words[@]})) || return 1
+  # `/usr/bin/git commit`: compare the basename.
+  [[ "${words[0]##*/}" == git ]] || return 1
+  is_git_commit_segment "${words[@]:1}"
+}
+
+# Does the command contain a `git … commit`? Each line is tokenised through
+# xargs, which honours shell quoting without evaluating anything, and the
+# token stream is cut at the control operators that stand alone as tokens —
+# so a `;` inside `-C "/a;b"` stays inside its token instead of cutting the
+# command before `commit`. Line continuations are joined first, and the
+# operators are padded with spaces before tokenising so `x;git` splits too.
 has_git_commit() {
-  local command=$1 seg tok
+  local command=$1 line tok
   local -a words
-  while IFS= read -r seg; do
-    seg=${seg#"${seg%%[![:space:]]*}"}
-    [[ -n "$seg" ]] || continue
-    # Only a segment that names git is worth tokenising: xargs costs ~8 ms per
-    # segment, and a heredoc body of a thousand lines would otherwise hold the
+  # `git -C /repo \` + newline + `commit`: one logical line.
+  command=${command//\\$'\n'/ }
+  while IFS= read -r line; do
+    # Only a line that names git is worth tokenising: xargs costs ~8 ms per
+    # call, and a heredoc body of a thousand lines would otherwise hold the
     # hook for eight seconds after a command that merely contains the word.
-    [[ "$seg" == *git* ]] || continue
+    [[ "$line" == *git* ]] || continue
     # One token per line, collected without a second round of word splitting
-    # so a quoted `-C "/a b"` stays one token (bash 3.2: no mapfile).
+    # so a quoted `-C "/a b"` stays one token (bash 3.2: no mapfile). -n1, one
+    # printf per token, is deliberate: when a line ends inside a quote — the
+    # first line of `git commit -m "$(cat <<'EOF'` — xargs -n1 has already
+    # printed the tokens before the unterminated quote, while a batched printf
+    # prints nothing at all.
     words=()
-    while IFS= read -r tok; do words+=("$tok"); done < <(printf '%s\n' "$seg" | xargs -n1 printf '%s\n' 2>/dev/null)
-    ((${#words[@]})) || continue
-    # `(git commit …)`: the subshell paren rides on the first token. Splitting
-    # segments on parens instead would cut a `-m "fix (x)"` in half.
-    words[0]=${words[0]#"${words[0]%%[!(]*}"}
-    # `GIT_EDITOR=true git commit`, `command git commit`: skip the prefix.
-    while ((${#words[@]})) && [[ "${words[0]}" == command || "${words[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
-      words=("${words[@]:1}")
-    done
-    ((${#words[@]})) || continue
-    # `/usr/bin/git commit`: compare the basename.
-    [[ "${words[0]##*/}" == git ]] || continue
-    is_git_commit_segment "${words[@]:1}" && return 0
-  done < <(printf '%s\n' "$command" | sed -E 's/&&|\|\||;|\|/\
-/g')
+    while IFS= read -r tok; do
+      case "$tok" in
+        ';' | '&&' | '||' | '|')
+          ((${#words[@]})) && segment_is_git_commit "${words[@]}" && return 0
+          words=()
+          ;;
+        *) words+=("$tok") ;;
+      esac
+    done < <(printf '%s\n' "$line" | sed -E 's/(&&|\|\||;|\|)/ \1 /g' | xargs -n1 printf '%s\n' 2>/dev/null)
+    ((${#words[@]})) && segment_is_git_commit "${words[@]}" && return 0
+  done <<<"$command"
   return 1
 }
 
