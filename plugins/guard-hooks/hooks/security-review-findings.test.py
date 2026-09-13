@@ -107,13 +107,25 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the message says it does not block", ctx is not None and "nothing is blocked" in ctx)
     check("the category and explanation come through", ctx is not None and "trust-boundary" in ctx and "unvalidated header" in ctx)
 
-    rc, ctx, _ = run(cfg, r, command="git -C /somewhere/else commit -F msg.txt")
-    check("git -C <path> commit is recognised as a commit", ctx is not None, f"ctx={ctx}")
+    # Any global option may sit between `git` and `commit`; the recognizer is
+    # loose on purpose because the hook only warns, so an over-match costs a
+    # lookup that finds nothing while a miss loses the one moment it exists for.
+    for label, command in (
+        ("git -C <path> commit is recognised as a commit", "git -C /somewhere/else commit -F msg.txt"),
+        ("a quoted -C path with whitespace is recognised", 'git -C "/some where/else" commit -m x'),
+        ("git -c key=value commit is recognised", "git -c commit.gpgSign=false commit -m x"),
+        ("git --no-pager commit is recognised", "git --no-pager commit -m x"),
+        ("a commit after && is recognised", "git add a.txt && git commit -m x"),
+    ):
+        rc, ctx, _ = run(cfg, r, command=command)
+        check(label, ctx is not None, f"ctx={ctx}")
 
     for label, command in (
         ("git status is not a commit", "git status --porcelain"),
         ("git log is not a commit", "git log --oneline -3"),
         ("a non-git command is ignored", "ls -la"),
+        ("gitk commit is not git commit", "gitk commit"),
+        ("git commitx is not git commit", "git commitx"),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, rc == 0 and ctx is None, f"exit={rc} ctx={ctx}")

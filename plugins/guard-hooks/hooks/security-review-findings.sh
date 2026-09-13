@@ -43,9 +43,13 @@ command -v jq >/dev/null 2>&1 || exit 0
 if [[ -z "$PRINT_MODE" ]]; then
   COMMAND=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
   [[ -n "$COMMAND" ]] || exit 0
-  # `git commit`, with or without a `-C <path>` between; anything else is not
-  # the moment this hook exists for and must cost nothing.
-  printf '%s' "$COMMAND" | grep -Eq 'git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+commit' || exit 0
+  # `git … commit` with any global options between (`-C <path>`, a quoted path
+  # with whitespace, `-c key=value`, `--no-pager`). This recognizer is loose on
+  # purpose: the hook only warns, so matching a `git log --grep commit` costs a
+  # lookup that finds nothing, while missing a real commit loses the one moment
+  # this hook exists for. Parsing git's argument grammar properly is
+  # staged-secret-guard's job, where a wrong answer has consequences.
+  printf '%s' "$COMMAND" | grep -Eq '(^|[[:space:];&|(])git([[:space:]]+[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' || exit 0
   CWD=$(printf '%s' "$HOOK_INPUT" | jq -r '.cwd // empty' 2>/dev/null || true)
   [[ -n "$CWD" ]] || exit 0
 fi
