@@ -170,7 +170,7 @@ The lookup is keyed by the cwd the hook input reports, the way Claude Code keys 
 Each finding prints its path, category, severity and confidence.
 `security-review-findings.sh --print [dir]` runs the same lookup from a terminal (on the physical path, the way Claude Code keys it) and prints plain text, so a git pre-commit action can call it too.
 Reads `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude/projects/`) and silently does nothing when that directory, the session's slug, or `jq` is absent.
-A report longer than 200 lines is cut with a pointer to `--print`.
+A report longer than 200 lines is cut with a pointer to `--print`, which is itself never cut.
 
 ### Turning hooks off
 

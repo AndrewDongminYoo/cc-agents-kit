@@ -53,7 +53,17 @@ command -v jq >/dev/null 2>&1 || exit 0
 # whichever repository the commit lands in.
 takes_value() {
   case "$1" in
-    -C | -c | --git-dir | --work-tree | --namespace | --super-prefix | --exec-path | --config-env | --list-cmds | --attr-source) return 0 ;;
+    -C | -c | --git-dir | --work-tree | --namespace | --super-prefix | --config-env | --list-cmds | --attr-source) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Global options after which git prints something and exits without
+# dispatching a subcommand, so `git --version commit` is not a commit.
+# A bare `--exec-path` prints the path; `--exec-path=<dir>` sets it.
+is_terminal() {
+  case "$1" in
+    --version | -v | --help | -h | --html-path | --man-path | --info-path | --exec-path) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -74,6 +84,7 @@ is_git_commit_segment() {
       -C* | -c*) ;; # attached forms, `-C/path` and `-ckey=value`
       --*=*) ;;
       -*)
+        is_terminal "$tok" && return 1
         if takes_value "$tok"; then
           (($#)) || return 1
           shift
@@ -140,12 +151,18 @@ fi
 # hook reads no `-C`, `cd`, or `--git-dir` out of the command, and does not
 # walk up to the repository root — a session opened in /repo/subdir lives
 # under `-repo-subdir`. The rule is the one context-handoff/bin/session-to-md
-# already uses — every character that is not a letter or digit becomes a dash —
-# applied per character in jq rather than per byte in `tr`, which under a C
-# locale would turn one Korean character into three dashes and miss the
-# directory Claude Code actually wrote.
+# already uses — every character that is not a letter or digit becomes a dash.
+# That rule is a JavaScript regex without the `u` flag, so it works on UTF-16
+# code units: a character outside the BMP (an emoji) is two dashes. The jq
+# below reproduces that per code point rather than per byte, which `tr -c`
+# under a C locale would do, turning one Korean character into three dashes.
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SLUG=$(printf '%s' "$CWD" | jq -Rr 'gsub("[^A-Za-z0-9]"; "-")' 2>/dev/null || true)
+SLUG=$(printf '%s' "$CWD" | jq -Rr '
+  explode
+  | map(if (. >= 48 and . <= 57) or (. >= 65 and . <= 90) or (. >= 97 and . <= 122) then [.]
+        elif . > 65535 then [45, 45]
+        else [45] end)
+  | flatten | implode' 2>/dev/null || true)
 [[ -n "$SLUG" ]] || exit 0
 PROJECT_DIR="$CONFIG_DIR/projects/$SLUG"
 [[ -d "$PROJECT_DIR" ]] || exit 0
@@ -175,13 +192,14 @@ done < <(find "$PROJECT_DIR" -maxdepth 1 -name '*.jsonl' -mtime -2 2>/dev/null)
 
 [[ -n "$FINDINGS" ]] || exit 0
 
-# Cap the report: a session with hundreds of findings would otherwise push the
-# whole text through one argument, and past ARG_MAX that turns a warning into
-# a hook error after every commit. The report goes through stdin as well, so
-# the cap is a courtesy to the reader rather than the only guard.
+# Cap the hook report: a session with hundreds of findings would otherwise
+# push the whole text through one argument, and past ARG_MAX that turns a
+# warning into a hook error after every commit. The report goes through stdin
+# as well, so the cap is a courtesy to the reader rather than the only guard.
+# --print is the full list the cap points at, so it is never cut.
 MAX_LINES=200
 TOTAL_LINES=$(printf '%s\n' "$FINDINGS" | wc -l | tr -d ' ')
-if ((TOTAL_LINES > MAX_LINES)); then
+if [[ -z "$PRINT_MODE" ]] && ((TOTAL_LINES > MAX_LINES)); then
   # sed, not head: head closes the pipe after MAX_LINES and the printf behind
   # it dies of SIGPIPE, which pipefail then turns into a hook error.
   FINDINGS=$(printf '%s\n' "$FINDINGS" | sed -n "1,${MAX_LINES}p")

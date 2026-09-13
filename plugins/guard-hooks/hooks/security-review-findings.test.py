@@ -31,8 +31,13 @@ def check(label, condition, detail=""):
 
 
 def slug(path):
-    """The rule context-handoff/bin/session-to-md uses: every non-alphanumeric character becomes a dash."""
-    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
+    """The rule context-handoff/bin/session-to-md uses: every non-alphanumeric character becomes a dash.
+
+    That is a JavaScript regex without the `u` flag, so a character outside the
+    BMP is two UTF-16 code units and two dashes; Python's re works per code
+    point and would give one.
+    """
+    return "".join(c if re.fullmatch(r"[A-Za-z0-9]", c) else "--" if ord(c) > 0xFFFF else "-" for c in str(path))
 
 
 def dumps(obj):
@@ -131,6 +136,7 @@ with tempfile.TemporaryDirectory() as tmp:
         ("two assignment prefixes are skipped", "A=1 B='x y' git commit -m x"),
         ("command git commit is recognised", "command git commit -m x"),
         ("an absolute git path is recognised", "/usr/bin/git commit -m x"),
+        ("--exec-path=<dir> sets the path and the commit runs", "git --exec-path=/opt/git/libexec commit -m x"),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, ctx is not None, f"ctx={ctx}")
@@ -144,6 +150,11 @@ with tempfile.TemporaryDirectory() as tmp:
         ("gitk commit is not git commit", "gitk commit"),
         ("git commitx is not git commit", "git commitx"),
         ("an assignment alone is not a commit", "COMMIT=1"),
+        ("git --version commit prints the version, not a commit", "git --version commit"),
+        ("git --help commit prints help, not a commit", "git --help commit"),
+        ("git -h commit prints usage, not a commit", "git -h commit"),
+        ("git --html-path commit prints a path, not a commit", "git --html-path commit"),
+        ("a bare --exec-path prints the path, not a commit", "git --exec-path commit"),
         ("a prefix in front of a non-git command is ignored", "GIT_DIR=x ls commit"),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
@@ -268,6 +279,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("600 findings are still delivered", ctx is not None and "src/f0.ts" in ctx, f"ctx={str(ctx)[:120]}")
     check("the report is capped with a pointer to --print", ctx is not None and "more line(s) not shown" in ctx and "--print" in ctx)
     check("the cap keeps the report under ARG_MAX territory", ctx is not None and len(ctx) < 100_000, f"len={len(ctx) if ctx else 0}")
+    # --print is the full list the cap points at, so it is never cut.
+    rc, out = run_print(cfg, r)
+    check("--print delivers all 600 findings uncut", rc == 0 and "src/f599.ts" in out and "more line(s) not shown" not in out, f"exit={rc} len={len(out)}")
 
 # --- the slug is per character, whatever the locale ------------------------------
 # Claude Code dashes per character (JS replace); `tr -c` dashes per BYTE under
@@ -281,6 +295,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a Korean cwd is found under LC_ALL=C", rc == 0 and ctx is not None, f"exit={rc} ctx={ctx} err={err[:120]}")
     rc, ctx, err = run(cfg, r, env_extra={"LC_ALL": "en_US.UTF-8"})
     check("a Korean cwd is found under a UTF-8 locale", rc == 0 and ctx is not None, f"exit={rc} ctx={ctx} err={err[:120]}")
+    # An emoji is one code point but two UTF-16 code units, so Claude Code's
+    # JavaScript rule writes two dashes for it.
+    e = repo(tmp, "app-\U0001F600")
+    transcript(cfg, e, [user(AUTO_PROMPT), verdict([FINDING])])
+    check("the fixture slug has two dashes for an emoji", slug(e).endswith("app---"), slug(e))
+    rc, ctx, err = run(cfg, e)
+    check("an emoji in the cwd is found under the two-dash slug", rc == 0 and ctx is not None, f"exit={rc} ctx={ctx} err={err[:120]}")
 
 # --- fail-open: every missing precondition is silence, never an error ------
 with tempfile.TemporaryDirectory() as tmp:
