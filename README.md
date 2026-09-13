@@ -159,14 +159,17 @@ Measured on an Apple Silicon Mac: about 30 ms per Bash call, including the gitle
 
 #### `security-review-findings.sh`
 
-After a `git commit`, surfaces any finding that Claude Code's automatic security-review subsessions produced for this repository in the last two days.
-Every file edit spawns one of those background sessions (its first prompt is `Review this change for security vulnerabilities.`); they commit nothing and modify nothing, so a finding they produce otherwise reaches no one.
-Measured over seven weeks on one machine, 437 of 450 verdicts were empty, and the 12 unique findings in the rest — a prompt-injection path in a workflow, a secret-exposure regression in `settings.json`, an account-separation bypass — had never been surfaced anywhere a session could read them.
+After a `git commit`, surfaces any finding that Claude Code's automatic security-review subsessions produced for this session's project in the last two days.
+When the harness reviews an edit, it does so in a background session stored beside the session that made the edit (its first prompt is `Review this change for security vulnerabilities.`); those sessions commit nothing and modify nothing, so a finding they produce otherwise reaches no one.
+Measured over seven weeks on one machine, 448 such sessions ran, 437 of 450 verdicts were empty, and the 12 unique findings in the rest — a prompt-injection path in a workflow, a secret-exposure regression in `settings.json`, an account-separation bypass — had never been surfaced anywhere a session could read them.
+Not every edit gets a review — the same machine went a whole session of dozens of edits with none — so the hook is often silent.
 
 Warns only, never blocks: the findings describe work that is already committed or already discarded, and some are false positives.
 It runs after the commit rather than before because `PreToolUse` has no `additionalContext` channel; for findings about already-committed work the timing costs nothing.
+The lookup is keyed by the session's cwd, the way Claude Code keys its `projects/` directories, so a `-C`, `cd`, or `--git-dir` in the commit command changes nothing: the findings belong to the session's work, wherever the commit lands.
 `security-review-findings.sh --print [dir]` runs the same lookup from a terminal and prints plain text, so a git pre-commit action can call it too.
-Reads `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude/projects/`) and silently does nothing when that directory, the repository's slug, or `jq` is absent.
+Reads `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude/projects/`) and silently does nothing when that directory, the session's slug, or `jq` is absent.
+A report longer than 200 lines is cut with a pointer to `--print`.
 
 ### Turning hooks off
 

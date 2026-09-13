@@ -3,7 +3,7 @@
 
 The fixtures are transcript files laid out the way Claude Code writes them:
 one JSONL per session under <config>/projects/<slug>/, where the slug is the
-repository's full path with every non-alphanumeric character dashed. CLAUDE_CONFIG_DIR points
+session's full cwd with every non-alphanumeric character dashed. CLAUDE_CONFIG_DIR points
 the hook at a temporary tree so no real transcript is read.
 """
 
@@ -132,31 +132,44 @@ with tempfile.TemporaryDirectory() as tmp:
         ("a non-git command is ignored", "ls -la"),
         ("gitk commit is not git commit", "gitk commit"),
         ("git commitx is not git commit", "git commitx"),
-        ("a -C path that does not exist is silence, not the cwd's findings", "git -C /no/such/dir commit -m x"),
-        ("a -C path carrying an expansion is silence", "git -C $R commit -m x"),
     ):
         rc, ctx, _ = run(cfg, r, command=command)
         check(label, rc == 0 and ctx is None, f"exit={rc} ctx={ctx}")
 
-# --- -C and cd select the repository, not the hook's cwd ---------------------
+# --- the SESSION selects the findings, never the commit's -C / cd / --git-dir --
+# Claude Code stores the automatic reviews beside the session that made the
+# edit, keyed by that session's cwd. A commit aimed elsewhere still belongs to
+# this session's work, so its findings are the ones to surface.
 with tempfile.TemporaryDirectory() as tmp:
     cfg = Path(tmp) / "cfg"
-    target = repo(tmp, "target")
-    elsewhere = repo(tmp, "elsewhere")
-    other_finding = dict(FINDING, filePath="target/only.ts")
-    transcript(cfg, target, [user(AUTO_PROMPT), verdict([other_finding])])
-    transcript(cfg, elsewhere, [user(AUTO_PROMPT), verdict([FINDING])])
+    session = repo(tmp, "session")
+    other = repo(tmp, "other")
+    transcript(cfg, session, [user(AUTO_PROMPT), verdict([FINDING])])
+    transcript(cfg, other, [user(AUTO_PROMPT), verdict([dict(FINDING, filePath="other/only.ts")])])
 
-    rc, ctx, _ = run(cfg, elsewhere, command=f"git -C {target} commit -m x")
-    check("git -C <other repo> commit reports THAT repository's findings", ctx is not None and "target/only.ts" in ctx and "src/auth.ts" not in ctx, f"ctx={ctx}")
-    rc, ctx, _ = run(cfg, elsewhere, command=f'git -C "{target}" commit -m x')
-    check("a quoted -C path is honoured", ctx is not None and "target/only.ts" in ctx, f"ctx={ctx}")
-    rc, ctx, _ = run(cfg, elsewhere, command=f"git -C{target} commit -m x")
-    check("the attached -C<path> form is honoured", ctx is not None and "target/only.ts" in ctx, f"ctx={ctx}")
-    rc, ctx, _ = run(cfg, elsewhere, command=f"cd {target} && git commit -m x")
-    check("cd <path> && git commit reports the cd target's findings", ctx is not None and "target/only.ts" in ctx, f"ctx={ctx}")
-    rc, ctx, _ = run(cfg, Path(tmp), command="git -C target commit -m x")
-    check("a relative -C path resolves against the cwd", ctx is not None and "target/only.ts" in ctx, f"ctx={ctx}")
+    for label, command in (
+        ("git -C <other repo> commit surfaces THIS session's findings", f"git -C {other} commit -m x"),
+        ("a quoted -C path is consumed, not followed", f'git -C "{other}" commit -m x'),
+        ("the attached -C<path> form is consumed, not followed", f"git -C{other} commit -m x"),
+        ("cd <other> && git commit surfaces THIS session's findings", f"cd {other} && git commit -m x"),
+        ("--git-dir/--work-tree are consumed, not followed", f"git --git-dir={other}/.git --work-tree={other} commit -m x"),
+        ("a -C path that does not exist still counts as a commit", "git -C /no/such/dir commit -m x"),
+        ("a -C path carrying an expansion still counts as a commit", "git -C $R commit -m x"),
+    ):
+        rc, ctx, _ = run(cfg, session, command=command)
+        check(label, ctx is not None and "src/auth.ts" in ctx and "other/only.ts" not in ctx, f"ctx={ctx}")
+
+# --- a session opened in a subdirectory is keyed by that subdirectory -----------
+with tempfile.TemporaryDirectory() as tmp:
+    cfg = Path(tmp) / "cfg"
+    r = repo(tmp, "app")
+    sub = r / "packages" / "web"
+    sub.mkdir(parents=True)
+    transcript(cfg, sub, [user(AUTO_PROMPT), verdict([FINDING])])
+    rc, ctx, _ = run(cfg, sub)
+    check("a session in /repo/subdir looks under -repo-subdir, not -repo", ctx is not None, f"ctx={ctx}")
+    rc, ctx, _ = run(cfg, r)
+    check("the repository root does not see the subdirectory session's findings", ctx is None, f"ctx={ctx}")
 
 # --- a repository path with spaces maps to its slug -----------------------------
 with tempfile.TemporaryDirectory() as tmp:
@@ -211,6 +224,18 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, ctx, _ = run(other, r)
     check("a basename-only slug is not matched", ctx is None, f"ctx={ctx}")
 
+# --- a huge report is capped and still delivered, never a hook error ---------
+with tempfile.TemporaryDirectory() as tmp:
+    cfg = Path(tmp) / "cfg"
+    r = repo(tmp, "app")
+    many = [dict(FINDING, filePath=f"src/f{i}.ts", explanation="x" * 300) for i in range(600)]
+    transcript(cfg, r, [user(AUTO_PROMPT), verdict(many)])
+    rc, ctx, err = run(cfg, r)
+    check("600 findings do not error the hook", rc == 0 and not err, f"exit={rc} err={err[:120]}")
+    check("600 findings are still delivered", ctx is not None and "src/f0.ts" in ctx, f"ctx={str(ctx)[:120]}")
+    check("the report is capped with a pointer to --print", ctx is not None and "more line(s) not shown" in ctx and "--print" in ctx)
+    check("the cap keeps the report under ARG_MAX territory", ctx is not None and len(ctx) < 100_000, f"len={len(ctx) if ctx else 0}")
+
 # --- fail-open: every missing precondition is silence, never an error ------
 with tempfile.TemporaryDirectory() as tmp:
     cfg = Path(tmp) / "cfg"
@@ -218,9 +243,9 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, ctx, err = run(cfg, r)
     check("no projects directory at all is silence", rc == 0 and ctx is None and not err, f"exit={rc} err={err[:120]}")
     rc, ctx, err = run(cfg, Path(tmp) / "not-a-repo")
-    check("a cwd outside any repository is silence", rc == 0 and ctx is None and not err, f"exit={rc} err={err[:120]}")
+    check("a cwd with no session directory is silence (nothing asks whether it is a repository)", rc == 0 and ctx is None and not err, f"exit={rc} err={err[:120]}")
     rc, ctx, err = run(cfg, Path(tmp) / "does-not-exist")
-    check("a cwd that does not exist is silence", rc == 0 and ctx is None and not err, f"exit={rc} err={err[:120]}")
+    check("a cwd that does not exist has no session directory either: silence", rc == 0 and ctx is None and not err, f"exit={rc} err={err[:120]}")
 
 # --- --print runs the same lookup without hook JSON ----------------------------
 with tempfile.TemporaryDirectory() as tmp:
@@ -230,7 +255,7 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out = run_print(cfg, r)
     check("--print prints the finding as plain text", rc == 0 and "src/auth.ts" in out and not out.startswith("{"), f"exit={rc} out={out[:120]}")
     rc, out = run_print(cfg, Path(tmp) / "not-a-repo")
-    check("--print outside a repository prints nothing", rc == 0 and not out, f"exit={rc} out={out[:120]}")
+    check("--print for a cwd with no session directory prints nothing", rc == 0 and not out, f"exit={rc} out={out[:120]}")
 
 # --- opt-out contract -------------------------------------------------------
 # This hook warns rather than blocks, so the shared blocking cases do not apply;
