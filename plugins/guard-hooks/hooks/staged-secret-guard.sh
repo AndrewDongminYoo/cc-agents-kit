@@ -91,6 +91,10 @@ last_unquoted_dollar=""
 # it is marked "literal" instead, and only an unmarked brace opens or closes a
 # group or a function body.
 token_quoted=""
+# An unquoted # at the start of a word opens a comment that runs to the end of
+# the line. Read as words, `git commit -m x # note` passed # and note as
+# pathspecs, scanned a candidate git never commits, and let the commit through.
+NEWLINE=$'\n'
 flush_token() {
   if [[ -n "$token_started" ]]; then
     if [[ -n "$token_quoted" ]] && [[ "$token" == "{" || "$token" == "}" ]]; then
@@ -132,14 +136,36 @@ while ((command_pos < command_len)); do
   else
     case "$char" in
       "'" | '"') quote="$char"; token_started=1; token_quoted=1 ;;
+      "#")
+        if [[ -n "$token_started" ]]; then
+          token="$token$char"
+        else
+          # Jump to the end of the line in one step, leaving the newline to
+          # separate the command; a test per character cost a fifth of the
+          # time on a large heredoc.
+          comment=${COMMAND:command_pos}
+          comment=${comment%%"$NEWLINE"*}
+          command_pos=$((command_pos + ${#comment} - 1))
+        fi
+        ;;
       "\\") escaped=1; token_quoted=1 ;;
       " " | $'\t')
         flush_token
         ;;
       $'\n')
         flush_token
-        TOKENS+=("$BOUNDARY_PREFIX;")
-        TOKEN_EXPANSION+=("")
+        # After &&, || or |, the command continues on the next line, and the
+        # operator is what joins what follows it: `false &&` then a newline
+        # still makes the next line conditional.
+        last_token=""
+        before_last=""
+        ((${#TOKENS[@]} < 1)) || last_token=${TOKENS[${#TOKENS[@]} - 1]}
+        ((${#TOKENS[@]} < 2)) || before_last=${TOKENS[${#TOKENS[@]} - 2]}
+        if [[ "$last_token" != "$BOUNDARY_PREFIX|" ]] \
+          && [[ "$last_token" != "$BOUNDARY_PREFIX&" || "$before_last" != "$BOUNDARY_PREFIX&" ]]; then
+          TOKENS+=("$BOUNDARY_PREFIX;")
+          TOKEN_EXPANSION+=("")
+        fi
         ;;
       ";" | "|" | "&")
         flush_token
@@ -283,9 +309,14 @@ FUNC_BODY_START=()
 FUNC_BODY_END=()
 FUNC_CERTAIN=()
 FUNC_NAME_SET=" "
-# Open if/while/until/for/case/select constructs, so that a definition inside one
-# is known not to be certain to run.
+# Open if/while/until/for/case/select constructs, and open brace groups, so that
+# a definition inside one is known not to be certain to run: a group can itself
+# be conditional (`false && { ...; }`), backgrounded or piped. And whether a
+# heredoc has been opened: its text is parsed as commands here, so a definition
+# after one may be only prose.
 cond_depth=0
+group_depth=0
+heredoc_seen=""
 BRACE_MATCH=()
 braces_stale=1
 # A call is inlined by appending the body after everything read so far and
@@ -315,6 +346,10 @@ while :; do
   current="${TOKENS[token_index]}"
   scan_start=-1
   indirect=""
+  case "$current" in
+    *'<<<'*) ;;
+    *'<<'*) heredoc_seen=1 ;;
+  esac
   if [[ "$current" == "$BOUNDARY_PREFIX"* ]]; then
     resume=1
     cmdword_continues=""
@@ -375,6 +410,8 @@ while :; do
     case "$current" in
       "if" | "while" | "until" | "for" | "case" | "select") cond_depth=$((cond_depth + 1)) ;;
       "fi" | "done" | "esac") ((cond_depth == 0)) || cond_depth=$((cond_depth - 1)) ;;
+      "{") [[ -n "${TOKEN_EXPANSION[token_index]-}" ]] || group_depth=$((group_depth + 1)) ;;
+      "}") [[ -n "${TOKEN_EXPANSION[token_index]-}" ]] || ((group_depth == 0)) || group_depth=$((group_depth - 1)) ;;
     esac
   fi
   # A shell keyword introduces a command rather than being one, so the word after
@@ -391,9 +428,9 @@ while :; do
         ;;
     esac
   fi
-  if ((at_command_start)) && [[ "$current" == "command" || "$current" == "time" ]]; then
+  if ((at_command_start)) && [[ "$current" == "command" || "$current" == "time" || "$current" == "builtin" ]]; then
     command_prefix=1
-    [[ "$current" != "command" ]] || function_lookup=""
+    [[ "$current" == "time" ]] || function_lookup=""
     token_index=$((token_index + 1))
     continue
   fi
@@ -472,7 +509,7 @@ while :; do
         # neighbours by `&&`, `||`, `|` or `&`. `( f() { :; } ); f` still runs the
         # outer f, and `if false; then f() { :; }; fi` defines nothing.
         def_certain=1
-        if [[ -n "$paren_stack" ]] || ((region_depth > 0 || cond_depth > 0)); then
+        if [[ -n "$paren_stack$heredoc_seen" ]] || ((region_depth > 0 || cond_depth > 0 || group_depth > 0)); then
           def_certain=""
         fi
         def_prev=""
@@ -495,6 +532,30 @@ while :; do
         continue
       fi
     fi
+  fi
+  # `unset` removes a function (with -f, or when no variable has the name), so
+  # after it no earlier definition of that name is certain to be in effect: the
+  # call may run the program of that name instead.
+  if ((at_command_start)) && [[ "$current" == "unset" && -z "${TOKEN_EXPANSION[token_index]-}" ]]; then
+    unset_functions=1
+    for ((unset_index = token_index + 1; unset_index < token_count; unset_index++)); do
+      unset_word=${TOKENS[unset_index]}
+      case "$unset_word" in
+        "$BOUNDARY_PREFIX"*) break ;;
+        -*)
+          # -v alone unsets variables only.
+          if [[ "$unset_word" == *v* && "$unset_word" != *f* ]]; then
+            unset_functions=""
+          fi
+          ;;
+        *)
+          [[ -n "$unset_functions" ]] || continue
+          for ((lookup_index = 0; lookup_index < ${#FUNC_NAMES[@]}; lookup_index++)); do
+            [[ "${FUNC_NAMES[lookup_index]}" != "$unset_word" ]] || FUNC_CERTAIN[lookup_index]=""
+          done
+          ;;
+      esac
+    done
   fi
   # A call to a function defined above; a name called before its definition is
   # not yet a function. The call is read as every definition that may be the one

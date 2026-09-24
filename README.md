@@ -123,7 +123,7 @@ Before a `git commit` runs, scans the *added* lines of the effective commit cand
 Deleting a secret is never blocked, only adding one.
 Staged commits, `git commit -a`, pathspec commits, and quoted `git -C <path>` repositories are distinguished without executing the command string; a commit form that cannot be parsed safely is blocked instead of scanning the wrong candidate.
 A shell function defined in the same command is followed: a call is read as its body with the call's arguments in place of `"$@"` and `$1`–`$9`, and a brace group as the commands inside it.
-A definition that may not have taken effect (inside a subshell, a branch or a loop, or joined by `&&`, `||`, `|` or `&`) does not hide the one before it: the call is read as both.
+A definition that may not have taken effect (inside a subshell, a brace group, a branch or a loop; joined by `&&`, `||`, `|` or `&`; after a heredoc has opened; or since removed by `unset`) does not hide the one before it: the call is read as both.
 Where the arguments cannot be placed (`shift`, `set`, a function defined inside the body, a word before them that can split) they are left unresolved, and the parse refuses what it then cannot identify; a recursion stops being read 8 deep, where every level above has been, and past 4096 added tokens a call is no longer read either; either way it is refused if its words say `commit`, and past the token budget also if anything it can reach, function by function, names `git` or `commit`.
 When the program name itself is a variable or a command substitution (`$g commit`, `$(command -v git) commit`) there is no candidate to scan, so the command is refused if `commit` stands where git reads its subcommand.
 

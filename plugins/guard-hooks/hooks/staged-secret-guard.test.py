@@ -170,6 +170,13 @@ for label, command in (
     # Options alone leave the parameters in place; -o takes an option name.
     ("a wrapper that only sets options", 'f() { set -euo pipefail; git "$@"; }; f status'),
     ("a wrapper with a bare set -", 'f() { set -; git "$@"; }; f status'),
+    # A closed group leaves later definitions certain again.
+    ("a function redefined after a brace group", "{ :; }; f() { git commit -m x; }; f() { git status; }; f"),
+    # unset -v removes a variable, never the function.
+    ("a git function kept through unset -v", "git() { :; }; unset -v git; git commit -m x"),
+    # A comment is not a command, and a # inside a word is not a comment.
+    ("a commit only in a comment", "# git commit -m x"),
+    ("a commit after a comment's semicolon", "echo hi # ; git commit -m x"),
     # A quoted brace is a word, so it does not end the body early.
     ("a definition with a quoted brace as an argument", 'f() { echo "}"; git commit -m x; }'),
     ("a function redefined after an if", "if true; then :; fi; f() { git commit -m x; }; f() { git status; }; f"),
@@ -369,6 +376,26 @@ for label, command in (
     ("commit through a function shadowed only by an uncalled one", "f() { git commit -m x; }; g() { f() { echo safe; }; }; false && g; f"),
     # And a git function defined only in a subshell leaves git itself to run.
     ("commit after a git function defined in a subshell", "( git() { :; } ); git commit -m x"),
+    # A newline after && or || continues the command, so the definition on the
+    # next line is still conditional; a comment before that newline too.
+    ("commit through a function shadowed after && and a newline", "f() { git commit -m x; }; false &&\nf() { echo safe; }; f"),
+    ("commit through a function shadowed after && and a comment", "f() { git commit -m x; }; false && # why\nf() { echo safe; }; f"),
+    # A function-shaped line in a heredoc is text, not a definition.
+    ("commit through a function shadowed only in heredoc text", "f() { git commit -m x; }; cat <<'EOF'\nf() { echo safe; }\nEOF\nf"),
+    # A brace group can be conditional, backgrounded or piped.
+    ("commit through a function shadowed in a conditional group", "f() { git commit -m x; }; false && { :; f() { echo safe; }; }; f"),
+    ("commit through a function shadowed in a piped group", "f() { git commit -m x; }; { :; f() { echo safe; }; } | cat; f"),
+    # unset removes the function, and the program of that name runs instead.
+    ("commit after a git function is unset with -f", "git() { :; }; unset -f git; git commit -m x"),
+    ("commit after a git function is unset by name", "git() { :; }; unset git; git commit -m x"),
+    ("commit after a git function is unset through builtin", "git() { :; }; builtin unset -f git; git commit -m x"),
+    # A trailing comment is not a pathspec: read as one, it made the scan look
+    # at files the commit never takes, and let the staged ones through.
+    ("commit with a trailing comment", "git commit -m x # note"),
+    ("commit after a # inside a word", "echo a#b $#; git commit -m x"),
+    # The comment ends at its newline, which still separates the next command.
+    ("commit on the line after a comment", "echo start # note\ngit commit -m x"),
+    ("commit with an apostrophe in a trailing comment", "git commit -m x # don't forget"),
     # Recursion is read several levels deep, where arguments can shift into
     # place: the second level of this one commits.
     ("commit reached at the second level of a recursion", 'f() { git "$1" -m x; f "$2" "$3"; }; f status commit'),

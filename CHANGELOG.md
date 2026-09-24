@@ -13,7 +13,7 @@ Entries are grouped by release; the topmost section collects work that has not y
   Raised by CodeRabbit on #9 and left out of that pull request; tracked as #10.
 - `guard-hooks` 0.3.1 `staged-secret-guard` follows a shell function defined in the same command.
   A call is read as the function's body with the call's words in place of `"$@"` and `$1`–`$9`, so `g() { git "$@"; }; g commit -m x` is scanned, `g status` is left alone, and a wrapper that adds `-c` is refused exactly as the same command written inline would be.
-  A definition that may not have taken effect (inside a subshell, a branch or a loop, or joined by `&&`, `||`, `|` or `&`) does not hide the one before it, so `f() { git commit -m x; }; ( f() { :; } ); f` is scanned; the call is read as every definition back to the latest one certain to have run.
+  A definition that may not have taken effect (inside a subshell, a brace group, a branch or a loop; joined by `&&`, `||`, `|` or `&`, even across a newline; after a heredoc has opened; or since removed by `unset`) does not hide the one before it, so `f() { git commit -m x; }; ( f() { :; } ); f` is scanned; the call is read as every definition back to the latest one certain to have run.
   Where the words cannot be placed (`shift`, `set`, a function defined inside the body, a word before them that can split) they are left unresolved, and the parse refuses what it then cannot identify; a recursion stops being read 8 deep, where every level above has been, and past 4096 added tokens a call is no longer read either; either way it is refused if its words say `commit`, and past the token budget also if anything it can reach, function by function, names `git` or `commit`.
   A definition whose body is a brace group is no longer read at all: the parser used to skip only the first command of a body, so `f() { echo; git commit -m x; }` was scanned although nothing ran.
   Where the body's end is in doubt the rest is read as though it ran, never skipped: every unquoted `}` ends a body, even one that is only an argument, and a body that holds a heredoc is read whole, because the heredoc's prose is parsed as commands and its braces cannot be trusted.
@@ -24,6 +24,8 @@ Entries are grouped by release; the topmost section collects work that has not y
   `g=git; $g commit`, `"${GIT:-git}" commit` and `$(command -v git) commit` ran a commit with only the word `commit` visible, and a name that expands to git can carry its own `-C` or `-c`, so there is no candidate to scan.
   The refusal fires only where git would read its subcommand, so `$PYTHON -c …` and `"$EDITOR" "$f"` pass as before.
   Tracked as #12.
+- `staged-secret-guard` reads an unquoted `#` at the start of a word as a comment.
+  `git commit -m x # note` passed `#` and `note` as pathspecs, scanned a candidate git never commits, and let a staged credential through; this was true before this release.
 
 ## [0.5.0] — 2026-09-10
 
