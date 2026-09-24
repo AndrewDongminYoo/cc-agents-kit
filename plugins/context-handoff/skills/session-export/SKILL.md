@@ -32,19 +32,28 @@ Do not describe the newest transcript as the active session without that evidenc
 
 | Format | Output |
 | --- | --- |
-| `md` | Conversation sections, a turn index, and expandable tool blocks. |
-| `html` | A standalone report with a turn index, export counts, tool expansion controls, and a responsive layout. |
+| `md` | Conversation sections and expandable tool blocks when requested. |
+| `html` | A standalone report with export counts, tool expansion controls, and a responsive layout. |
 | `json` | Filtered records, metadata, and export diagnostics under `schema_version: 1`. |
 
 HTML displays message text literally, including Markdown syntax.
 It escapes transcript markup and does not load external resources.
-The light report theme uses a single reading column, compact navigation, and distinct tool cards.
+Use Markdown output in a Markdown viewer when rendered headings, lists, and links matter.
+The light report theme uses a single reading column and distinct tool cards, with compact navigation when `--toc` is set.
 The font stack uses Inter when available locally, with system fonts as a fallback.
 Summary counts describe included records, not all activity in the source session.
 Markdown folding requires a viewer that supports HTML details.
 
 All formats use the same record filter and tool limits.
 An explicit `.md`, `.html`, or `.json` output extension must match `--format`.
+
+Include a turn index in Markdown or HTML only when it helps navigate a long session:
+
+```bash
+session-to-md "${CLAUDE_SESSION_ID}" --toc
+```
+
+The turn index is omitted by default.
 
 ## Session Selection
 
@@ -143,9 +152,10 @@ Tool values are readable text, and inputs are formatted JSON text.
 1. Use the current session command above unless the user specifies a different session.
 2. Select the requested format, with Markdown as the default.
 3. Keep tools and thinking excluded unless explicitly requested.
-4. Report the output path printed by the script.
-5. Report export notes about omissions or truncation.
-6. Tell the user to review the export before sharing it.
+4. Add `--toc` only when the user requests navigation.
+5. Report the output path printed by the script.
+6. Report export notes about omissions or truncation.
+7. Tell the user to review the export before sharing it.
 
 ## Verification
 

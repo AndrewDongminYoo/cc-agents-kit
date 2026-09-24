@@ -289,12 +289,12 @@ function toolBody(record) {
   return chunks.join("\n\n");
 }
 
-function renderMarkdown(doc) {
+function renderMarkdown(doc, toc = false) {
   const lines = ["---", ...Object.entries(doc.metadata).map(([key, value]) => `${key}: ${JSON.stringify(value)}`), "---", "", `# ${markdownLabel(doc.metadata.title)}`, "", `> ${NOTICE}`, ""];
   if (doc.notes.length) lines.push("## Export notes", "", ...doc.notes.map((note) => `- ${note}`), "");
-  lines.push("## Conversation", "", ...turnLinks(doc.records).map((link) => `- [${link.label}](#${link.id})`), "");
+  if (toc) lines.push("## Conversation", "", ...turnLinks(doc.records).map((link) => `- [${link.label}](#${link.id})`), "");
   for (const record of doc.records) {
-    lines.push(`<a id="${record.id}"></a>`, "");
+    if (toc) lines.push(`<a id="${record.id}"></a>`, "");
     if (record.type === "tool" || record.type === "thinking") {
       lines.push(`<details${record.type === "tool" && doc.metadata.tools === "full" ? " open" : ""}><summary>${escapeHtml(heading(record))} · ${fmtTime(record.timestamp)}</summary>`, "",
         `<pre><code>${escapeHtml(record.type === "tool" ? toolBody(record) : record.text)}</code></pre>`, "", "</details>", "");
@@ -303,7 +303,7 @@ function renderMarkdown(doc) {
   return lines.join("\n") + "\n";
 }
 
-function renderHtml(doc) {
+function renderHtml(doc, toc = false) {
   const template = fs.readFileSync(new URL("../skills/session-export/templates/session.html", import.meta.url), "utf8");
   const inlineHash = (tag) => createHash("sha256").update(template.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))[1]).digest("base64");
   const body = doc.records.map((record) => {
@@ -320,7 +320,7 @@ function renderHtml(doc) {
       ["messages", doc.records.filter((record) => record.type === "message").length, "Messages"],
       ["tools", doc.records.filter((record) => record.type === "tool").length, "Tool calls included"],
     ].map(([key, count, label]) => `<div class="stat"><div class="stat-value" data-stat="${key}">${count}</div><div class="stat-label">${label}</div></div>`).join(""),
-    toc: `<ol>${turnLinks(doc.records).map((link) => `<li><a href="#${link.id}">${link.label}</a></li>`).join("")}</ol>`,
+    navigation: toc ? `<nav class="nav-toc" aria-label="Conversation turns"><ol>${turnLinks(doc.records).map((link) => `<li><a href="#${link.id}">${link.label}</a></li>`).join("")}</ol></nav>` : "",
     metadata: [doc.metadata.model, `Started: ${fmtTime(doc.metadata.create_time)}`, `Updated: ${fmtTime(doc.metadata.update_time)}`, `Session: ${doc.metadata.session}`].map(escapeHtml).join("<br>"),
     notes: doc.notes.length ? `<section class="export-notes" aria-label="Export notes"><h2>Export notes</h2><ul>${doc.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul></section>` : "",
     style_hash: inlineHash("style"), script_hash: inlineHash("script"),
@@ -334,6 +334,7 @@ function main() {
       out: { type: "string" }, format: { type: "string", default: "md" },
       tools: { type: "string", default: "none" }, "tool-limit": { type: "string" },
       thinking: { type: "boolean", default: false }, list: { type: "boolean", default: false },
+      toc: { type: "boolean", default: false },
       last: { type: "string", default: "1" },
     }, allowPositionals: true,
   });
@@ -365,7 +366,7 @@ function main() {
   if (!fs.existsSync(file)) throw new Error(`Transcript not found: ${file}`);
   const { entries, malformed } = readEntries(file);
   const doc = buildExport(entries, values, malformed, file);
-  const rendered = values.format === "json" ? JSON.stringify(doc, null, 2) + "\n" : values.format === "html" ? renderHtml(doc) : renderMarkdown(doc);
+  const rendered = values.format === "json" ? JSON.stringify(doc, null, 2) + "\n" : values.format === "html" ? renderHtml(doc, values.toc) : renderMarkdown(doc, values.toc);
   const safeId = doc.metadata.session.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 100) || "session";
   const defaultName = `${fmtTime(doc.metadata.create_time).slice(0, 10) || "session"}-${safeId}.${values.format}`;
   let output = values.out || path.join(os.homedir(), "Downloads", defaultName);

@@ -273,7 +273,7 @@ class ExportTests(unittest.TestCase):
 
     def test_html_escapes_source_markup_and_keeps_controls_local(self):
         attack = '</pre><script>alert("bad")</script><img src="https://example.invalid/leak">'
-        result, output = self.export("html", "--tools", "full", entries=[
+        result, output = self.export("html", "--tools", "full", "--toc", entries=[
             self.entry("user", attack),
             self.entry("assistant", [{"type": "tool_use", "id": "x", "name": attack, "input": {"x": attack}}]),
             self.entry("user", [{"type": "tool_result", "tool_use_id": "x", "content": attack}]),
@@ -296,15 +296,22 @@ class ExportTests(unittest.TestCase):
         self.assertIn('id="expand-tools"', html)
         self.assertIn('href="#record-1"', html)
 
-    def test_markdown_has_turn_index_and_safe_tool_blocks(self):
+    def test_toc_is_opt_in_and_tool_blocks_remain_safe(self):
         result, output = self.export("md", "--tools", "collapsed")
         self.assertEqual(result.returncode, 0, result.stderr)
         body = output.read_text()
-        self.assertIn("## Conversation", body)
-        self.assertIn('id="record-1"', body)
+        self.assertNotIn("## Conversation", body)
+        self.assertNotIn('id="record-1"', body)
         self.assertIn("<pre><code>", body)
         self.assertIn("No output recorded", body)
         self.assertNotIn("<details open>", body)
+        result, output = self.export("md", "--toc")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("## Conversation", output.read_text())
+        self.assertIn('id="record-1"', output.read_text())
+        result, output = self.export("html")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('aria-label="Conversation turns"', output.read_text())
 
     def test_html_summary_counts_only_included_records(self):
         for mode, tools_count in (("none", 0), ("full", 2)):
