@@ -395,6 +395,11 @@ for label, command in (
     ("commit after a # inside a word", "echo a#b $#; git commit -m x"),
     # The comment ends at its newline, which still separates the next command.
     ("commit on the line after a comment", "echo start # note\ngit commit -m x"),
+    # A brace a call passes in is an expanded word inside the body, never a
+    # reserved one, and a body never closes outside the region that holds it:
+    # here the unmatched { of a heredoc line paired with the } that `g }`
+    # copied into g's body, and the commit after the heredoc went unread.
+    ("commit after a call that passes a brace", "g() { echo \"$@\"; }; g }; cat <<EOF\nfoo() {\nEOF\ngit commit -m x"),
     ("commit with an apostrophe in a trailing comment", "git commit -m x # don't forget"),
     # Recursion is read several levels deep, where arguments can shift into
     # place: the second level of this one commits.

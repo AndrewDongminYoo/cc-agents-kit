@@ -277,6 +277,15 @@ match_braces() {
   braces_stale=""
 }
 
+# A word the call passes in is an expanded parameter inside the body, and an
+# expansion is never a reserved word: in `g }`, the } closes nothing in g.
+inline_word() {
+  local word_expansion=$2
+  [[ "$1" != "{" && "$1" != "}" ]] || word_expansion="literal"
+  INLINE_TOKENS+=("$1")
+  INLINE_EXPANSION+=("$word_expansion")
+}
+
 REPO_ARGS=()
 commit_index=-1
 commit_count=0
@@ -493,6 +502,12 @@ while :; do
     if [[ -n "$def_name" && "${TOKENS[def_open]-}" == "{" ]]; then
       [[ -z "$braces_stale" ]] || match_braces
       def_close=${BRACE_MATCH[def_open]--1}
+      # And never outside the command's own tokens, or the inlined body, that
+      # holds the definition: a closing brace from another region would skip
+      # everything between.
+      region_limit=$orig_end
+      ((region_depth == 0)) || region_limit=${REGION_END[region_depth - 1]}
+      ((def_close < region_limit)) || def_close=-1
       # A heredoc inside the range means prose was parsed as commands, and its
       # braces may have paired with the wrong ones, so the range is not trusted
       # to be a body: it is read as though it ran instead.
@@ -654,8 +669,7 @@ while :; do
               # Read as "$@" either way: once tokenized, the quoted and unquoted
               # spellings are the same token, and unquoted is the rarer one.
               for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
-                INLINE_TOKENS+=("${TOKENS[arg_index]}")
-                INLINE_EXPANSION+=("${TOKEN_EXPANSION[arg_index]-}")
+                inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
               done
               continue
               ;;
@@ -665,8 +679,7 @@ while :; do
               position=${body_token//[^0-9]/}
               if ((first_split == 0 || position <= first_split)); then
                 for ((arg_index = token_index + position; arg_index < call_end; arg_index++)); do
-                  INLINE_TOKENS+=("${TOKENS[arg_index]}")
-                  INLINE_EXPANSION+=("${TOKEN_EXPANSION[arg_index]-}")
+                  inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
                 done
                 continue
               fi
@@ -688,16 +701,14 @@ while :; do
                   INLINE_EXPANSION+=("")
                 fi
               elif [[ "$body_expansion" == quoted ]]; then
-                INLINE_TOKENS+=("${TOKENS[arg_index]}")
-                INLINE_EXPANSION+=("${TOKEN_EXPANSION[arg_index]-}")
+                inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
               else
                 # Unquoted, the value splits into words: `step "git commit -m x"`
                 # with a body of `$1` runs a commit.
                 split_words=()
                 IFS=$' \t\n' read -r -d '' -a split_words <<<"${TOKENS[arg_index]}" || true
                 for split_word in ${split_words[@]+"${split_words[@]}"}; do
-                  INLINE_TOKENS+=("$split_word")
-                  INLINE_EXPANSION+=("${TOKEN_EXPANSION[arg_index]-}")
+                  inline_word "$split_word" "${TOKEN_EXPANSION[arg_index]-}"
                 done
               fi
               continue
@@ -715,8 +726,7 @@ while :; do
       INLINE_TOKENS+=(command git)
       INLINE_EXPANSION+=("" "")
       for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
-        INLINE_TOKENS+=("${TOKENS[arg_index]}")
-        INLINE_EXPANSION+=("${TOKEN_EXPANSION[arg_index]-}")
+        inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
       done
       INLINE_TOKENS+=("$BOUNDARY_PREFIX;")
       INLINE_EXPANSION+=("")
