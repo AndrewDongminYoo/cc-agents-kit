@@ -194,10 +194,21 @@ for label, command in (
     # The `}` of `${ROOT:-$(pwd)}` ends a parameter expansion, not the body.
     ("a body holding a defaulted substitution", 'f() { local d=${ROOT:-$(pwd)}; git -C "$d" "$@"; }; f status'),
     ("a git wrapper running a read-only verb", 'g() { git "$@"; }; g status'),
+    # "$@" keeps each word whole, and `git "commit -m x"` names no subcommand
+    # git has; only an unquoted $@ splits it.
+    ("a wrapper passed one word holding a commit", 'g() { git "$@"; }; g "commit -m x"'),
+    ("a logging wrapper running a read-only command unquoted", 'run() { echo "+ $*"; $@; }; run "git status"'),
+    ("a git wrapper passing an unquoted $* a read-only verb", "g() { git $*; }; g status"),
+    # "$*" joins the words into one, and `"git commit -m x"` is no program.
+    ("a wrapper running its words joined by \"$*\"", 'run() { "$*"; }; run git commit -m x'),
     # `commit` after an unreadable program name is only judged where git would
     # read its subcommand; anything else is ordinary work.
     ("a program named by a variable", "$PYTHON script.py commit"),
     ("a program named by a variable, with -c", "\"$PY\" -c 'print(1)'"),
+    ("a program named by a variable, with an option and its value", '"$EDITOR" --wait notes.txt'),
+    # Only git's own options are assumed to take the next word as a value.
+    ("a program named by a substitution, with an option before commit", "$(git rev-parse --show-toplevel)/scripts/check.sh --since HEAD~1 commit"),
+    ("a variable naming git, then an option and its value", "g=git; $g --git-dir .git log --grep commit"),
     ("a program named by a variable, with unquoted flags", "$PYTHON $flags script.py"),
     ("a quoted program and a quoted argument", '"$EDITOR" "$f"'),
     ("a substitution glued to the program name", "$(npm bin)/eslint ."),
@@ -349,6 +360,10 @@ for label, command in (
     # Unquoted, a parameter splits into words, and the words are what run.
     ("commit through an unquoted parameter", 'step() { echo ">> $1"; $1; }; step "git commit -m wip"'),
     ("commit through an empty unquoted parameter", 'c() { git $1 commit -m x; }; c ""'),
+    ("commit through an unquoted $@", 'run() { echo "+ $*"; $@; }; run "git commit -m x"'),
+    ("commit through an unquoted slice", 'f() { git ${@:2}; }; f x "commit -m y"'),
+    ("commit through an unquoted $*", 'run() { echo "+ $*"; $*; }; run git commit -m x'),
+    ("commit through an unquoted ${*}", 'run() { ${*}; }; run "git commit -m x"'),
     # A function inside the body has positional parameters of its own.
     ("commit through a function defined inside another", 'outer() { inner() { git "$@"; }; inner commit -m x; }; outer status'),
     ("commit through a function-keyword function inside another", 'outer() { function inner { git "$@"; }; inner commit -m x; }; outer status'),
@@ -428,6 +443,11 @@ for label, command, reason in (
     # After `shift` the call's words no longer line up with $1 and "$@", so they
     # are left unresolved and the parse cannot identify the subcommand.
     ("a wrapper that shifts its arguments", 'f() { local r=$1; shift; git -C "$r" "$@"; }; f /repo commit -m x', "unquoted expansion"),
+    # Left unresolved, an unquoted $@ can split like any unquoted expansion,
+    # whether git reads it or another call passes it on.
+    ("a wrapper that shifts its arguments, unquoted", 'f() { shift; git $@; }; f x commit -m y', "unquoted expansion"),
+    ("a wrapper that shifts and passes its arguments on, unquoted", 'f() { shift; g $@; }; g() { git -C "$1" "$2"; }; f x /repo commit', "could not safely parse"),
+    ("a wrapper that shifts its arguments into a message, unquoted", 'f() { shift; git commit -m $@; }; f y x -a', "could not safely parse"),
     ("a wrapper that resets its arguments with set --", 'f() { set -- commit -m x; git "$@"; }; f status', "unquoted expansion"),
     ("a wrapper that resets its arguments with set", 'f() { set commit -m x; git "$@"; }; f status', "unquoted expansion"),
     # A bare - or +, and words after options, reset them too.
@@ -443,6 +463,15 @@ for label, command, reason in (
     # "$2" or in a slice is unknown.
     ("a parameter after a word that can split", 'run_in() { git -C "$1" "$2"; }; run_in $d status', "could not safely parse"),
     ("a slice after a word that can split", 'f() { git "${@:2}"; }; f $x commit -m x', "unquoted expansion"),
+    # An expansion passed to an unquoted parameter can split, however the call
+    # quoted it, and so move every parameter of the call it is passed on to.
+    ("an unquoted parameter given a quoted expansion", 'f() { g $1; }; g() { git -C "$1" "$2"; }; f "$x"', "could not safely parse"),
+    # A command that mentions IFS may have changed how a parameter splits, so an
+    # unquoted one is not resolved, and a literal holding commit is refused.
+    ("a wrapper that changes IFS before an unquoted parameter", 'f() { IFS=:; git $1; }; f commit:-m:x', "unquoted expansion"),
+    ("a wrapper that changes IFS before an unquoted $@", 'f() { IFS=X; git $@; }; f commitX-mXx', "unquoted expansion"),
+    ("a wrapper that changes IFS and runs its parameter", 'f() { IFS=:; $1; }; f git:commit:-m:x', "unquoted expansion"),
+    ("a wrapper that changes IFS and runs its parameter as the program", 'f() { IFS=:; $1 commit -m x; }; f env:git', "program name this hook cannot read"),
     # A body that multiplies its arguments stops being inlined at the token
     # budget, and is then judged as a program name this hook cannot read.
     ("a wrapper that doubles its arguments", 'f() { f "$@" "$@"; }; f commit -m x', "program name this hook cannot read"),
@@ -450,6 +479,7 @@ for label, command, reason in (
     # commit, and nothing it reaches through another function may either.
     ("a committing function called past the token budget", BUDGET_SPENT + 'c() { git commit -m x; }; c', "program name this hook cannot read"),
     ("a function reaching a commit through another, past the token budget", BUDGET_SPENT + 'g() { git commit -m x; }; c() { g; }; c', "program name this hook cannot read"),
+    ("a function committing through a variable, past the token budget", BUDGET_SPENT + 'c() { "$GIT" commit -m x; }; c', "program name this hook cannot read"),
 ):
     # Bounded, because an unbounded inliner does not fail this case: it hangs.
     rc, err = check_hook(command, plain, timeout=60)
@@ -467,6 +497,10 @@ for label, command in (
     ("a substitution glued to the rest of the name", '$(dirname "$x")/git commit -m x'),
     ("two substitutions forming the name", "$(a)$(b) commit"),
     ("a variable naming git, then a flag", "$g --no-pager commit -m x"),
+    # git's own options may take the next word as their value.
+    ("a variable naming git, then an option and its value", "g=git; $g --git-dir .git commit -m x"),
+    ("a variable naming git, then --work-tree and its value", "g=git; $g --work-tree . commit -m x"),
+    ("a variable naming git, then --config-env and its value", "g=git; $g --config-env user.name=HOME commit -m x"),
 ):
     rc, err = check_hook(command, plain)
     check(f"{label} is refused", rc == 2, f"exit={rc}")

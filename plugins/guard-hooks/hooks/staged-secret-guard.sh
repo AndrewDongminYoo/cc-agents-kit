@@ -73,6 +73,10 @@ token_started=""
 # matter and they matter in different places -- "$x" is a single argument but
 # can still BE the subcommand, while $x can also carry extra words after it. An
 # escaped \$ and a '$x' in single quotes expand to nothing and stay empty.
+# "split-words" is "split" for an unquoted $@ or $*, whose parameters each split
+# in turn, where "$@" keeps them whole and "$*" joins them into one word: in a
+# function body they differ once the call's words replace them, and everywhere
+# else it is read as "split".
 token_expansion=""
 TOKEN_EXPANSION=()
 TOKENIZATION_ERROR=""
@@ -99,6 +103,12 @@ flush_token() {
   if [[ -n "$token_started" ]]; then
     if [[ -n "$token_quoted" ]] && [[ "$token" == "{" || "$token" == "}" ]]; then
       token_expansion="literal"
+    fi
+    if [[ -z "$token_quoted" && "$token_expansion" == split ]]; then
+      # shellcheck disable=SC2016  # literal spellings of positional parameters
+      case "$token" in
+        '$'[@*] | '${'[@*]'}' | '${'[@*]':'[1-9]'}') token_expansion="split-words" ;;
+      esac
     fi
     TOKENS+=("$token")
     TOKEN_EXPANSION+=("$token_expansion")
@@ -284,6 +294,47 @@ inline_word() {
   [[ "$1" != "{" && "$1" != "}" ]] || word_expansion="literal"
   INLINE_TOKENS+=("$1")
   INLINE_EXPANSION+=("$word_expansion")
+}
+
+# The call's words from index $1 up to $2, as an unquoted parameter expansion
+# ($1, $@) standing for them in the body, spelled $3 there, makes them: each
+# word split as the default IFS splits it, so `step "git commit -m x"` with a
+# body of `$1` runs a commit. A word that is itself an expansion has a value
+# unknown here, which can split however it is quoted in the call.
+#
+# bash never takes IFS from the environment, but the command can set it, and
+# then how a value splits is unknown: `f() { IFS=:; git $1; }; f commit:-m:x`
+# commits. So in a command that mentions IFS at all, the expansion is left
+# unresolved for the parse to refuse where git reads its subcommand, and a
+# literal word holding commit is refused outright: some IFS makes that a word of
+# its own wherever the expansion stands.
+IFS_NAMED=""
+[[ "$COMMAND" != *IFS* ]] || IFS_NAMED=1
+inline_unquoted() {
+  local arg_index split_word
+  local split_words=()
+  if [[ -n "$IFS_NAMED" ]]; then
+    for ((arg_index = $1; arg_index < $2; arg_index++)); do
+      case "${TOKEN_EXPANSION[arg_index]-}" in
+        "" | literal) [[ "${TOKENS[arg_index]}" != *commit* ]] || block_unquoted_expansion ;;
+      esac
+    done
+    INLINE_TOKENS+=("$3")
+    INLINE_EXPANSION+=(split)
+    return 0
+  fi
+  for ((arg_index = $1; arg_index < $2; arg_index++)); do
+    case "${TOKEN_EXPANSION[arg_index]-}" in
+      "" | literal)
+        split_words=()
+        IFS=$' \t\n' read -r -d '' -a split_words <<<"${TOKENS[arg_index]}" || true
+        for split_word in ${split_words[@]+"${split_words[@]}"}; do
+          inline_word "$split_word" ""
+        done
+        ;;
+      *) inline_word "${TOKENS[arg_index]}" split ;;
+    esac
+  done
 }
 
 REPO_ARGS=()
@@ -608,7 +659,7 @@ while :; do
     # which parameter is unknown.
     first_split=0
     for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
-      if [[ "${TOKEN_EXPANSION[arg_index]-}" == split ]]; then
+      if [[ "${TOKEN_EXPANSION[arg_index]-}" == split* ]]; then
         first_split=$((arg_index - token_index))
         break
       fi
@@ -665,23 +716,24 @@ while :; do
         if [[ -n "$substitute" && -n "$body_expansion" ]]; then
           # shellcheck disable=SC2016  # literal spellings of positional parameters
           case "$body_token" in
-            '$@' | '${@}')
-              # Read as "$@" either way: once tokenized, the quoted and unquoted
-              # spellings are the same token, and unquoted is the rarer one.
-              for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
-                inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
-              done
-              continue
-              ;;
-            '${@:'[1-9]'}')
-              # "${@:2}": the call's words from the second on, once the words
-              # before it are known to be one parameter each.
-              position=${body_token//[^0-9]/}
+            '$'[@*] | '${'[@*]'}' | '${'[@*]':'[1-9]'}')
+              # "$@": the call's words, one word each. "${@:2}": the same from
+              # the second on, once the words before it are known to be one
+              # parameter each. Unquoted, $@ and $* alike split each of those
+              # words in turn: `run git commit -m x` with a body of `$*` runs a
+              # commit. "$*" joins them into one word, and is left as it is.
+              position=1
+              [[ "$body_token" != '${'[@*]':'* ]] || position=${body_token//[^0-9]/}
               if ((first_split == 0 || position <= first_split)); then
-                for ((arg_index = token_index + position; arg_index < call_end; arg_index++)); do
-                  inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
-                done
-                continue
+                if [[ "$body_expansion" == split-words ]]; then
+                  inline_unquoted "$((token_index + position))" "$call_end" "$body_token"
+                  continue
+                elif [[ "$body_token" == *@* ]]; then
+                  for ((arg_index = token_index + position; arg_index < call_end; arg_index++)); do
+                    inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
+                  done
+                  continue
+                fi
               fi
               ;;
             '$'[1-9] | '${'[1-9]'}')
@@ -703,13 +755,7 @@ while :; do
               elif [[ "$body_expansion" == quoted ]]; then
                 inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
               else
-                # Unquoted, the value splits into words: `step "git commit -m x"`
-                # with a body of `$1` runs a commit.
-                split_words=()
-                IFS=$' \t\n' read -r -d '' -a split_words <<<"${TOKENS[arg_index]}" || true
-                for split_word in ${split_words[@]+"${split_words[@]}"}; do
-                  inline_word "$split_word" "${TOKEN_EXPANSION[arg_index]-}"
-                done
+                inline_unquoted "$arg_index" "$((arg_index + 1))" "$body_token"
               fi
               continue
               ;;
@@ -819,6 +865,7 @@ while :; do
     config_override=""
     split_risk=""
     opaque_option=""
+    option_value_index=-1
     scanned_past_commit=1
     while ((scan_index < token_count)); do
       current="${TOKENS[scan_index]}"
@@ -826,12 +873,12 @@ while :; do
       # One splittable token anywhere ahead of the subcommand is enough: the
       # words it expands to are git's arguments and never reach this parser, so
       # nothing read after it can be trusted to be the subcommand.
-      [[ "${TOKEN_EXPANSION[scan_index]-}" != split ]] || split_risk=1
+      [[ "${TOKEN_EXPANSION[scan_index]-}" != split* ]] || split_risk=1
       case "$current" in
         -C)
           if ((scan_index + 1 < token_count)) && [[ "${TOKENS[scan_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
             unsafe_value "${TOKENS[scan_index + 1]}" && pending_block=1
-            [[ "${TOKEN_EXPANSION[scan_index + 1]-}" != split ]] || split_risk=1
+            [[ "${TOKEN_EXPANSION[scan_index + 1]-}" != split* ]] || split_risk=1
             candidate_repo_args+=("$current" "${TOKENS[scan_index + 1]}")
             scan_index=$((scan_index + 2))
           else
@@ -859,6 +906,7 @@ while :; do
           pending_block=1
           config_override=1
           scan_index=$((scan_index + 1))
+          [[ "$current" != --config-env ]] || option_value_index=$scan_index
           ;;
         # The global options that take no value, from git's own synopsis. Naming
         # the flags rather than the value-takers is the direction that fails
@@ -884,6 +932,14 @@ while :; do
           pending_block=1
           opaque_option=1
           scan_index=$((scan_index + 1))
+          # Behind a program name this hook cannot read, only the options git
+          # itself gives a separate value are assumed to take one: `$g --git-dir
+          # .git commit` commits, where `"$SCRIPT" --since HEAD~1 commit` need
+          # not be git at all. (--super-prefix is gone from git 2.43, not from
+          # the 2.39 that Xcode ships.)
+          case "$current" in
+            --git-dir | --work-tree | --namespace | --attr-source | --super-prefix) option_value_index=$scan_index ;;
+          esac
           ;;
         commit)
           [[ -z "$indirect" ]] || block_indirect_commit
@@ -909,10 +965,16 @@ while :; do
           # identified, so telling it to quote would send it in a circle.
           #
           # None of that applies behind a program name this hook cannot read:
-          # nothing says it is git, and `"$EDITOR" "$f"` is not a commit.
-          [[ -z "$indirect" ]] || break
+          # nothing says it is git, and `"$EDITOR" "$f"` is not a commit. What
+          # still applies is the value one of git's options takes: if the
+          # program is git, `$g --git-dir .git commit -m x` commits.
+          if [[ -n "$indirect" ]]; then
+            ((scan_index == option_value_index)) || break
+            scan_index=$((scan_index + 1))
+            continue
+          fi
           case "${TOKEN_EXPANSION[scan_index]-}" in
-            split) block_unquoted_expansion ;;
+            split*) block_unquoted_expansion ;;
             quoted) block_unparsed ;;
           esac
           # Scanning past it would read its own arguments, where a value such as
@@ -954,7 +1016,7 @@ while ((token_index < token_count)); do
   [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
   # A token that can add words is as dangerous here as before the subcommand:
   # it can introduce -a, which commits tracked files the index scan never saw.
-  [[ "${TOKEN_EXPANSION[token_index]-}" != split ]] || block_unparsed
+  [[ "${TOKEN_EXPANSION[token_index]-}" != split* ]] || block_unparsed
   if [[ -n "$after_separator" ]]; then
     unsafe_value "$current" && block_unparsed
     [[ "$current" == *'*'* || "$current" == *'?'* || "$current" == *'['* ]] && block_unparsed
@@ -970,7 +1032,7 @@ while ((token_index < token_count)); do
       ((token_index + 1 < token_count)) || block_unparsed
       # Checked here rather than at the top of the loop, because consuming the
       # value is exactly what stops it from being seen there.
-      [[ "${TOKEN_EXPANSION[token_index + 1]-}" != split ]] || block_unparsed
+      [[ "${TOKEN_EXPANSION[token_index + 1]-}" != split* ]] || block_unparsed
       token_index=$((token_index + 1))
       ;;
     --message=* | --file=* | --reuse-message=* | --reedit-message=* | --author=* | --date=* | --cleanup=* | --fixup=* | --squash=* | --template=* | --trailer=* | --untracked-files=* | --gpg-sign=*) ;;
