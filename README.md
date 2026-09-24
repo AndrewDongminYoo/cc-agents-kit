@@ -123,7 +123,7 @@ Before a `git commit` runs, scans the *added* lines of the effective commit cand
 Deleting a secret is never blocked, only adding one.
 Staged commits, `git commit -a`, pathspec commits, and quoted `git -C <path>` repositories are distinguished without executing the command string; a commit form that cannot be parsed safely is blocked instead of scanning the wrong candidate.
 A shell function defined in the same command is followed: a call is read as its body with the call's arguments in place of `"$@"` and `$1`–`$9`, and a brace group as the commands inside it.
-Where the arguments cannot be placed (`shift`, `set`, a function defined inside the body) they are left unresolved, and the parse refuses what it then cannot identify; past its bounds (64 calls, or 4096 added tokens) a call is judged like a program name the hook cannot read.
+Where the arguments cannot be placed (`shift`, `set`, a function defined inside the body, a word before them that can split) they are left unresolved, and the parse refuses what it then cannot identify; past its bounds (a function 8 deep in its own body, 128 calls, or 4096 added tokens) a call is refused if its body or its words say `commit`.
 When the program name itself is a variable or a command substitution (`$g commit`, `$(command -v git) commit`) there is no candidate to scan, so the command is refused if `commit` stands where git reads its subcommand.
 
 This is the commit-time counterpart to `secrets-path-guard.sh`, which blocks *reading* secret files - a value still reaches a diff by being typed, pasted, or written by a generator.

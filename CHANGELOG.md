@@ -13,7 +13,7 @@ Entries are grouped by release; the topmost section collects work that has not y
   Raised by CodeRabbit on #9 and left out of that pull request; tracked as #10.
 - `guard-hooks` 0.3.1 `staged-secret-guard` follows a shell function defined in the same command.
   A call is read as the function's body with the call's words in place of `"$@"` and `$1`–`$9`, so `g() { git "$@"; }; g commit -m x` is scanned, `g status` is left alone, and a wrapper that adds `-c` is refused exactly as the same command written inline would be.
-  Where the words cannot be placed (`shift`, `set`, a function defined inside the body) they are left unresolved, and the parse refuses what it then cannot identify; past 64 calls or 4096 added tokens a call is judged like a program name the hook cannot read.
+  Where the words cannot be placed (`shift`, `set`, a function defined inside the body, a word before them that can split) they are left unresolved, and the parse refuses what it then cannot identify; past a recursion 8 deep, 128 calls, or 4096 added tokens, a call is refused if its body or its words say `commit`.
   A definition whose body is a brace group is no longer read at all: the parser used to skip only the first command of a body, so `f() { echo; git commit -m x; }` was scanned although nothing ran.
   Where the body's end is in doubt the rest is read as though it ran, never skipped: every `}` ends a body, even one that is only an argument, and a body that holds a heredoc is read whole, because the heredoc's prose is parsed as commands and its braces cannot be trusted.
 - `staged-secret-guard` scans a commit inside a brace group.

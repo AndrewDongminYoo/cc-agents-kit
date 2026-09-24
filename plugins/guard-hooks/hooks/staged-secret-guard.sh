@@ -217,6 +217,11 @@ match_braces() {
         esac
         ;;
       "}")
+        # Glued to a closing substitution, as in `${ROOT:-$(pwd)}`, the brace
+        # ends a parameter expansion, which is part of a word, not a body.
+        if ((index > 0)) && [[ "${TOKENS[index - 1]}" == "$BOUNDARY_PREFIX\$)+" ]]; then
+          continue
+        fi
         if [[ -n "$stack" ]]; then
           BRACE_MATCH[${stack##* }]=$index
           stack=${stack% *}
@@ -256,17 +261,30 @@ assignment_continues=""
 FUNC_NAMES=()
 FUNC_BODY_START=()
 FUNC_BODY_END=()
+FUNC_NAME_SET=" "
 BRACE_MATCH=()
 braces_stale=1
-# Inlining is bounded twice: by the number of calls replaced, which stops
-# recursion (`f() { f; }; f`), and by the tokens it may add, which stops a body
-# that multiplies its arguments (`f() { f "$@" "$@"; }`) from doubling them at
-# every level. Past either bound a call is judged like any other program name
-# this hook cannot read.
-INLINE_LIMIT=64
+# Inlining is bounded three ways. Recursion (`f() { f; }; f`) stops at a depth of
+# 8 calls of one function inside its own inlined body; the regions currently
+# being read are tracked as a stack of function and end index, so that a helper
+# called twenty times in a row is not mistaken for one calling itself. The tokens
+# inlining may add are capped, which stops a body that multiplies its arguments
+# (`f() { f "$@" "$@"; }`) from doubling them at every level. And the calls
+# replaced in one command are capped, because each one copies the token list: a
+# recursion that ran on to the token cap took 11 s in a long command, against
+# the hook's 10 s timeout. Past any bound a call is refused if its body or its
+# words say `commit`, and otherwise left alone.
+INLINE_LIMIT=128
+RECURSION_LIMIT=8
 inline_count=0
 inline_budget=$((token_count + 4096))
+REGION_FUNC=()
+REGION_END=()
+region_depth=0
 while ((token_index < token_count)); do
+  while ((region_depth > 0)) && ((token_index >= REGION_END[region_depth - 1])); do
+    region_depth=$((region_depth - 1))
+  done
   current="${TOKENS[token_index]}"
   scan_start=-1
   indirect=""
@@ -418,6 +436,7 @@ while ((token_index < token_count)); do
         FUNC_NAMES+=("$def_name")
         FUNC_BODY_START+=("$((def_open + 1))")
         FUNC_BODY_END+=("$def_close")
+        FUNC_NAME_SET="$FUNC_NAME_SET$def_name "
         at_command_start=0
         token_index=$((def_close + 1))
         continue
@@ -427,7 +446,8 @@ while ((token_index < token_count)); do
   # A call to a function defined above. The latest definition wins, as in the
   # shell, and a name called before its definition is not yet a function.
   func_index=-1
-  if ((at_command_start)) && [[ -n "$function_lookup" && -z "$env_prefix" && -z "${TOKEN_EXPANSION[token_index]-}" ]]; then
+  if ((at_command_start)) && [[ -n "$function_lookup" && -z "$env_prefix" && -z "${TOKEN_EXPANSION[token_index]-}" \
+    && "$FUNC_NAME_SET" == *" $current "* ]]; then
     for ((lookup_index = ${#FUNC_NAMES[@]} - 1; lookup_index >= 0; lookup_index--)); do
       if [[ "${FUNC_NAMES[lookup_index]}" == "$current" ]]; then
         func_index=$lookup_index
@@ -435,13 +455,29 @@ while ((token_index < token_count)); do
       fi
     done
   fi
-  if ((func_index >= 0 && inline_count < INLINE_LIMIT)); then
+  recursion=0
+  if ((func_index >= 0)); then
+    for ((region_index = 0; region_index < region_depth; region_index++)); do
+      ((REGION_FUNC[region_index] != func_index)) || recursion=$((recursion + 1))
+    done
+  fi
+  if ((func_index >= 0 && inline_count < INLINE_LIMIT && recursion < RECURSION_LIMIT)); then
     call_end=$((token_index + 1))
     while ((call_end < token_count)) && [[ "${TOKENS[call_end]}" != "$BOUNDARY_PREFIX"* ]]; do
       call_end=$((call_end + 1))
     done
     body_start=${FUNC_BODY_START[func_index]}
     body_end=${FUNC_BODY_END[func_index]}
+    # The first of the call's words that can split into several. Up to it each
+    # word is exactly one positional parameter; from it on, which word lands in
+    # which parameter is unknown.
+    first_split=0
+    for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
+      if [[ "${TOKEN_EXPANSION[arg_index]-}" == split ]]; then
+        first_split=$((arg_index - token_index))
+        break
+      fi
+    done
     # The call's words replace the positional parameters only where they are
     # sure to line up. `shift` and `set` renumber them partway through the body,
     # and a function defined inside the body has positional parameters of its
@@ -478,9 +514,29 @@ while ((token_index < token_count)); do
             done
             continue
             ;;
+          '${@:'[1-9]'}')
+            # "${@:2}": the call's words from the second on, once the words
+            # before it are known to be one parameter each.
+            position=${body_token//[^0-9]/}
+            if ((first_split == 0 || position <= first_split)); then
+              for ((arg_index = token_index + position; arg_index < call_end; arg_index++)); do
+                INLINE_TOKENS+=("${TOKENS[arg_index]}")
+                INLINE_EXPANSION+=("${TOKEN_EXPANSION[arg_index]-}")
+              done
+              continue
+            fi
+            ;;
           '$'[1-9] | '${'[1-9]'}')
-            arg_index=$((token_index + ${body_token//[^1-9]/}))
-            if ((arg_index >= call_end)); then
+            position=${body_token//[^1-9]/}
+            arg_index=$((token_index + position))
+            if ((first_split > 0 && position >= first_split)); then
+              # A word that can split sits at or before this parameter, so its
+              # value is unknown. Quoted it is still exactly one word, and a
+              # quoted expansion is what the parse makes of it: `"$1"` given
+              # `$d` is a single path to `-C`, never an extra subcommand.
+              INLINE_TOKENS+=("$body_token")
+              INLINE_EXPANSION+=("$body_expansion")
+            elif ((arg_index >= call_end)); then
               # "$3" with no third argument is still one, empty, word; $3 is none.
               if [[ "$body_expansion" == quoted ]]; then
                 INLINE_TOKENS+=("")
@@ -514,22 +570,40 @@ while ((token_index < token_count)); do
       token_count=${#TOKENS[@]}
       inline_count=$((inline_count + 1))
       braces_stale=1
+      # Every region being read contains this call, so each grows with it.
+      for ((region_index = 0; region_index < region_depth; region_index++)); do
+        REGION_END[region_index]=$((REGION_END[region_index] + ${#INLINE_TOKENS[@]} - (call_end - token_index)))
+      done
+      REGION_FUNC[region_depth]=$func_index
+      REGION_END[region_depth]=$((token_index + ${#INLINE_TOKENS[@]}))
+      region_depth=$((region_depth + 1))
       continue
     fi
   fi
+  if ((at_command_start && func_index >= 0)); then
+    # A call past the inlining bounds cannot be read, but neither its body nor
+    # its words may say commit.
+    body_end=${FUNC_BODY_END[func_index]}
+    for ((body_index = FUNC_BODY_START[func_index]; body_index < body_end; body_index++)); do
+      [[ "${TOKENS[body_index]}" != commit ]] || block_indirect_commit
+    done
+    for ((arg_index = token_index + 1; arg_index < token_count; arg_index++)); do
+      [[ "${TOKENS[arg_index]}" != "$BOUNDARY_PREFIX"* ]] || break
+      [[ "${TOKENS[arg_index]}" != commit ]] || block_indirect_commit
+    done
+    at_command_start=0
+    token_index=$((token_index + 1))
+    continue
+  fi
   # What runs is git itself, or a program name this hook cannot read: an
-  # expansion (`$g`, "${GIT:-git}"), a command substitution, or a function call
-  # past the inlining bounds. The second kind is judged only on whether `commit`
-  # turns up where git would read its subcommand; anything else is left alone,
-  # since `$PYTHON -c ...` and `"$EDITOR" "$f"` are ordinary work. A word with a
-  # backtick is not judged at all: a heredoc's prose is parsed as commands here,
-  # and markdown puts backticks at the start of a line far more often than any
-  # command does.
+  # expansion (`$g`, "${GIT:-git}") or a command substitution. The second kind
+  # is judged only on whether `commit` turns up where git would read its
+  # subcommand; anything else is left alone, since `$PYTHON -c ...` and
+  # `"$EDITOR" "$f"` are ordinary work. A word with a backtick is not judged at
+  # all: a heredoc's prose is parsed as commands here, and markdown puts
+  # backticks at the start of a line far more often than any command does.
   if ((at_command_start && scan_start < 0)); then
-    if ((func_index >= 0)); then
-      scan_start=$((token_index + 1))
-      indirect=1
-    elif [[ "$current" == "git" || "$current" == */git ]]; then
+    if [[ "$current" == "git" || "$current" == */git ]]; then
       scan_start=$((token_index + 1))
     elif [[ -n "${TOKEN_EXPANSION[token_index]-}" && "$current" != *'`'* ]]; then
       if [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX\$(" ]]; then

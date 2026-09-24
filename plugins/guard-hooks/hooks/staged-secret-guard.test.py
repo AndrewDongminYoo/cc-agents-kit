@@ -159,6 +159,13 @@ for label, command in (
     # "$2" with no second argument is still a word, and `git "" commit` is not a
     # commit.
     ("a missing quoted parameter standing as the subcommand", 'c() { git "$2" commit -m x; }; c a'),
+    # "$1" is one word whatever the call passed, so an unquoted `$d` given to it
+    # is a single unknown path, not a word that could turn into a subcommand.
+    ("a quoted parameter given an unquoted word", 'gs() { git -C "$1" status --short; }; for d in */; do gs $d; done'),
+    ("a quoted parameter given a substitution", 'show() { git -C "$1" log -3; }; show $(git rev-parse --show-toplevel)'),
+    ("a slice of the arguments", 'in_repo() { git -C "$1" "${@:2}"; }; in_repo ./frontend status'),
+    # The `}` of `${ROOT:-$(pwd)}` ends a parameter expansion, not the body.
+    ("a body holding a defaulted substitution", 'f() { local d=${ROOT:-$(pwd)}; git -C "$d" "$@"; }; f status'),
     ("a git wrapper running a read-only verb", 'g() { git "$@"; }; g status'),
     # `commit` after an unreadable program name is only judged where git would
     # read its subcommand; anything else is ordinary work.
@@ -316,6 +323,17 @@ for label, command in (
     ("commit through a function-keyword function inside another", 'outer() { function inner { git "$@"; }; inner commit -m x; }; outer status'),
     # Inlining is bounded, but not so tightly that ordinary helper calls use it up.
     ("commit after sixteen helper calls", 'run() { "$@"; }; ' + "run true; " * 16 + "run git commit -m x"),
+    ("commit through a slice of the arguments", 'in_repo() { git -C "$1" "${@:2}"; }; in_repo . commit -m x'),
+    # The recursion bound is a depth, not a count: a wrapper called twenty times,
+    # or one called after a recursive helper, is still inlined and scanned.
+    ("commit through a wrapper on its twenty-first call", 'g() { git "$@"; }; ' + "g status; " * 20 + "g commit -m x"),
+    ("commit through a wrapper after a recursive helper", 'f() { f; }; f; g() { git "$@"; }; g commit -m x'),
+    # Depth counts one function inside its own body, not nesting in general.
+    ("commit through nine nested wrappers", "".join(f'a{i}() {{ a{i + 1} "$@"; }}; ' for i in range(1, 9)) + 'a9() { git "$@"; }; a1 commit -m x'),
+    # A body that goes on after a nested call keeps its own end in step, so the
+    # recursion in it still stops at its depth instead of running to the call cap.
+    ("commit through a wrapper after recursion with a call before it", 'f() { g; f; }; g() { :; }; f; h() { git "$@"; }; h commit -m x'),
+    ("commit through a wrapper after a recursive countdown", 'countdown() { [ "$1" -le 0 ] && return; countdown $(( $1 - 1 )); }; countdown 3; g() { git "$@"; }; g commit -m x'),
     # The rest of an assignment's word is still the assignment.
     ("commit behind an assignment glued to a substitution", "out=$(date)x git commit -m x"),
     # An assignment's substitution leaves the next word a command.
@@ -338,9 +356,15 @@ for label, command, reason in (
     ("a wrapper that shifts its arguments", 'f() { local r=$1; shift; git -C "$r" "$@"; }; f /repo commit -m x', "unquoted expansion"),
     ("a wrapper that resets its arguments with set --", 'f() { set -- commit -m x; git "$@"; }; f status', "unquoted expansion"),
     ("a wrapper that resets its arguments with set", 'f() { set commit -m x; git "$@"; }; f status', "unquoted expansion"),
+    # A word that can split moves every parameter after it, so what lands in
+    # "$2" or in a slice is unknown.
+    ("a parameter after a word that can split", 'run_in() { git -C "$1" "$2"; }; run_in $d status', "could not safely parse"),
+    ("a slice after a word that can split", 'f() { git "${@:2}"; }; f $x commit -m x', "unquoted expansion"),
     # A body that multiplies its arguments stops being inlined at the token
     # budget, and is then judged as a program name this hook cannot read.
     ("a wrapper that doubles its arguments", 'f() { f "$@" "$@"; }; f commit -m x', "program name this hook cannot read"),
+    # Past the call cap a body is no longer read, but it may still not say commit.
+    ("a committing function called past the call cap", 'h() { :; }; ' + "h; " * 130 + 'c() { git commit -m x; }; c', "program name this hook cannot read"),
 ):
     # Bounded, because an unbounded inliner does not fail this case: it hangs.
     rc, err = check_hook(command, plain, timeout=60)
@@ -379,6 +403,25 @@ try:
     check("recursion in a long command finishes within the hook timeout", rc == 0, f"exit={rc}")
 except subprocess.TimeoutExpired:
     check("recursion in a long command finishes within the hook timeout", False, "timed out")
+
+# Recursion now stops at its depth, so the call cap is what bounds a command
+# with many ordinary calls: without it, 1500 of them took 18 s under bash 3.2.
+many_calls = "echo " + " ".join(f"w{i}" for i in range(400)) + "\nh() { :; }; " + "h; " * 1500
+try:
+    rc, _ = check_hook(many_calls, plain, timeout=10)
+    check("many calls in a long command finish within the hook timeout", rc == 0, f"exit={rc}")
+except subprocess.TimeoutExpired:
+    check("many calls in a long command finish within the hook timeout", False, "timed out")
+
+# The token budget is what bounds functions that multiply their arguments in a
+# cycle: each is only one deep in its own body, so the recursion bound lets all
+# three through eight times over, and without the budget this ran past 30 s.
+doubling_cycle = 'a() { b "$@" "$@"; }; b() { c "$@" "$@"; }; c() { a "$@" "$@"; }; a commit -m x'
+try:
+    rc, err = check_hook(doubling_cycle, plain, timeout=10)
+    check("a cycle of doubling functions is refused within the hook timeout", rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+except subprocess.TimeoutExpired:
+    check("a cycle of doubling functions is refused within the hook timeout", False, "timed out")
 
 # --- honours git -C so the right repo is scanned ----------------------------
 dirty = repo({"config.txt": f"{GITHUB}\n"})
