@@ -51,10 +51,10 @@ def marker_command(directory, name):
     return command, marker
 
 
-def check_hook(command, cwd, env=None):
+def check_hook(command, cwd, env=None, timeout=None):
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
     proc = subprocess.run(
-        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True, cwd=cwd, env=env
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True, cwd=cwd, env=env, timeout=timeout
     )
     return proc.returncode, proc.stderr
 
@@ -139,8 +139,90 @@ for label, command in (
     ("braced scalar then a literal bracket-at", 'git -C "$root/${x}dir[@]" log -1'),
     # The braces come from two different expansions, so no array is involved.
     ("bracket-at between two expansions", 'git -C "$root/${x}dir[@]${suffix}" log'),
-    # Defining a function executes nothing.
+    # Defining a function executes nothing -- including every line of its body,
+    # not only the first, which is all the parser used to skip.
     ("a function definition containing a commit", 'f() { git commit -m x; }'),
+    ("a definition whose second line commits", "f() { echo; git commit -m x; }"),
+    ("a function-keyword definition", "function f { git commit -m x; }"),
+    ("a function called before it is defined", "f; f() { git commit -m x; }"),
+    # The body ends at the right brace. Every `}` closes one, and `{` opens one
+    # only where a command can start, so a body is never read past its end.
+    ("a definition closed straight after fi", "f() { if true; then git commit -m x; fi }"),
+    ("a definition containing a brace group", "f() { { git status; }; git commit -m x; }"),
+    ("a function-keyword definition with parentheses", "function f() { git commit -m x; }"),
+    ("a function-keyword definition with a nested one", "function f { function g { :; }; git commit -m x; }"),
+    # The latest definition wins, as in the shell.
+    ("a function redefined before its call", "f() { git commit -m x; }; f() { git status; }; f"),
+    # A definition that may not have taken effect is read alongside the ones it
+    # would replace, and here none of them commits.
+    ("a read-only function shadowed in a subshell", "f() { git status; }; ( f() { git log -1; } ); f"),
+    # Past its recursion bound a function has been read at every level above,
+    # so a read-only body is not refused for naming git.
+    ("a recursive function running a read-only git command", "f() { git status; f; }; f"),
+    # An inlined body is appended after the command, behind a separator, so a
+    # bare git at the very end does not read the body's first word as its
+    # subcommand.
+    ("a bare git after a call whose body starts with commit", "f() { commit -m x; }; f; git"),
+    # A setup script: thirty steps, each logging through a helper and checking
+    # status, run three times. 180 calls in all, none of them a commit.
+    ("a script of thirty steps run three times", 'log() { printf "%s\\n" "$*"; }\nR=/repo\n' + "".join(f'step{i}() {{\n  log "step {i}"\n  git -C "$R" status --short\n  npm run task{i} -- --flag "$1"\n}}\n' for i in range(30)) + "".join(f"step{i} arg{r}\n" for r in range(3) for i in range(30))),
+    # A finished `if` leaves later definitions certain again.
+    # Options alone leave the parameters in place; -o takes an option name.
+    ("a wrapper that only sets options", 'f() { set -euo pipefail; git "$@"; }; f status'),
+    ("a wrapper with a bare set -", 'f() { set -; git "$@"; }; f status'),
+    # A closed group leaves later definitions certain again.
+    ("a function redefined after a brace group", "{ :; }; f() { git commit -m x; }; f() { git status; }; f"),
+    # unset -v removes a variable, never the function.
+    ("a git function kept through unset -v", "git() { :; }; unset -v git; git commit -m x"),
+    # A comment is not a command, and a # inside a word is not a comment.
+    ("a commit only in a comment", "# git commit -m x"),
+    ("a commit after a comment's semicolon", "echo hi # ; git commit -m x"),
+    # A quoted brace is a word, so it does not end the body early.
+    ("a definition with a quoted brace as an argument", 'f() { echo "}"; git commit -m x; }'),
+    ("a function redefined after an if", "if true; then :; fi; f() { git commit -m x; }; f() { git status; }; f"),
+    # `command` and `env` run a program named f, never the function.
+    ("a function name behind command", "f() { git commit -m x; }; command f"),
+    ("a function name behind env", "f() { git commit -m x; }; env f"),
+    # "$2" with no second argument is still a word, and `git "" commit` is not a
+    # commit.
+    ("a missing quoted parameter standing as the subcommand", 'c() { git "$2" commit -m x; }; c a'),
+    # "$1" is one word whatever the call passed, so an unquoted `$d` given to it
+    # is a single unknown path, not a word that could turn into a subcommand.
+    ("a quoted parameter given an unquoted word", 'gs() { git -C "$1" status --short; }; for d in */; do gs $d; done'),
+    ("a quoted parameter given a substitution", 'show() { git -C "$1" log -3; }; show $(git rev-parse --show-toplevel)'),
+    ("a slice of the arguments", 'in_repo() { git -C "$1" "${@:2}"; }; in_repo ./frontend status'),
+    # The `}` of `${ROOT:-$(pwd)}` ends a parameter expansion, not the body.
+    ("a body holding a defaulted substitution", 'f() { local d=${ROOT:-$(pwd)}; git -C "$d" "$@"; }; f status'),
+    ("a git wrapper running a read-only verb", 'g() { git "$@"; }; g status'),
+    # "$@" keeps each word whole, and `git "commit -m x"` names no subcommand
+    # git has; only an unquoted $@ splits it.
+    ("a wrapper passed one word holding a commit", 'g() { git "$@"; }; g "commit -m x"'),
+    ("a logging wrapper running a read-only command unquoted", 'run() { echo "+ $*"; $@; }; run "git status"'),
+    ("a git wrapper passing an unquoted $* a read-only verb", "g() { git $*; }; g status"),
+    # A quoted < or >, or one an expansion produced, is part of a word, never a
+    # redirection, and `git "commit>x"` names no subcommand git has.
+    ("a wrapper passed a quoted word holding a redirection", 'g() { git "$@"; }; g "commit>x"'),
+    ("a wrapper passed an expansion holding a redirection", 'f() { g $1; }; g() { git "$@"; }; f "commit>x"'),
+    ("a wrapper whose output is redirected", 'g() { git "$@"; }; g status >/dev/null 2>&1'),
+    # "$*" joins the words into one, and `"git commit -m x"` is no program.
+    ("a wrapper running its words joined by \"$*\"", 'run() { "$*"; }; run git commit -m x'),
+    # `commit` after an unreadable program name is only judged where git would
+    # read its subcommand; anything else is ordinary work.
+    ("a program named by a variable", "$PYTHON script.py commit"),
+    ("a program named by a variable, with -c", "\"$PY\" -c 'print(1)'"),
+    ("a program named by a variable, with an option and its value", '"$EDITOR" --wait notes.txt'),
+    # Only git's own options are assumed to take the next word as a value.
+    ("a program named by a substitution, with an option before commit", "$(git rev-parse --show-toplevel)/scripts/check.sh --since HEAD~1 commit"),
+    ("a variable naming git, then an option and its value", "g=git; $g --git-dir .git log --grep commit"),
+    ("a program named by a variable, with unquoted flags", "$PYTHON $flags script.py"),
+    ("a quoted program and a quoted argument", '"$EDITOR" "$f"'),
+    ("a substitution glued to the program name", "$(npm bin)/eslint ."),
+    ("a variable naming git for a read-only verb", "$g log --oneline"),
+    # A substitution among the arguments leaves the words after it arguments.
+    ("git as an argument after a substitution", "echo $(date) git commit -m x"),
+    # Heredoc prose is parsed as commands here, and markdown often starts a line
+    # with a backticked word.
+    ("a heredoc line starting with a backticked word", "cat > n.md <<'EOF'\n`git` commit messages are conventional\nEOF"),
     ("git log with an unparsed --option", "git --no-pager log -1"),
     ("git log behind a long option carrying its own value", "git --git-dir=/repo/.git log -1"),
     ("git log behind a pathspec flag", "git --literal-pathspecs log -1"),
@@ -243,6 +325,242 @@ for label, command in (
     rc, err = check_hook(command, continued_commit_repo)
     check(f"{label} is parsed, not refused", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
     check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
+# --- a commit reached through a group, a function, or a substitution --------
+# A brace group runs where it stands, and a call runs its function's body with
+# the call's words in place of "$@" and $1..$9. Each of these names the
+# credential, so the commit was found and scanned rather than refused unread.
+for label, command in (
+    ("commit inside a brace group", "{ git commit -m x; }"),
+    ("commit inside a nested brace group", "{ { git commit -m x; } }"),
+    ("commit through a wrapper that forwards its arguments", 'g() { git "$@"; }; g commit -m x'),
+    ("commit inside a called function", "f() { git add -A && git commit -m wip; }; f"),
+    ("commit in a body defined over several lines", "f()\n{\n  git commit -m x\n}\nf"),
+    ("commit in a function-keyword body", "function f { git commit -m x; }; f"),
+    # "$1" standing where the subcommand goes is refused unread unless the call's
+    # word is put in its place.
+    ("commit through positional parameters", 'c() { git "$1" -m "$2"; }; c commit msg'),
+    ("commit through two wrappers", 'a() { git "$@"; }; b() { a commit "$@"; }; b -m x'),
+    # `command` inside the body reaches the real git, not the function again.
+    ("commit through a function named git", 'git() { command git "$@"; }; git commit -m x'),
+    ("commit through a wrapper behind time", 'g() { git "$@"; }; time g commit -m x'),
+    # `}` closes a body after fi as well as after a separator; after an ordinary
+    # word it is only an argument.
+    ("commit in a body closed straight after fi", "f() { if true; then git commit -m x; fi }; f"),
+    ("commit after a brace that is only an argument", "f() { echo }; git commit -m x; }; f"),
+    # Leaning the other way: a `}` that is only an argument still ends the body,
+    # so what follows it is read as though it ran even with no call.
+    ("commit after an argument brace, uncalled", "f() { echo }; git commit -m x; }"),
+    # Nor does a quoted or escaped brace open a group inside it, which would let
+    # the body's real close pair with that and run on past the commit.
+    ("commit after a body holding a quoted brace", 'f() { if "{"; then :; fi; }; git commit -m x; echo "}"'),
+    ("commit after a body holding an escaped brace", 'f() { if \\{; then :; fi; }; git commit -m x; echo \\}'),
+    # A body that ends straight after `]]` must not swallow the commands after it.
+    ("commit after a body closed by ]]", 'is_clean() { [[ -z "$(git status --porcelain)" ]] }\ngit add -A && git commit -m wip\nfunction cleanup { rm -f tmp; }'),
+    # A heredoc's prose is parsed as commands, and its braces must not pair with
+    # real ones across a commit.
+    ("commit between two heredocs of JavaScript", "cat > a.js <<'EOF'\nfunction init() {\n  if (!ready) { return }\n  start();\n}\nEOF\ngit add a.js && git commit -m init\ncat > b.js <<'EOF'\nmodule.exports = {\n  a: 1,\n};\nEOF"),
+    ("commit after a body that holds a heredoc", "f() { cat <<EOF\n{\nEOF\n}\ngit commit -m x\ncat <<EOF\n}\nEOF"),
+    ("commit through ${1}", 'c() { git "${1}" -m x; }; c commit'),
+    # Unquoted, a parameter splits into words, and the words are what run.
+    ("commit through an unquoted parameter", 'step() { echo ">> $1"; $1; }; step "git commit -m wip"'),
+    ("commit through an empty unquoted parameter", 'c() { git $1 commit -m x; }; c ""'),
+    ("commit through an unquoted $@", 'run() { echo "+ $*"; $@; }; run "git commit -m x"'),
+    ("commit through an unquoted slice", 'f() { git ${@:2}; }; f x "commit -m y"'),
+    ("commit through an unquoted $*", 'run() { echo "+ $*"; $*; }; run git commit -m x'),
+    ("commit through an unquoted ${*}", 'run() { ${*}; }; run "git commit -m x"'),
+    # A redirection is removed before the call's words become its parameters,
+    # wherever it stands, operator and target alike.
+    ("commit through a wrapper after a redirection", 'g() { git "$@"; }; g > /dev/null commit -m x'),
+    ("commit through a wrapper after an attached redirection", 'g() { git "$@"; }; g >/dev/null commit -m x'),
+    ("commit through a wrapper after a duplicated descriptor", 'g() { git "$@"; }; g 2>&1 commit -m x'),
+    ("commit through a wrapper after a redirection to an expansion", 'g() { git "$@"; }; g >"$log" commit -m x'),
+    ("commit through a wrapper with a redirection glued to a word", 'g() { git "$@"; }; g commit>/dev/null -m x'),
+    ("commit through a wrapper followed by redirections", 'g() { git "$@"; }; g commit -m x >/dev/null 2>&1'),
+    ("commit through git past a redirection, its definition uncertain", '( git() { :; } ); git >/dev/null commit -m x'),
+    # An expanded name given to unset may be any function's.
+    ("commit through git after an expanded unset -f", 'git() { :; }; x=git; unset -f "$x"; git commit -m x'),
+    ("commit through git after an unquoted expanded unset", 'git() { :; }; x=git; unset $x; git commit -m x'),
+    # A function inside the body has positional parameters of its own.
+    ("commit through a function defined inside another", 'outer() { inner() { git "$@"; }; inner commit -m x; }; outer status'),
+    ("commit through a function-keyword function inside another", 'outer() { function inner { git "$@"; }; inner commit -m x; }; outer status'),
+    # Inlining is bounded, but not so tightly that ordinary helper calls use it up.
+    ("commit after sixteen helper calls", 'run() { "$@"; }; ' + "run true; " * 16 + "run git commit -m x"),
+    ("commit through a slice of the arguments", 'in_repo() { git -C "$1" "${@:2}"; }; in_repo . commit -m x'),
+    # The recursion bound is a depth, not a count: a wrapper called twenty times,
+    # or one called after a recursive helper, is still inlined and scanned.
+    ("commit through a wrapper on its twenty-first call", 'g() { git "$@"; }; ' + "g status; " * 20 + "g commit -m x"),
+    ("commit through a wrapper after a recursive helper", 'f() { f; }; f; g() { git "$@"; }; g commit -m x'),
+    # Depth counts one function inside its own body, not nesting in general.
+    ("commit through nine nested wrappers", "".join(f'a{i}() {{ a{i + 1} "$@"; }}; ' for i in range(1, 9)) + 'a9() { git "$@"; }; a1 commit -m x'),
+    # A body that goes on after a nested call keeps its own end in step, so the
+    # recursion in it still stops at its depth instead of running to the call cap.
+    ("commit through a wrapper after recursion with a call before it", 'f() { g; f; }; g() { :; }; f; h() { git "$@"; }; h commit -m x'),
+    # A definition replaces an earlier one only where it certainly runs in this
+    # shell. Everywhere else the earlier body may still be the one called.
+    ("commit through a function shadowed only in a subshell", "f() { git commit -m x; }; ( f() { echo safe; } ); f"),
+    ("commit through a function shadowed only in an untaken branch", "f() { git commit -m x; }; if false; then f() { echo safe; }; fi; f"),
+    # The same, where the shadowing definition is not the first command inside.
+    ("commit through a function shadowed later in an untaken branch", "f() { git commit -m x; }; if false; then :; f() { echo safe; }; fi; f"),
+    ("commit through a function shadowed mid-subshell", "f() { git commit -m x; }; ( :; f() { echo safe; }; : ); f"),
+    ("commit through a function shadowed only behind &&", "f() { git commit -m x; }; false && f() { echo safe; }; f"),
+    ("commit through a function shadowed only in a pipeline", "f() { git commit -m x; }; f() { echo safe; } | cat; f"),
+    ("commit through a function shadowed only by an uncalled one", "f() { git commit -m x; }; g() { f() { echo safe; }; }; false && g; f"),
+    # And a git function defined only in a subshell leaves git itself to run.
+    ("commit after a git function defined in a subshell", "( git() { :; } ); git commit -m x"),
+    # A newline after && or || continues the command, so the definition on the
+    # next line is still conditional; a comment before that newline too.
+    ("commit through a function shadowed after && and a newline", "f() { git commit -m x; }; false &&\nf() { echo safe; }; f"),
+    ("commit through a function shadowed after && and a comment", "f() { git commit -m x; }; false && # why\nf() { echo safe; }; f"),
+    # A function-shaped line in a heredoc is text, not a definition.
+    ("commit through a function shadowed only in heredoc text", "f() { git commit -m x; }; cat <<'EOF'\nf() { echo safe; }\nEOF\nf"),
+    # A brace group can be conditional, backgrounded or piped.
+    ("commit through a function shadowed in a conditional group", "f() { git commit -m x; }; false && { :; f() { echo safe; }; }; f"),
+    ("commit through a function shadowed in a piped group", "f() { git commit -m x; }; { :; f() { echo safe; }; } | cat; f"),
+    # unset removes the function, and the program of that name runs instead.
+    ("commit after a git function is unset with -f", "git() { :; }; unset -f git; git commit -m x"),
+    ("commit after a git function is unset by name", "git() { :; }; unset git; git commit -m x"),
+    ("commit after a git function is unset through builtin", "git() { :; }; builtin unset -f git; git commit -m x"),
+    # A trailing comment is not a pathspec: read as one, it made the scan look
+    # at files the commit never takes, and let the staged ones through.
+    ("commit with a trailing comment", "git commit -m x # note"),
+    ("commit after a # inside a word", "echo a#b $#; git commit -m x"),
+    # The comment ends at its newline, which still separates the next command.
+    ("commit on the line after a comment", "echo start # note\ngit commit -m x"),
+    # A brace a call passes in is an expanded word inside the body, never a
+    # reserved one, and a body never closes outside the region that holds it:
+    # here the unmatched { of a heredoc line paired with the } that `g }`
+    # copied into g's body, and the commit after the heredoc went unread.
+    ("commit after a call that passes a brace", "g() { echo \"$@\"; }; g }; cat <<EOF\nfoo() {\nEOF\ngit commit -m x"),
+    ("commit with an apostrophe in a trailing comment", "git commit -m x # don't forget"),
+    # Recursion is read several levels deep, where arguments can shift into
+    # place: the second level of this one commits.
+    ("commit reached at the second level of a recursion", 'f() { git "$1" -m x; f "$2" "$3"; }; f status commit'),
+    ("commit through a wrapper after a recursive countdown", 'countdown() { [ "$1" -le 0 ] && return; countdown $(( $1 - 1 )); }; countdown 3; g() { git "$@"; }; g commit -m x'),
+    # The rest of an assignment's word is still the assignment.
+    ("commit behind an assignment glued to a substitution", "out=$(date)x git commit -m x"),
+    # An assignment's substitution leaves the next word a command.
+    ("commit behind an assignment's substitution", "out=$(date) git commit -m x"),
+    ("commit inside an assignment's substitution", "x=$(git commit -m y)"),
+):
+    rc, err = check_hook(command, continued_commit_repo)
+    check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
+# A clean index, so a refusal below cannot be a credential that was found.
+plain = repo({"README.md": "# hello\n"})
+# Seventy calls to a sixty-word body add more tokens than inlining may, so the
+# calls after them are past the budget.
+BUDGET_SPENT = "h() { : " + " ".join(f"w{i}" for i in range(60)) + "; }; " + "h; " * 70
+
+# The wrapper gets the verdict its body would get written out, so what is
+# refused inline is refused through the call too.
+for label, command, reason in (
+    ("a wrapper adding -c before a commit", 'GC() { git -c user.name=x "$@"; }; GC commit -q -m y', "could not safely parse"),
+    ("a wrapper passed an unquoted -C expansion", 'g() { git "$@"; }; g -C $d log', "unquoted expansion"),
+    # After `shift` the call's words no longer line up with $1 and "$@", so they
+    # are left unresolved and the parse cannot identify the subcommand.
+    ("a wrapper that shifts its arguments", 'f() { local r=$1; shift; git -C "$r" "$@"; }; f /repo commit -m x', "unquoted expansion"),
+    # Left unresolved, an unquoted $@ can split like any unquoted expansion,
+    # whether git reads it or another call passes it on.
+    ("a wrapper that shifts its arguments, unquoted", 'f() { shift; git $@; }; f x commit -m y', "unquoted expansion"),
+    ("a wrapper that shifts and passes its arguments on, unquoted", 'f() { shift; g $@; }; g() { git -C "$1" "$2"; }; f x /repo commit', "could not safely parse"),
+    ("a wrapper that shifts its arguments into a message, unquoted", 'f() { shift; git commit -m $@; }; f y x -a', "could not safely parse"),
+    ("a wrapper that resets its arguments with set --", 'f() { set -- commit -m x; git "$@"; }; f status', "unquoted expansion"),
+    ("a wrapper that resets its arguments with set", 'f() { set commit -m x; git "$@"; }; f status', "unquoted expansion"),
+    # A bare - or +, and words after options, reset them too.
+    ("a wrapper that resets its arguments with set -", 'f() { set - commit -m x; git "$1" "$2" "$3"; }; f status', "could not safely parse"),
+    ("a wrapper that resets its arguments with set +", 'f() { set + commit -m x; git "$1" "$2" "$3"; }; f status', "could not safely parse"),
+    ("a wrapper that resets its arguments after an option", 'f() { set -e commit -m x; git "$@"; }; f status', "unquoted expansion"),
+    # After a bare -, even a word spelled like an option is a parameter, and a
+    # bare -- clears them. Reading the call's words instead would pass a
+    # pathspec the real commit never gets, and scan too little.
+    ("a wrapper that resets its arguments to an option-like word", 'f() { set - --amend; git commit -m x "$@"; }; f -- other.txt', "could not safely parse"),
+    ("a wrapper that clears its arguments", 'f() { set --; git commit -m x "$@"; }; f -- other.txt', "could not safely parse"),
+    # A word that can split moves every parameter after it, so what lands in
+    # "$2" or in a slice is unknown.
+    ("a parameter after a word that can split", 'run_in() { git -C "$1" "$2"; }; run_in $d status', "could not safely parse"),
+    ("a slice after a word that can split", 'f() { git "${@:2}"; }; f $x commit -m x', "unquoted expansion"),
+    # An expansion passed to an unquoted parameter can split, however the call
+    # quoted it, and so move every parameter of the call it is passed on to.
+    ("an unquoted parameter given a quoted expansion", 'f() { g $1; }; g() { git -C "$1" "$2"; }; f "$x"', "could not safely parse"),
+    # A command that mentions IFS may have changed how a parameter splits, so an
+    # unquoted one is not resolved, and a literal holding commit is refused.
+    ("a wrapper that changes IFS before an unquoted parameter", 'f() { IFS=:; git $1; }; f commit:-m:x', "unquoted expansion"),
+    ("a wrapper that changes IFS before an unquoted $@", 'f() { IFS=X; git $@; }; f commitX-mXx', "unquoted expansion"),
+    ("a wrapper that changes IFS and runs its parameter", 'f() { IFS=:; $1; }; f git:commit:-m:x', "unquoted expansion"),
+    ("a wrapper that changes IFS and runs its parameter as the program", 'f() { IFS=:; $1 commit -m x; }; f env:git', "program name this hook cannot read"),
+    # IFS is looked for as the shell reads the words, escapes and quotes removed.
+    ("a wrapper naming IFS through escapes", 'g() { :; printf -v I\\F\\S :; git $1; }; g commit:-m:x', "unquoted expansion"),
+    ("a wrapper naming IFS through quotes", 'g() { :; printf -v "I"FS :; git $1; }; g commit:-m:x', "unquoted expansion"),
+    # A body that multiplies its arguments stops being inlined at the token
+    # budget, and is then judged as a program name this hook cannot read.
+    ("a wrapper that doubles its arguments", 'f() { f "$@" "$@"; }; f commit -m x', "program name this hook cannot read"),
+    # Past the token budget a body is no longer read, but it may still not say
+    # commit, and nothing it reaches through another function may either.
+    ("a committing function called past the token budget", BUDGET_SPENT + 'c() { git commit -m x; }; c', "program name this hook cannot read"),
+    ("a function reaching a commit through another, past the token budget", BUDGET_SPENT + 'g() { git commit -m x; }; c() { g; }; c', "program name this hook cannot read"),
+    ("a function committing through a variable, past the token budget", BUDGET_SPENT + 'c() { "$GIT" commit -m x; }; c', "program name this hook cannot read"),
+):
+    # Bounded, because an unbounded inliner does not fail this case: it hangs.
+    rc, err = check_hook(command, plain, timeout=60)
+    check(f"{label} is refused", rc == 2 and reason in err, f"exit={rc} stderr={err.strip()[:160]}")
+
+# A program name this hook cannot read, followed by `commit` where git reads its
+# subcommand. It may be git, carrying its own -C or -c, so there is nothing to
+# scan: refused in a clean repository too, with a message that says to name git.
+for label, command in (
+    ("a variable naming git", "g=git; $g commit -m x"),
+    ("a quoted variable naming git", '"$g" commit -m x'),
+    ("a defaulted expansion naming git", "${GIT:-git} commit -m x"),
+    ("a command substitution naming git", "$(echo git) commit -m x"),
+    ("a substitution naming git, then a global option", "$(command -v git) -C . commit -m x"),
+    ("a substitution glued to the rest of the name", '$(dirname "$x")/git commit -m x'),
+    ("two substitutions forming the name", "$(a)$(b) commit"),
+    ("a variable naming git, then a flag", "$g --no-pager commit -m x"),
+    # git's own options may take the next word as their value.
+    ("a variable naming git, then an option and its value", "g=git; $g --git-dir .git commit -m x"),
+    ("a variable naming git, then --work-tree and its value", "g=git; $g --work-tree . commit -m x"),
+    ("a variable naming git, then --config-env and its value", "g=git; $g --config-env user.name=HOME commit -m x"),
+):
+    rc, err = check_hook(command, plain)
+    check(f"{label} is refused", rc == 2, f"exit={rc}")
+    check(f"{label} names the unreadable program", "program name this hook cannot read" in err, f"stderr={err.strip()[:160]}")
+
+# Recursion is bounded: the hook must return, not inline forever.
+try:
+    rc, _ = check_hook("a() { b; }; b() { a; }; a commit -m x", plain, timeout=20)
+    check("mutually recursive functions terminate", rc == 0, f"exit={rc}")
+except subprocess.TimeoutExpired:
+    check("mutually recursive functions terminate", False, "timed out")
+
+# Recursion in a long command must stay cheap: it once ran on to the token
+# budget, copying the token list at every call, and took 11 s here against the
+# hook's 10 s timeout, where it fails open.
+long_recursion = "echo " + " ".join(f"w{i}" for i in range(1500)) + "\na() { b; }; b() { a; }; a"
+try:
+    rc, _ = check_hook(long_recursion, plain, timeout=10)
+    check("recursion in a long command finishes within the hook timeout", rc == 0, f"exit={rc}")
+except subprocess.TimeoutExpired:
+    check("recursion in a long command finishes within the hook timeout", False, "timed out")
+
+# Many ordinary calls in a long command must stay cheap too: when each one
+# copied the token list, 1500 of them took 18 s under bash 3.2.
+many_calls = "echo " + " ".join(f"w{i}" for i in range(400)) + "\nh() { :; }; " + "h; " * 1500
+try:
+    rc, _ = check_hook(many_calls, plain, timeout=10)
+    check("many calls in a long command finish within the hook timeout", rc == 0, f"exit={rc}")
+except subprocess.TimeoutExpired:
+    check("many calls in a long command finish within the hook timeout", False, "timed out")
+
+# The token budget is what bounds functions that multiply their arguments in a
+# cycle: each is only one deep in its own body, so the recursion bound lets all
+# three through eight times over, and without the budget this ran past 30 s.
+doubling_cycle = 'a() { b "$@" "$@"; }; b() { c "$@" "$@"; }; c() { a "$@" "$@"; }; a commit -m x'
+try:
+    rc, err = check_hook(doubling_cycle, plain, timeout=10)
+    check("a cycle of doubling functions is refused within the hook timeout", rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+except subprocess.TimeoutExpired:
+    check("a cycle of doubling functions is refused within the hook timeout", False, "timed out")
 
 # --- honours git -C so the right repo is scanned ----------------------------
 dirty = repo({"config.txt": f"{GITHUB}\n"})

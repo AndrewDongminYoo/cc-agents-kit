@@ -11,6 +11,23 @@ Entries are grouped by release; the topmost section collects work that has not y
   This supersedes the 0.3.9 wording, "a billing or runner block upstream of the workflow, read from the run's annotation, not from a diff": the guidance now requires the annotation on `gh run view <id>` to name the upstream cause — billing, a spending limit, or the runner — before the failure is classified Environmental.
   An annotation that names an ordinary cause is the diagnosis instead, and only when the annotation is absent or inconclusive does the reader move on to the run's other jobs and the normal failure diagnosis: a reusable-workflow caller fails with the same `steps: []` for an ordinary reason.
   Raised by CodeRabbit on #9 and left out of that pull request; tracked as #10.
+- `guard-hooks` 0.3.1 `staged-secret-guard` follows a shell function defined in the same command.
+  A call is read as the function's body with the call's words in place of `"$@"` and `$1`–`$9`, so `g() { git "$@"; }; g commit -m x` is scanned, `g status` is left alone, and a wrapper that adds `-c` is refused exactly as the same command written inline would be.
+  A redirection among the call's words is removed before they become its parameters, as bash removes it, so `g >/dev/null commit -m x` and `g 2>&1 commit -m x` are scanned.
+  An unquoted `$1`, `$@` or `$*` splits each word as bash's default `IFS` does, so `run() { echo "+ $*"; $*; }; run git commit -m x` and `run "git commit -m x"` through `$@` are scanned too; in a command that names `IFS`, however quoted or escaped (`I\F\S`), the split is unknown, so the parameter is left unresolved and a literal word holding `commit` is refused (`f() { IFS=:; git $1; }; f commit:-m:x`).
+  A definition that may not have taken effect (inside a subshell, a brace group, a branch or a loop; joined by `&&`, `||`, `|` or `&`, even across a newline; after a heredoc has opened; or since removed by `unset`, where an expanded name may be any function's) does not hide the one before it, so `f() { git commit -m x; }; ( f() { :; } ); f` is scanned; the call is read as every definition back to the latest one certain to have run.
+  Where the words cannot be placed (`shift`, `set`, a function defined inside the body, a word before them that can split) they are left unresolved, and the parse refuses what it then cannot identify; a recursion stops being read 8 deep, where every level above has been, and past 4096 added tokens a call is no longer read either; either way it is refused if its words say `commit`, and past the token budget also if anything it can reach, function by function, names `git` or `commit`.
+  A definition whose body is a brace group is no longer read at all: the parser used to skip only the first command of a body, so `f() { echo; git commit -m x; }` was scanned although nothing ran.
+  Where the body's end is in doubt the rest is read as though it ran, never skipped: every unquoted `}` ends a body, even one that is only an argument, and a body that holds a heredoc is read whole, because the heredoc's prose is parsed as commands and its braces cannot be trusted.
+- `staged-secret-guard` scans a commit inside a brace group.
+  `{ git commit -m x; }` went unscanned because `{` could not be told apart from a function body; with definitions recognised by their name, it can.
+  Words after a command substitution among a command's arguments are no longer read as a new command, so `echo $(date) git commit` is not treated as a commit, and a substitution glued to more of an assignment no longer hides the command after it: `out=$(date)x git commit` was unscanned before this release.
+- `staged-secret-guard` refuses `commit` behind a program name it cannot read.
+  `g=git; $g commit`, `"${GIT:-git}" commit` and `$(command -v git) commit` ran a commit with only the word `commit` visible, and a name that expands to git can carry its own `-C` or `-c`, so there is no candidate to scan.
+  The refusal fires only where git would read its subcommand, so `$PYTHON -c …` and `"$EDITOR" "$f"` pass as before; the word after one of git's own options that take a separate value (`--git-dir`, `--work-tree`, `--namespace`, `--attr-source`, `--config-env`) counts as that value, so `$g --git-dir .git commit` is refused as well.
+  Tracked as #12.
+- `staged-secret-guard` reads an unquoted `#` at the start of a word as a comment.
+  `git commit -m x # note` passed `#` and `note` as pathspecs, scanned a candidate git never commits, and let a staged credential through; this was true before this release.
 
 ## [0.5.0] — 2026-09-10
 
