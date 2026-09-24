@@ -95,6 +95,12 @@ last_unquoted_dollar=""
 # it is marked "literal" instead, and only an unmarked brace opens or closes a
 # group or a function body.
 token_quoted=""
+# The tokenizer keeps < and > inside words. Whether any of them was unquoted is
+# what makes a word hold a redirection: one whose every < and > was quoted is
+# marked "literal", so that `g ">" x` passes > as an argument. An & straight
+# after an unquoted < or > belongs to it (`2>&1`), not a background job.
+token_redirect=""
+last_unquoted_redirect=""
 # An unquoted # at the start of a word opens a comment that runs to the end of
 # the line. Read as words, `git commit -m x # note` passed # and note as
 # pathspecs, scanned a candidate git never commits, and let the commit through.
@@ -102,6 +108,9 @@ NEWLINE=$'\n'
 flush_token() {
   if [[ -n "$token_started" ]]; then
     if [[ -n "$token_quoted" ]] && [[ "$token" == "{" || "$token" == "}" ]]; then
+      token_expansion="literal"
+    fi
+    if [[ -z "$token_redirect$token_expansion" && "$token" == *[\<\>]* ]]; then
       token_expansion="literal"
     fi
     if [[ -z "$token_quoted" && "$token_expansion" == split ]]; then
@@ -116,6 +125,7 @@ flush_token() {
     token_started=""
     token_expansion=""
     token_quoted=""
+    token_redirect=""
   fi
 }
 command_len=${#COMMAND}
@@ -124,6 +134,8 @@ while ((command_pos < command_len)); do
   char="${COMMAND:command_pos:1}"
   prev_dollar=$last_unquoted_dollar
   last_unquoted_dollar=""
+  prev_redirect=$last_unquoted_redirect
+  last_unquoted_redirect=""
   if [[ -n "$escaped" ]]; then
     if [[ "$char" != $'\n' ]]; then
       token="$token$char"
@@ -178,9 +190,13 @@ while ((command_pos < command_len)); do
         fi
         ;;
       ";" | "|" | "&")
-        flush_token
-        TOKENS+=("$BOUNDARY_PREFIX$char")
-        TOKEN_EXPANSION+=("")
+        if [[ "$char" == "&" && -n "$prev_redirect" ]]; then
+          token="$token$char"
+        else
+          flush_token
+          TOKENS+=("$BOUNDARY_PREFIX$char")
+          TOKEN_EXPANSION+=("")
+        fi
         ;;
       "(")
         flush_token
@@ -214,6 +230,10 @@ while ((command_pos < command_len)); do
         # "$base"$d splits, however the first half was written.
         [[ "$char" == '$' || "$char" == '`' ]] && token_expansion="split"
         [[ "$char" != '$' ]] || last_unquoted_dollar=1
+        if [[ "$char" == '<' || "$char" == '>' ]]; then
+          token_redirect=1
+          last_unquoted_redirect=1
+        fi
         ;;
     esac
   fi
@@ -288,35 +308,39 @@ match_braces() {
 }
 
 # A word the call passes in is an expanded parameter inside the body, and an
-# expansion is never a reserved word: in `g }`, the } closes nothing in g.
+# expansion is never a reserved word: in `g }`, the } closes nothing in g. Nor
+# is it ever a redirection, whatever < or > it holds.
 inline_word() {
   local word_expansion=$2
   [[ "$1" != "{" && "$1" != "}" ]] || word_expansion="literal"
+  [[ -n "$word_expansion" || "$1" != *[\<\>]* ]] || word_expansion="literal"
   INLINE_TOKENS+=("$1")
   INLINE_EXPANSION+=("$word_expansion")
 }
 
-# The call's words from index $1 up to $2, as an unquoted parameter expansion
-# ($1, $@) standing for them in the body, spelled $3 there, makes them: each
-# word split as the default IFS splits it, so `step "git commit -m x"` with a
-# body of `$1` runs a commit. A word that is itself an expansion has a value
-# unknown here, which can split however it is quoted in the call.
+# The call's words from position $1 up to $2 (from 0, in CALL_WORDS), as an
+# unquoted parameter expansion ($1, $@) standing for them in the body, spelled
+# $3 there, makes them: each word split as the default IFS splits it, so `step
+# "git commit -m x"` with a body of `$1` runs a commit. A word that is itself an
+# expansion has a value unknown here, which can split however it is quoted in
+# the call.
 #
 # bash never takes IFS from the environment, but the command can set it, and
 # then how a value splits is unknown: `f() { IFS=:; git $1; }; f commit:-m:x`
-# commits. So in a command that mentions IFS at all, the expansion is left
+# commits. So in a command that names IFS at all, the expansion is left
 # unresolved for the parse to refuse where git reads its subcommand, and a
 # literal word holding commit is refused outright: some IFS makes that a word of
-# its own wherever the expansion stands.
+# its own wherever the expansion stands. The name is looked for in the words as
+# the shell reads them, where `I\F\S` and `"I"FS` are IFS too.
 IFS_NAMED=""
-[[ "$COMMAND" != *IFS* ]] || IFS_NAMED=1
+[[ "${TOKENS[*]-}" != *IFS* ]] || IFS_NAMED=1
 inline_unquoted() {
   local arg_index split_word
   local split_words=()
   if [[ -n "$IFS_NAMED" ]]; then
     for ((arg_index = $1; arg_index < $2; arg_index++)); do
-      case "${TOKEN_EXPANSION[arg_index]-}" in
-        "" | literal) [[ "${TOKENS[arg_index]}" != *commit* ]] || block_unquoted_expansion ;;
+      case "${CALL_KINDS[arg_index]}" in
+        "" | literal) [[ "${CALL_WORDS[arg_index]}" != *commit* ]] || block_unquoted_expansion ;;
       esac
     done
     INLINE_TOKENS+=("$3")
@@ -324,15 +348,15 @@ inline_unquoted() {
     return 0
   fi
   for ((arg_index = $1; arg_index < $2; arg_index++)); do
-    case "${TOKEN_EXPANSION[arg_index]-}" in
+    case "${CALL_KINDS[arg_index]}" in
       "" | literal)
         split_words=()
-        IFS=$' \t\n' read -r -d '' -a split_words <<<"${TOKENS[arg_index]}" || true
+        IFS=$' \t\n' read -r -d '' -a split_words <<<"${CALL_WORDS[arg_index]}" || true
         for split_word in ${split_words[@]+"${split_words[@]}"}; do
           inline_word "$split_word" ""
         done
         ;;
-      *) inline_word "${TOKENS[arg_index]}" split ;;
+      *) inline_word "${CALL_WORDS[arg_index]}" split ;;
     esac
   done
 }
@@ -616,8 +640,12 @@ while :; do
           ;;
         *)
           [[ -n "$unset_functions" ]] || continue
+          # A name that is an expansion may be any function's: `x=git; unset
+          # -f "$x"` removes git.
+          unset_expansion=${TOKEN_EXPANSION[unset_index]-}
           for ((lookup_index = 0; lookup_index < ${#FUNC_NAMES[@]}; lookup_index++)); do
-            [[ "${FUNC_NAMES[lookup_index]}" != "$unset_word" ]] || FUNC_CERTAIN[lookup_index]=""
+            [[ "$unset_expansion" != quoted && "$unset_expansion" != split* \
+              && "${FUNC_NAMES[lookup_index]}" != "$unset_word" ]] || FUNC_CERTAIN[lookup_index]=""
           done
           ;;
       esac
@@ -654,13 +682,39 @@ while :; do
     while ((call_end < token_count)) && [[ "${TOKENS[call_end]}" != "$BOUNDARY_PREFIX"* ]]; do
       call_end=$((call_end + 1))
     done
+    # The call's words, which become its positional parameters. A redirection
+    # is not one of them: bash sets it up and removes it, target and all,
+    # wherever it stands, so `g >/dev/null commit -m x` runs g with `commit -m
+    # x`. A word is cut at its first < or >, and what came before stays unless
+    # it only numbers a descriptor (`2>err`); an operator with nothing after it
+    # takes the next word as its target.
+    CALL_WORDS=()
+    CALL_KINDS=()
+    redirect_target=""
+    for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
+      arg_word=${TOKENS[arg_index]}
+      arg_kind=${TOKEN_EXPANSION[arg_index]-}
+      if [[ -n "$redirect_target" ]]; then
+        redirect_target=""
+        continue
+      fi
+      if [[ "$arg_kind" != literal && "$arg_word" == *[\<\>]* ]]; then
+        redirect_op=${arg_word#*[<>]}
+        [[ "$redirect_op" == *[!\<\>\&-]* ]] || redirect_target=1
+        arg_word=${arg_word%%[<>]*}
+        [[ "$arg_word" == *[!0-9]* ]] || continue
+      fi
+      CALL_WORDS+=("$arg_word")
+      CALL_KINDS+=("$arg_kind")
+    done
+    call_count=${#CALL_WORDS[@]}
     # The first of the call's words that can split into several. Up to it each
     # word is exactly one positional parameter; from it on, which word lands in
     # which parameter is unknown.
     first_split=0
-    for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
-      if [[ "${TOKEN_EXPANSION[arg_index]-}" == split* ]]; then
-        first_split=$((arg_index - token_index))
+    for ((arg_index = 0; arg_index < call_count; arg_index++)); do
+      if [[ "${CALL_KINDS[arg_index]}" == split* ]]; then
+        first_split=$((arg_index + 1))
         break
       fi
     done
@@ -726,11 +780,11 @@ while :; do
               [[ "$body_token" != '${'[@*]':'* ]] || position=${body_token//[^0-9]/}
               if ((first_split == 0 || position <= first_split)); then
                 if [[ "$body_expansion" == split-words ]]; then
-                  inline_unquoted "$((token_index + position))" "$call_end" "$body_token"
+                  inline_unquoted "$((position - 1))" "$call_count" "$body_token"
                   continue
                 elif [[ "$body_token" == *@* ]]; then
-                  for ((arg_index = token_index + position; arg_index < call_end; arg_index++)); do
-                    inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
+                  for ((arg_index = position - 1; arg_index < call_count; arg_index++)); do
+                    inline_word "${CALL_WORDS[arg_index]}" "${CALL_KINDS[arg_index]}"
                   done
                   continue
                 fi
@@ -738,7 +792,7 @@ while :; do
               ;;
             '$'[1-9] | '${'[1-9]'}')
               position=${body_token//[^1-9]/}
-              arg_index=$((token_index + position))
+              arg_index=$((position - 1))
               if ((first_split > 0 && position >= first_split)); then
                 # A word that can split sits at or before this parameter, so its
                 # value is unknown. Quoted it is still exactly one word, and a
@@ -746,14 +800,14 @@ while :; do
                 # `$d` is a single path to `-C`, never an extra subcommand.
                 INLINE_TOKENS+=("$body_token")
                 INLINE_EXPANSION+=("$body_expansion")
-              elif ((arg_index >= call_end)); then
+              elif ((arg_index >= call_count)); then
                 # "$3" with no third argument is still one, empty, word; $3 is none.
                 if [[ "$body_expansion" == quoted ]]; then
                   INLINE_TOKENS+=("")
                   INLINE_EXPANSION+=("")
                 fi
               elif [[ "$body_expansion" == quoted ]]; then
-                inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
+                inline_word "${CALL_WORDS[arg_index]}" "${CALL_KINDS[arg_index]}"
               else
                 inline_unquoted "$arg_index" "$((arg_index + 1))" "$body_token"
               fi
@@ -771,8 +825,8 @@ while :; do
       # No definition of git is sure to be in effect, so git itself may run.
       INLINE_TOKENS+=(command git)
       INLINE_EXPANSION+=("" "")
-      for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
-        inline_word "${TOKENS[arg_index]}" "${TOKEN_EXPANSION[arg_index]-}"
+      for ((arg_index = 0; arg_index < call_count; arg_index++)); do
+        inline_word "${CALL_WORDS[arg_index]}" "${CALL_KINDS[arg_index]}"
       done
       INLINE_TOKENS+=("$BOUNDARY_PREFIX;")
       INLINE_EXPANSION+=("")

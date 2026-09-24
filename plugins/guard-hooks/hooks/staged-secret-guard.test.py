@@ -199,6 +199,11 @@ for label, command in (
     ("a wrapper passed one word holding a commit", 'g() { git "$@"; }; g "commit -m x"'),
     ("a logging wrapper running a read-only command unquoted", 'run() { echo "+ $*"; $@; }; run "git status"'),
     ("a git wrapper passing an unquoted $* a read-only verb", "g() { git $*; }; g status"),
+    # A quoted < or >, or one an expansion produced, is part of a word, never a
+    # redirection, and `git "commit>x"` names no subcommand git has.
+    ("a wrapper passed a quoted word holding a redirection", 'g() { git "$@"; }; g "commit>x"'),
+    ("a wrapper passed an expansion holding a redirection", 'f() { g $1; }; g() { git "$@"; }; f "commit>x"'),
+    ("a wrapper whose output is redirected", 'g() { git "$@"; }; g status >/dev/null 2>&1'),
     # "$*" joins the words into one, and `"git commit -m x"` is no program.
     ("a wrapper running its words joined by \"$*\"", 'run() { "$*"; }; run git commit -m x'),
     # `commit` after an unreadable program name is only judged where git would
@@ -364,6 +369,18 @@ for label, command in (
     ("commit through an unquoted slice", 'f() { git ${@:2}; }; f x "commit -m y"'),
     ("commit through an unquoted $*", 'run() { echo "+ $*"; $*; }; run git commit -m x'),
     ("commit through an unquoted ${*}", 'run() { ${*}; }; run "git commit -m x"'),
+    # A redirection is removed before the call's words become its parameters,
+    # wherever it stands, operator and target alike.
+    ("commit through a wrapper after a redirection", 'g() { git "$@"; }; g > /dev/null commit -m x'),
+    ("commit through a wrapper after an attached redirection", 'g() { git "$@"; }; g >/dev/null commit -m x'),
+    ("commit through a wrapper after a duplicated descriptor", 'g() { git "$@"; }; g 2>&1 commit -m x'),
+    ("commit through a wrapper after a redirection to an expansion", 'g() { git "$@"; }; g >"$log" commit -m x'),
+    ("commit through a wrapper with a redirection glued to a word", 'g() { git "$@"; }; g commit>/dev/null -m x'),
+    ("commit through a wrapper followed by redirections", 'g() { git "$@"; }; g commit -m x >/dev/null 2>&1'),
+    ("commit through git past a redirection, its definition uncertain", '( git() { :; } ); git >/dev/null commit -m x'),
+    # An expanded name given to unset may be any function's.
+    ("commit through git after an expanded unset -f", 'git() { :; }; x=git; unset -f "$x"; git commit -m x'),
+    ("commit through git after an unquoted expanded unset", 'git() { :; }; x=git; unset $x; git commit -m x'),
     # A function inside the body has positional parameters of its own.
     ("commit through a function defined inside another", 'outer() { inner() { git "$@"; }; inner commit -m x; }; outer status'),
     ("commit through a function-keyword function inside another", 'outer() { function inner { git "$@"; }; inner commit -m x; }; outer status'),
@@ -472,6 +489,9 @@ for label, command, reason in (
     ("a wrapper that changes IFS before an unquoted $@", 'f() { IFS=X; git $@; }; f commitX-mXx', "unquoted expansion"),
     ("a wrapper that changes IFS and runs its parameter", 'f() { IFS=:; $1; }; f git:commit:-m:x', "unquoted expansion"),
     ("a wrapper that changes IFS and runs its parameter as the program", 'f() { IFS=:; $1 commit -m x; }; f env:git', "program name this hook cannot read"),
+    # IFS is looked for as the shell reads the words, escapes and quotes removed.
+    ("a wrapper naming IFS through escapes", 'g() { :; printf -v I\\F\\S :; git $1; }; g commit:-m:x', "unquoted expansion"),
+    ("a wrapper naming IFS through quotes", 'g() { :; printf -v "I"FS :; git $1; }; g commit:-m:x', "unquoted expansion"),
     # A body that multiplies its arguments stops being inlined at the token
     # budget, and is then judged as a program name this hook cannot read.
     ("a wrapper that doubles its arguments", 'f() { f "$@" "$@"; }; f commit -m x', "program name this hook cannot read"),
