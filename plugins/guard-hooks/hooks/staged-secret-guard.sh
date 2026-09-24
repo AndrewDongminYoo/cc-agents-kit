@@ -47,6 +47,15 @@ block_config_override() {
   exit 2
 }
 
+# Separate message: the program itself is what cannot be read. `g=git; $g commit`
+# and `$(command -v git) commit` run a commit, but only `commit` is visible here,
+# and a word that expands to git can carry its own -C or -c as well, so there is
+# no candidate to scan. The fix is to name git, not to requote anything.
+block_indirect_commit() {
+  echo "Blocked: \`commit\` follows a program name this hook cannot read - a variable, a command substitution, or a shell function it could not follow - so this may be a git commit whose repository and options are unknown. Call git by name (git commit ...) so the staged diff can be scanned." >&2
+  exit 2
+}
+
 unsafe_value() {
   [[ "$1" == *'$'* || "$1" == *'`'* || "$1" == *'<'* || "$1" == *'>'* ]]
 }
@@ -68,10 +77,21 @@ token_expansion=""
 TOKEN_EXPANSION=()
 TOKENIZATION_ERROR=""
 BOUNDARY_PREFIX=$'\034'
+# A parenthesis opened straight after an unquoted `$` is a command substitution,
+# not a subshell, and the parser needs to know which one closed: `$(echo git)
+# commit` runs the substitution's output with `commit` as its first argument,
+# where `(git status) commit` is not valid shell at all. So `$(` and its closing
+# `)` get their own boundary spellings, `$)` and `$)+`, the second when a word
+# follows with no space and so continues the substitution's word
+# (`$(npm bin)/eslint`). One character per open parenthesis, s or p, pairs them.
+subst_stack=""
+last_unquoted_dollar=""
 command_len=${#COMMAND}
 command_pos=0
 while ((command_pos < command_len)); do
   char="${COMMAND:command_pos:1}"
+  prev_dollar=$last_unquoted_dollar
+  last_unquoted_dollar=""
   if [[ -n "$escaped" ]]; then
     if [[ "$char" != $'\n' ]]; then
       token="$token$char"
@@ -103,9 +123,34 @@ while ((command_pos < command_len)); do
         TOKENS+=("$BOUNDARY_PREFIX;")
         TOKEN_EXPANSION+=("")
         ;;
-      ";" | "|" | "&" | "(" | ")")
+      ";" | "|" | "&")
         if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
         TOKENS+=("$BOUNDARY_PREFIX$char")
+        TOKEN_EXPANSION+=("")
+        ;;
+      "(")
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
+        if [[ -n "$prev_dollar" ]]; then
+          subst_stack="${subst_stack}s"
+          TOKENS+=("$BOUNDARY_PREFIX\$(")
+        else
+          subst_stack="${subst_stack}p"
+          TOKENS+=("$BOUNDARY_PREFIX(")
+        fi
+        TOKEN_EXPANSION+=("")
+        ;;
+      ")")
+        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
+        closing="${subst_stack#"${subst_stack%?}"}"
+        subst_stack="${subst_stack%?}"
+        if [[ "$closing" == s ]]; then
+          case "${COMMAND:command_pos+1:1}" in
+            "" | " " | $'\t' | $'\n' | ";" | "|" | "&" | "(" | ")") TOKENS+=("$BOUNDARY_PREFIX\$)") ;;
+            *) TOKENS+=("$BOUNDARY_PREFIX\$)+") ;;
+          esac
+        else
+          TOKENS+=("$BOUNDARY_PREFIX)")
+        fi
         TOKEN_EXPANSION+=("")
         ;;
       *)
@@ -114,6 +159,7 @@ while ((command_pos < command_len)); do
         # Unquoted wins over a quoted expansion seen earlier in the token:
         # "$base"$d splits, however the first half was written.
         [[ "$char" == '$' || "$char" == '`' ]] && token_expansion="split"
+        [[ "$char" != '$' ]] || last_unquoted_dollar=1
         ;;
     esac
   fi
@@ -156,14 +202,76 @@ token_index=0
 at_command_start=1
 command_prefix=""
 env_prefix=""
+# `command` runs a builtin or a program, never a shell function, so a name behind
+# it is not looked up among the functions defined below.
+function_lookup=1
+# The main loop's own record of open parentheses, one character each: p for a
+# subshell or group, c for a command substitution that is (part of) the program
+# name, and 0 or 1 for any other substitution -- the command-start state to
+# restore once it closes. `echo $(date) git commit` passes git as an argument to
+# echo, while `out=$(date) git commit` runs git behind an assignment.
+paren_stack=""
+# Set when a command-name substitution closes glued to the next word, which is
+# then still part of the program name rather than its first argument.
+cmdword_continues=""
+# Functions defined earlier in the same command: name and body token range. A
+# call is replaced by its body with the call's words in place of "$@" and $1..$9,
+# so the git parse below judges what the call actually runs -- the same verdict
+# the body would get written out inline. Definitions themselves run nothing.
+FUNC_NAMES=()
+FUNC_BODY_START=()
+FUNC_BODY_END=()
+# Bounds recursion (`f() { f; }; f`) and runaway growth; past it a call is judged
+# like any other program name this hook cannot read.
+INLINE_LIMIT=16
+inline_count=0
 while ((token_index < token_count)); do
   current="${TOKENS[token_index]}"
+  scan_start=-1
+  indirect=""
   if [[ "$current" == "$BOUNDARY_PREFIX"* ]]; then
-    at_command_start=1
+    resume=1
+    cmdword_continues=""
+    case "$current" in
+      "$BOUNDARY_PREFIX(") paren_stack="${paren_stack}p" ;;
+      "$BOUNDARY_PREFIX\$(") paren_stack="${paren_stack}${at_command_start}" ;;
+      "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+")
+        opener="${paren_stack#"${paren_stack%?}"}"
+        paren_stack="${paren_stack%?}"
+        case "$opener" in
+          0) resume=0 ;;
+          c)
+            resume=0
+            if [[ "$current" == "$BOUNDARY_PREFIX\$)+" ]]; then
+              cmdword_continues=1
+            else
+              scan_start=$((token_index + 1))
+              indirect=1
+            fi
+            ;;
+        esac
+        ;;
+    esac
+    at_command_start=$resume
     command_prefix=""
     env_prefix=""
-    token_index=$((token_index + 1))
-    continue
+    function_lookup=1
+    if ((scan_start < 0)); then
+      token_index=$((token_index + 1))
+      continue
+    fi
+  elif [[ -n "$cmdword_continues" ]]; then
+    # The word glued to a closing command-name substitution: `$(npm bin)/eslint`.
+    # It may open another one (`$(a)$(b)`); otherwise the arguments follow it.
+    cmdword_continues=""
+    if [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX\$(" ]]; then
+      paren_stack="${paren_stack}c"
+      at_command_start=1
+      token_index=$((token_index + 2))
+      continue
+    fi
+    scan_start=$((token_index + 1))
+    indirect=1
   fi
   if ((at_command_start)) && [[ "$current" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
     token_index=$((token_index + 1))
@@ -172,11 +280,12 @@ while ((token_index < token_count)); do
   # A shell keyword introduces a command rather than being one, so the word after
   # it is still at a command start. Without this, `if git commit ...` and the
   # body of a `for ... do` loop are never recognised as git invocations at all.
-  # `{` is deliberately not in the list: it opens a function body as often as a
-  # group, and a definition executes nothing.
+  # `{` is in the list because a function body never reaches it: a definition is
+  # recognised by its name, below, and skipped whole, so a `{` seen here opens a
+  # group, which runs where it stands.
   if ((at_command_start)); then
     case "$current" in
-      if | then | elif | else | do | while | until | "!")
+      if | then | elif | else | do | while | until | "!" | "{")
         token_index=$((token_index + 1))
         continue
         ;;
@@ -184,6 +293,7 @@ while ((token_index < token_count)); do
   fi
   if ((at_command_start)) && [[ "$current" == "command" || "$current" == "time" ]]; then
     command_prefix=1
+    [[ "$current" != "command" ]] || function_lookup=""
     token_index=$((token_index + 1))
     continue
   fi
@@ -221,8 +331,164 @@ while ((token_index < token_count)); do
         ;;
     esac
   fi
-  if ((at_command_start)) && [[ "$current" == "git" || "$current" == */git ]]; then
-    scan_index=$((token_index + 1))
+  # A function definition: `name() {`, `function name {` or `function name() {`,
+  # with any newlines before the brace. Record the body and step over all of it;
+  # defining a function runs nothing, so nothing in the body is judged here. A
+  # body that is not a brace group, or a brace that never closes, is left to the
+  # ordinary parse, which reads it as though it ran.
+  if ((at_command_start)) && [[ -z "$command_prefix$env_prefix" && -z "${TOKEN_EXPANSION[token_index]-}" ]]; then
+    def_name=""
+    def_open=-1
+    if [[ "$current" == "function" ]] && ((token_index + 1 < token_count)) \
+      && [[ "${TOKENS[token_index + 1]}" != "$BOUNDARY_PREFIX"* && -z "${TOKEN_EXPANSION[token_index + 1]-}" ]]; then
+      def_name=${TOKENS[token_index + 1]}
+      def_open=$((token_index + 2))
+      if [[ "${TOKENS[def_open]-}" == "$BOUNDARY_PREFIX(" && "${TOKENS[def_open + 1]-}" == "$BOUNDARY_PREFIX)" ]]; then
+        def_open=$((def_open + 2))
+      fi
+    elif [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX(" && "${TOKENS[token_index + 2]-}" == "$BOUNDARY_PREFIX)" ]]; then
+      def_name=$current
+      def_open=$((token_index + 3))
+    fi
+    if [[ -n "$def_name" ]]; then
+      while [[ "${TOKENS[def_open]-}" == "$BOUNDARY_PREFIX;" ]]; do def_open=$((def_open + 1)); done
+    fi
+    if [[ -n "$def_name" && "${TOKENS[def_open]-}" == "{" ]]; then
+      # `{` and `}` are reserved words only where a command can start: `{` after
+      # a separator, a keyword or another `{`; `}` after a separator or the end
+      # of a compound command. `echo }` is an argument, not the end of the body.
+      depth=1
+      def_close=-1
+      brace_index=$((def_open + 1))
+      while ((brace_index < token_count)); do
+        brace_prev=${TOKENS[brace_index - 1]}
+        case "${TOKENS[brace_index]}" in
+          "{")
+            case "$brace_prev" in
+              "$BOUNDARY_PREFIX"* | "{" | if | then | elif | else | do | while | until | "!") depth=$((depth + 1)) ;;
+            esac
+            ;;
+          "}")
+            case "$brace_prev" in
+              "$BOUNDARY_PREFIX"* | "}" | "fi" | "done" | "esac") depth=$((depth - 1)) ;;
+            esac
+            if ((depth == 0)); then
+              def_close=$brace_index
+              break
+            fi
+            ;;
+        esac
+        brace_index=$((brace_index + 1))
+      done
+      if ((def_close >= 0)); then
+        FUNC_NAMES+=("$def_name")
+        FUNC_BODY_START+=("$((def_open + 1))")
+        FUNC_BODY_END+=("$def_close")
+        at_command_start=0
+        token_index=$((def_close + 1))
+        continue
+      fi
+    fi
+  fi
+  # A call to a function defined above. The latest definition wins, as in the
+  # shell, and a name called before its definition is not yet a function.
+  func_index=-1
+  if ((at_command_start)) && [[ -n "$function_lookup" && -z "$env_prefix" && -z "${TOKEN_EXPANSION[token_index]-}" ]]; then
+    for ((lookup_index = ${#FUNC_NAMES[@]} - 1; lookup_index >= 0; lookup_index--)); do
+      if [[ "${FUNC_NAMES[lookup_index]}" == "$current" ]]; then
+        func_index=$lookup_index
+        break
+      fi
+    done
+  fi
+  if ((func_index >= 0 && inline_count < INLINE_LIMIT)); then
+    call_end=$((token_index + 1))
+    while ((call_end < token_count)) && [[ "${TOKENS[call_end]}" != "$BOUNDARY_PREFIX"* ]]; do
+      call_end=$((call_end + 1))
+    done
+    body_start=${FUNC_BODY_START[func_index]}
+    body_end=${FUNC_BODY_END[func_index]}
+    # `shift` and `set --` renumber the positional parameters partway through the
+    # body, so the call's words would land in the wrong places. Leave the
+    # expansions unresolved instead, and the parse refuses what it cannot place.
+    substitute=1
+    for ((body_index = body_start; body_index < body_end; body_index++)); do
+      case "${TOKENS[body_index]}" in
+        shift) substitute="" ;;
+        set) [[ "${TOKENS[body_index + 1]-}" != "--" ]] || substitute="" ;;
+      esac
+    done
+    INLINE_TOKENS=("$BOUNDARY_PREFIX;")
+    INLINE_EXPANSION=("")
+    for ((body_index = body_start; body_index < body_end; body_index++)); do
+      body_token=${TOKENS[body_index]}
+      body_expansion=${TOKEN_EXPANSION[body_index]-}
+      if [[ -n "$substitute" && -n "$body_expansion" ]]; then
+        # shellcheck disable=SC2016  # literal spellings of positional parameters
+        case "$body_token" in
+          '$@' | '${@}')
+            for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
+              INLINE_TOKENS+=("${TOKENS[arg_index]}")
+              INLINE_EXPANSION+=("${TOKEN_EXPANSION[arg_index]-}")
+            done
+            continue
+            ;;
+          '$'[1-9] | '${'[1-9]'}')
+            arg_index=$((token_index + ${body_token//[^1-9]/}))
+            if ((arg_index < call_end)); then
+              INLINE_TOKENS+=("${TOKENS[arg_index]}")
+              INLINE_EXPANSION+=("${TOKEN_EXPANSION[arg_index]-}")
+            elif [[ "$body_expansion" == quoted ]]; then
+              # "$3" with no third argument is still one, empty, word.
+              INLINE_TOKENS+=("")
+              INLINE_EXPANSION+=("")
+            fi
+            continue
+            ;;
+        esac
+      fi
+      INLINE_TOKENS+=("$body_token")
+      INLINE_EXPANSION+=("$body_expansion")
+    done
+    INLINE_TOKENS+=("$BOUNDARY_PREFIX;")
+    INLINE_EXPANSION+=("")
+    TOKENS=("${TOKENS[@]:0:token_index}" "${INLINE_TOKENS[@]}" "${TOKENS[@]:call_end}")
+    TOKEN_EXPANSION=("${TOKEN_EXPANSION[@]:0:token_index}" "${INLINE_EXPANSION[@]}" "${TOKEN_EXPANSION[@]:call_end}")
+    token_count=${#TOKENS[@]}
+    inline_count=$((inline_count + 1))
+    continue
+  fi
+  # What runs is git itself, or a program name this hook cannot read: an
+  # expansion (`$g`, "${GIT:-git}"), a command substitution, or a function call
+  # past the inlining limit. The second kind is judged only on whether `commit`
+  # turns up where git would read its subcommand; anything else is left alone,
+  # since `$PYTHON -c ...` and `"$EDITOR" "$f"` are ordinary work. A word with a
+  # backtick is not judged at all: a heredoc's prose is parsed as commands here,
+  # and markdown puts backticks at the start of a line far more often than any
+  # command does.
+  if ((at_command_start && scan_start < 0)); then
+    if ((func_index >= 0)); then
+      scan_start=$((token_index + 1))
+      indirect=1
+    elif [[ "$current" == "git" || "$current" == */git ]]; then
+      scan_start=$((token_index + 1))
+    elif [[ -n "${TOKEN_EXPANSION[token_index]-}" && "$current" != *'`'* ]]; then
+      if [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX\$(" ]]; then
+        # `$(echo git) commit`: the program name is still being built. Its
+        # arguments start where the substitution closes.
+        paren_stack="${paren_stack}c"
+        command_prefix=""
+        env_prefix=""
+        function_lookup=1
+        token_index=$((token_index + 2))
+        continue
+      fi
+      scan_start=$((token_index + 1))
+      indirect=1
+    fi
+  fi
+  if ((scan_start >= 0)); then
+    scan_index=$scan_start
     candidate_repo_args=()
     # A global option this parser cannot resolve (-c, --no-pager, a -C value
     # with shell syntax) is only a problem when the subcommand turns out to be
@@ -299,6 +565,7 @@ while ((token_index < token_count)); do
           scan_index=$((scan_index + 1))
           ;;
         commit)
+          [[ -z "$indirect" ]] || block_indirect_commit
           [[ -z "$pending_block" ]] || block_unparsed
           scanned_past_commit=""
           ((commit_count += 1))
@@ -319,6 +586,10 @@ while ((token_index < token_count)); do
           # the scan may trust a token. Only a splittable expansion earns the
           # quoting advice: `git "$sub"` is already quoted and still cannot be
           # identified, so telling it to quote would send it in a circle.
+          #
+          # None of that applies behind a program name this hook cannot read:
+          # nothing says it is git, and `"$EDITOR" "$f"` is not a commit.
+          [[ -z "$indirect" ]] || break
           case "${TOKEN_EXPANSION[scan_index]-}" in
             split) block_unquoted_expansion ;;
             quoted) block_unparsed ;;
@@ -338,8 +609,9 @@ while ((token_index < token_count)); do
     done
     # Reached without identifying a commit. Command-scoped config could rename
     # one, and an unquoted expansion could carry one in words this parser never
-    # saw, so neither may end the scan quietly.
-    if [[ -n "$scanned_past_commit" ]]; then
+    # saw, so neither may end the scan quietly. Behind an unreadable program
+    # name they may: `$PYTHON -c ...` sets no git config.
+    if [[ -n "$scanned_past_commit" && -z "$indirect" ]]; then
       [[ -z "$config_override" ]] || block_config_override
       [[ -z "$split_risk" ]] || block_unquoted_expansion
       [[ -z "$opaque_option" ]] || block_unparsed

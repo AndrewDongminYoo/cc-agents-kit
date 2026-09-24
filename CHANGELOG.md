@@ -11,6 +11,16 @@ Entries are grouped by release; the topmost section collects work that has not y
   This supersedes the 0.3.9 wording, "a billing or runner block upstream of the workflow, read from the run's annotation, not from a diff": the guidance now requires the annotation on `gh run view <id>` to name the upstream cause — billing, a spending limit, or the runner — before the failure is classified Environmental.
   An annotation that names an ordinary cause is the diagnosis instead, and only when the annotation is absent or inconclusive does the reader move on to the run's other jobs and the normal failure diagnosis: a reusable-workflow caller fails with the same `steps: []` for an ordinary reason.
   Raised by CodeRabbit on #9 and left out of that pull request; tracked as #10.
+- `guard-hooks` 0.3.1 `staged-secret-guard` follows a shell function defined in the same command.
+  A call is read as the function's body with the call's words in place of `"$@"` and `$1`–`$9`, so `g() { git "$@"; }; g commit -m x` is scanned, `g status` is left alone, and a wrapper that adds `-c` is refused exactly as the same command written inline would be.
+  A definition on its own is no longer read at all: the parser used to skip only the first command of a body, so `f() { echo; git commit -m x; }` was scanned although nothing ran.
+- `staged-secret-guard` scans a commit inside a brace group.
+  `{ git commit -m x; }` went unscanned because `{` could not be told apart from a function body; with definitions recognised by their name, it can.
+  Words after a command substitution among a command's arguments are no longer read as a new command, so `echo $(date) git commit` is not treated as a commit.
+- `staged-secret-guard` refuses `commit` behind a program name it cannot read.
+  `g=git; $g commit`, `"${GIT:-git}" commit` and `$(command -v git) commit` ran a commit with only the word `commit` visible, and a name that expands to git can carry its own `-C` or `-c`, so there is no candidate to scan.
+  The refusal fires only where git would read its subcommand, so `$PYTHON -c …` and `"$EDITOR" "$f"` pass as before.
+  Tracked as #12.
 
 ## [0.5.0] — 2026-09-10
 
