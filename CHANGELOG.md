@@ -13,10 +13,12 @@ Entries are grouped by release; the topmost section collects work that has not y
   Raised by CodeRabbit on #9 and left out of that pull request; tracked as #10.
 - `guard-hooks` 0.3.1 `staged-secret-guard` follows a shell function defined in the same command.
   A call is read as the function's body with the call's words in place of `"$@"` and `$1`–`$9`, so `g() { git "$@"; }; g commit -m x` is scanned, `g status` is left alone, and a wrapper that adds `-c` is refused exactly as the same command written inline would be.
-  A definition on its own is no longer read at all: the parser used to skip only the first command of a body, so `f() { echo; git commit -m x; }` was scanned although nothing ran.
+  Where the words cannot be placed (`shift`, `set`, a function defined inside the body) they are left unresolved, and the parse refuses what it then cannot identify; past 64 calls or 4096 added tokens a call is judged like a program name the hook cannot read.
+  A definition whose body is a brace group is no longer read at all: the parser used to skip only the first command of a body, so `f() { echo; git commit -m x; }` was scanned although nothing ran.
+  Where the body's end is in doubt the rest is read as though it ran, never skipped: every `}` ends a body, even one that is only an argument, and a body that holds a heredoc is read whole, because the heredoc's prose is parsed as commands and its braces cannot be trusted.
 - `staged-secret-guard` scans a commit inside a brace group.
   `{ git commit -m x; }` went unscanned because `{` could not be told apart from a function body; with definitions recognised by their name, it can.
-  Words after a command substitution among a command's arguments are no longer read as a new command, so `echo $(date) git commit` is not treated as a commit.
+  Words after a command substitution among a command's arguments are no longer read as a new command, so `echo $(date) git commit` is not treated as a commit, and a substitution glued to more of an assignment no longer hides the command after it: `out=$(date)x git commit` was unscanned before this release.
 - `staged-secret-guard` refuses `commit` behind a program name it cannot read.
   `g=git; $g commit`, `"${GIT:-git}" commit` and `$(command -v git) commit` ran a commit with only the word `commit` visible, and a name that expands to git can carry its own `-C` or `-c`, so there is no candidate to scan.
   The refusal fires only where git would read its subcommand, so `$PYTHON -c …` and `"$EDITOR" "$f"` pass as before.
