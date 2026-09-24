@@ -153,6 +153,21 @@ for label, command in (
     ("a function-keyword definition with a nested one", "function f { function g { :; }; git commit -m x; }"),
     # The latest definition wins, as in the shell.
     ("a function redefined before its call", "f() { git commit -m x; }; f() { git status; }; f"),
+    # A definition that may not have taken effect is read alongside the ones it
+    # would replace, and here none of them commits.
+    ("a read-only function shadowed in a subshell", "f() { git status; }; ( f() { git log -1; } ); f"),
+    # Past its recursion bound a function has been read at every level above,
+    # so a read-only body is not refused for naming git.
+    ("a recursive function running a read-only git command", "f() { git status; f; }; f"),
+    # An inlined body is appended after the command, behind a separator, so a
+    # bare git at the very end does not read the body's first word as its
+    # subcommand.
+    ("a bare git after a call whose body starts with commit", "f() { commit -m x; }; f; git"),
+    # A setup script: thirty steps, each logging through a helper and checking
+    # status, run three times. 180 calls in all, none of them a commit.
+    ("a script of thirty steps run three times", 'log() { printf "%s\\n" "$*"; }\nR=/repo\n' + "".join(f'step{i}() {{\n  log "step {i}"\n  git -C "$R" status --short\n  npm run task{i} -- --flag "$1"\n}}\n' for i in range(30)) + "".join(f"step{i} arg{r}\n" for r in range(3) for i in range(30))),
+    # A finished `if` leaves later definitions certain again.
+    ("a function redefined after an if", "if true; then :; fi; f() { git commit -m x; }; f() { git status; }; f"),
     # `command` and `env` run a program named f, never the function.
     ("a function name behind command", "f() { git commit -m x; }; command f"),
     ("a function name behind env", "f() { git commit -m x; }; env f"),
@@ -333,6 +348,21 @@ for label, command in (
     # A body that goes on after a nested call keeps its own end in step, so the
     # recursion in it still stops at its depth instead of running to the call cap.
     ("commit through a wrapper after recursion with a call before it", 'f() { g; f; }; g() { :; }; f; h() { git "$@"; }; h commit -m x'),
+    # A definition replaces an earlier one only where it certainly runs in this
+    # shell. Everywhere else the earlier body may still be the one called.
+    ("commit through a function shadowed only in a subshell", "f() { git commit -m x; }; ( f() { echo safe; } ); f"),
+    ("commit through a function shadowed only in an untaken branch", "f() { git commit -m x; }; if false; then f() { echo safe; }; fi; f"),
+    # The same, where the shadowing definition is not the first command inside.
+    ("commit through a function shadowed later in an untaken branch", "f() { git commit -m x; }; if false; then :; f() { echo safe; }; fi; f"),
+    ("commit through a function shadowed mid-subshell", "f() { git commit -m x; }; ( :; f() { echo safe; }; : ); f"),
+    ("commit through a function shadowed only behind &&", "f() { git commit -m x; }; false && f() { echo safe; }; f"),
+    ("commit through a function shadowed only in a pipeline", "f() { git commit -m x; }; f() { echo safe; } | cat; f"),
+    ("commit through a function shadowed only by an uncalled one", "f() { git commit -m x; }; g() { f() { echo safe; }; }; false && g; f"),
+    # And a git function defined only in a subshell leaves git itself to run.
+    ("commit after a git function defined in a subshell", "( git() { :; } ); git commit -m x"),
+    # Recursion is read several levels deep, where arguments can shift into
+    # place: the second level of this one commits.
+    ("commit reached at the second level of a recursion", 'f() { git "$1" -m x; f "$2" "$3"; }; f status commit'),
     ("commit through a wrapper after a recursive countdown", 'countdown() { [ "$1" -le 0 ] && return; countdown $(( $1 - 1 )); }; countdown 3; g() { git "$@"; }; g commit -m x'),
     # The rest of an assignment's word is still the assignment.
     ("commit behind an assignment glued to a substitution", "out=$(date)x git commit -m x"),
@@ -345,6 +375,9 @@ for label, command in (
 
 # A clean index, so a refusal below cannot be a credential that was found.
 plain = repo({"README.md": "# hello\n"})
+# Seventy calls to a sixty-word body add more tokens than inlining may, so the
+# calls after them are past the budget.
+BUDGET_SPENT = "h() { : " + " ".join(f"w{i}" for i in range(60)) + "; }; " + "h; " * 70
 
 # The wrapper gets the verdict its body would get written out, so what is
 # refused inline is refused through the call too.
@@ -363,8 +396,10 @@ for label, command, reason in (
     # A body that multiplies its arguments stops being inlined at the token
     # budget, and is then judged as a program name this hook cannot read.
     ("a wrapper that doubles its arguments", 'f() { f "$@" "$@"; }; f commit -m x', "program name this hook cannot read"),
-    # Past the call cap a body is no longer read, but it may still not say commit.
-    ("a committing function called past the call cap", 'h() { :; }; ' + "h; " * 130 + 'c() { git commit -m x; }; c', "program name this hook cannot read"),
+    # Past the token budget a body is no longer read, but it may still not say
+    # commit, and nothing it reaches through another function may either.
+    ("a committing function called past the token budget", BUDGET_SPENT + 'c() { git commit -m x; }; c', "program name this hook cannot read"),
+    ("a function reaching a commit through another, past the token budget", BUDGET_SPENT + 'g() { git commit -m x; }; c() { g; }; c', "program name this hook cannot read"),
 ):
     # Bounded, because an unbounded inliner does not fail this case: it hangs.
     rc, err = check_hook(command, plain, timeout=60)
@@ -394,9 +429,9 @@ try:
 except subprocess.TimeoutExpired:
     check("mutually recursive functions terminate", False, "timed out")
 
-# The call limit is what keeps recursion cheap in a long command: the token
-# budget alone also ends it, but only after thousands of copies of the token
-# list, which took 11 s here against the hook's 10 s timeout, where it fails open.
+# Recursion in a long command must stay cheap: it once ran on to the token
+# budget, copying the token list at every call, and took 11 s here against the
+# hook's 10 s timeout, where it fails open.
 long_recursion = "echo " + " ".join(f"w{i}" for i in range(1500)) + "\na() { b; }; b() { a; }; a"
 try:
     rc, _ = check_hook(long_recursion, plain, timeout=10)
@@ -404,8 +439,8 @@ try:
 except subprocess.TimeoutExpired:
     check("recursion in a long command finishes within the hook timeout", False, "timed out")
 
-# Recursion now stops at its depth, so the call cap is what bounds a command
-# with many ordinary calls: without it, 1500 of them took 18 s under bash 3.2.
+# Many ordinary calls in a long command must stay cheap too: when each one
+# copied the token list, 1500 of them took 18 s under bash 3.2.
 many_calls = "echo " + " ".join(f"w{i}" for i in range(400)) + "\nh() { :; }; " + "h; " * 1500
 try:
     rc, _ = check_hook(many_calls, plain, timeout=10)
