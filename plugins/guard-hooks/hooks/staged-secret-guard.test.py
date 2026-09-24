@@ -313,6 +313,7 @@ for label, command in (
     ("commit through an empty unquoted parameter", 'c() { git $1 commit -m x; }; c ""'),
     # A function inside the body has positional parameters of its own.
     ("commit through a function defined inside another", 'outer() { inner() { git "$@"; }; inner commit -m x; }; outer status'),
+    ("commit through a function-keyword function inside another", 'outer() { function inner { git "$@"; }; inner commit -m x; }; outer status'),
     # Inlining is bounded, but not so tightly that ordinary helper calls use it up.
     ("commit after sixteen helper calls", 'run() { "$@"; }; ' + "run true; " * 16 + "run git commit -m x"),
     # The rest of an assignment's word is still the assignment.
@@ -368,6 +369,16 @@ try:
     check("mutually recursive functions terminate", rc == 0, f"exit={rc}")
 except subprocess.TimeoutExpired:
     check("mutually recursive functions terminate", False, "timed out")
+
+# The call limit is what keeps recursion cheap in a long command: the token
+# budget alone also ends it, but only after thousands of copies of the token
+# list, which took 11 s here against the hook's 10 s timeout, where it fails open.
+long_recursion = "echo " + " ".join(f"w{i}" for i in range(1500)) + "\na() { b; }; b() { a; }; a"
+try:
+    rc, _ = check_hook(long_recursion, plain, timeout=10)
+    check("recursion in a long command finishes within the hook timeout", rc == 0, f"exit={rc}")
+except subprocess.TimeoutExpired:
+    check("recursion in a long command finishes within the hook timeout", False, "timed out")
 
 # --- honours git -C so the right repo is scanned ----------------------------
 dirty = repo({"config.txt": f"{GITHUB}\n"})
