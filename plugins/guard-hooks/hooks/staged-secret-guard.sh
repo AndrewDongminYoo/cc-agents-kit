@@ -86,6 +86,24 @@ BOUNDARY_PREFIX=$'\034'
 # (`$(npm bin)/eslint`). One character per open parenthesis, s or p, pairs them.
 subst_stack=""
 last_unquoted_dollar=""
+# Whether any part of the token being built was quoted or escaped. The quotes
+# themselves are dropped, so a lone `"{"` or `\}` would read as a reserved word;
+# it is marked "literal" instead, and only an unmarked brace opens or closes a
+# group or a function body.
+token_quoted=""
+flush_token() {
+  if [[ -n "$token_started" ]]; then
+    if [[ -n "$token_quoted" ]] && [[ "$token" == "{" || "$token" == "}" ]]; then
+      token_expansion="literal"
+    fi
+    TOKENS+=("$token")
+    TOKEN_EXPANSION+=("$token_expansion")
+    token=""
+    token_started=""
+    token_expansion=""
+    token_quoted=""
+  fi
+}
 command_len=${#COMMAND}
 command_pos=0
 while ((command_pos < command_len)); do
@@ -113,23 +131,23 @@ while ((command_pos < command_len)); do
     fi
   else
     case "$char" in
-      "'" | '"') quote="$char"; token_started=1 ;;
-      "\\") escaped=1 ;;
+      "'" | '"') quote="$char"; token_started=1; token_quoted=1 ;;
+      "\\") escaped=1; token_quoted=1 ;;
       " " | $'\t')
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
+        flush_token
         ;;
       $'\n')
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
+        flush_token
         TOKENS+=("$BOUNDARY_PREFIX;")
         TOKEN_EXPANSION+=("")
         ;;
       ";" | "|" | "&")
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
+        flush_token
         TOKENS+=("$BOUNDARY_PREFIX$char")
         TOKEN_EXPANSION+=("")
         ;;
       "(")
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
+        flush_token
         if [[ -n "$prev_dollar" ]]; then
           subst_stack="${subst_stack}s"
           TOKENS+=("$BOUNDARY_PREFIX\$(")
@@ -140,7 +158,7 @@ while ((command_pos < command_len)); do
         TOKEN_EXPANSION+=("")
         ;;
       ")")
-        if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); token=""; token_started=""; token_expansion=""; fi
+        flush_token
         closing="${subst_stack#"${subst_stack%?}"}"
         subst_stack="${subst_stack%?}"
         if [[ "$closing" == s ]]; then
@@ -166,7 +184,7 @@ while ((command_pos < command_len)); do
   ((command_pos += 1))
 done
 [[ -z "$quote" && -z "$escaped" ]] || TOKENIZATION_ERROR=1
-if [[ -n "$token_started" ]]; then TOKENS+=("$token"); TOKEN_EXPANSION+=("$token_expansion"); fi
+flush_token
 
 # "quoted" was shorthand for "one word", and for two forms that is wrong: "$@"
 # and "${name[@]}" emit one word per element even inside quotes, so
@@ -201,12 +219,13 @@ done
 # though it ran: a refusal at worst. Closing too late skips whatever real
 # commands follow the body, and a heredoc's prose (`if (!ready) { return }`,
 # `module.exports = {`) is parsed as commands here, so its braces pair up with
-# anything. So every `}` closes, and `{` opens only where a command could start:
-# after a separator, a keyword, another `{`, or `function NAME`.
+# anything. So every unquoted `}` closes, and `{` opens only where a command
+# could start: after a separator, a keyword, another `{`, or `function NAME`.
 match_braces() {
   local index prev stack=""
   BRACE_MATCH=()
   for ((index = 0; index < token_count; index++)); do
+    [[ -z "${TOKEN_EXPANSION[index]-}" ]] || continue
     case "${TOKENS[index]}" in
       "{")
         prev=""
@@ -536,9 +555,29 @@ while :; do
         case "${TOKENS[body_index]}" in
           shift | function) substitute="" ;;
           set)
-            case "${TOKENS[body_index + 1]-}" in
-              -- | [!+-]*) substitute="" ;;
-            esac
+            # Options, then words, and the words become the positional
+            # parameters. The word after an -o or +o is an option name, so
+            # `set -euo pipefail` leaves them alone. After a bare - or +, any
+            # word is a parameter however it is spelled (`set - --amend`), while
+            # either one alone changes nothing; a bare -- alone clears them.
+            set_index=$((body_index + 1))
+            while ((set_index < body_end)); do
+              case "${TOKENS[set_index]}" in
+                "$BOUNDARY_PREFIX"*) break ;;
+                - | +)
+                  case "${TOKENS[set_index + 1]-}" in
+                    "" | "$BOUNDARY_PREFIX"*) ;;
+                    *) substitute="" ;;
+                  esac
+                  break
+                  ;;
+                --) substitute=""; break ;;
+                [-+]*o) set_index=$((set_index + 1)) ;;
+                [-+]*) ;;
+                *) substitute=""; break ;;
+              esac
+              set_index=$((set_index + 1))
+            done
             ;;
           "$BOUNDARY_PREFIX(") [[ "${TOKENS[body_index + 1]-}" != "$BOUNDARY_PREFIX)" ]] || substitute="" ;;
         esac

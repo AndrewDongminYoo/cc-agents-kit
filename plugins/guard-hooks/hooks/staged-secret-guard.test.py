@@ -167,6 +167,11 @@ for label, command in (
     # status, run three times. 180 calls in all, none of them a commit.
     ("a script of thirty steps run three times", 'log() { printf "%s\\n" "$*"; }\nR=/repo\n' + "".join(f'step{i}() {{\n  log "step {i}"\n  git -C "$R" status --short\n  npm run task{i} -- --flag "$1"\n}}\n' for i in range(30)) + "".join(f"step{i} arg{r}\n" for r in range(3) for i in range(30))),
     # A finished `if` leaves later definitions certain again.
+    # Options alone leave the parameters in place; -o takes an option name.
+    ("a wrapper that only sets options", 'f() { set -euo pipefail; git "$@"; }; f status'),
+    ("a wrapper with a bare set -", 'f() { set -; git "$@"; }; f status'),
+    # A quoted brace is a word, so it does not end the body early.
+    ("a definition with a quoted brace as an argument", 'f() { echo "}"; git commit -m x; }'),
     ("a function redefined after an if", "if true; then :; fi; f() { git commit -m x; }; f() { git status; }; f"),
     # `command` and `env` run a program named f, never the function.
     ("a function name behind command", "f() { git commit -m x; }; command f"),
@@ -323,6 +328,10 @@ for label, command in (
     # Leaning the other way: a `}` that is only an argument still ends the body,
     # so what follows it is read as though it ran even with no call.
     ("commit after an argument brace, uncalled", "f() { echo }; git commit -m x; }"),
+    # Nor does a quoted or escaped brace open a group inside it, which would let
+    # the body's real close pair with that and run on past the commit.
+    ("commit after a body holding a quoted brace", 'f() { if "{"; then :; fi; }; git commit -m x; echo "}"'),
+    ("commit after a body holding an escaped brace", 'f() { if \\{; then :; fi; }; git commit -m x; echo \\}'),
     # A body that ends straight after `]]` must not swallow the commands after it.
     ("commit after a body closed by ]]", 'is_clean() { [[ -z "$(git status --porcelain)" ]] }\ngit add -A && git commit -m wip\nfunction cleanup { rm -f tmp; }'),
     # A heredoc's prose is parsed as commands, and its braces must not pair with
@@ -389,6 +398,15 @@ for label, command, reason in (
     ("a wrapper that shifts its arguments", 'f() { local r=$1; shift; git -C "$r" "$@"; }; f /repo commit -m x', "unquoted expansion"),
     ("a wrapper that resets its arguments with set --", 'f() { set -- commit -m x; git "$@"; }; f status', "unquoted expansion"),
     ("a wrapper that resets its arguments with set", 'f() { set commit -m x; git "$@"; }; f status', "unquoted expansion"),
+    # A bare - or +, and words after options, reset them too.
+    ("a wrapper that resets its arguments with set -", 'f() { set - commit -m x; git "$1" "$2" "$3"; }; f status', "could not safely parse"),
+    ("a wrapper that resets its arguments with set +", 'f() { set + commit -m x; git "$1" "$2" "$3"; }; f status', "could not safely parse"),
+    ("a wrapper that resets its arguments after an option", 'f() { set -e commit -m x; git "$@"; }; f status', "unquoted expansion"),
+    # After a bare -, even a word spelled like an option is a parameter, and a
+    # bare -- clears them. Reading the call's words instead would pass a
+    # pathspec the real commit never gets, and scan too little.
+    ("a wrapper that resets its arguments to an option-like word", 'f() { set - --amend; git commit -m x "$@"; }; f -- other.txt', "could not safely parse"),
+    ("a wrapper that clears its arguments", 'f() { set --; git commit -m x "$@"; }; f -- other.txt', "could not safely parse"),
     # A word that can split moves every parameter after it, so what lands in
     # "$2" or in a slice is unknown.
     ("a parameter after a word that can split", 'run_in() { git -C "$1" "$2"; }; run_in $d status', "could not safely parse"),
