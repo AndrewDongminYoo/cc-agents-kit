@@ -23,8 +23,8 @@ digraph fix_osv {
     "Reachability evidence collected?" [shape=diamond];
     "Explicit suppression approval?" [shape=diamond];
     "Is it a direct dependency?" [shape=diamond];
-    "Bump version in package.json" [shape=box];
-    "Add/update overrides (or resolutions)" [shape=box];
+    "Bump the direct dependency (package.json or Gemfile)" [shape=box];
+    "Override it (pnpm/npm/yarn) or bump the parent that pins it (Bundler)" [shape=box];
     "Add IgnoredVulns entry to osv-scanner.toml" [shape=box];
     "Run install + verify build" [shape=box];
 
@@ -36,10 +36,10 @@ digraph fix_osv {
     "Reachability evidence collected?" -> "Stop and report" [label="no"];
     "Explicit suppression approval?" -> "Add IgnoredVulns entry to osv-scanner.toml" [label="yes"];
     "Explicit suppression approval?" -> "Stop and report" [label="no"];
-    "Is it a direct dependency?" -> "Bump version in package.json" [label="yes"];
-    "Is it a direct dependency?" -> "Add/update overrides (or resolutions)" [label="no, transitive"];
-    "Bump version in package.json" -> "Run install + verify build";
-    "Add/update overrides (or resolutions)" -> "Run install + verify build";
+    "Is it a direct dependency?" -> "Bump the direct dependency (package.json or Gemfile)" [label="yes"];
+    "Is it a direct dependency?" -> "Override it (pnpm/npm/yarn) or bump the parent that pins it (Bundler)" [label="no, transitive"];
+    "Bump the direct dependency (package.json or Gemfile)" -> "Run install + verify build";
+    "Override it (pnpm/npm/yarn) or bump the parent that pins it (Bundler)" -> "Run install + verify build";
     "Add IgnoredVulns entry to osv-scanner.toml" -> "Run install + verify build";
 }
 ```
@@ -134,13 +134,17 @@ Bump the version in the relevant workspace `package.json` directly:
 Bundler has no overrides, so a transitive gem moves only when the gem that requires it allows the move.
 In `Gemfile.lock` the parent's requirement is the indented line under the parent's own entry (`rubyzip (>= 2.0.0, < 3.0.0)` under `fastlane (2.238.0)`); if it excludes the patched version, `bundle update <gem>` cannot reach the fix.
 
-Find the first parent release whose requirement admits the patch:
+Find the first parent release whose requirement admits the patch.
+List every stable release oldest first, then query each one above the locked version until the requirement changes:
 
 ```bash
-gh api -X GET https://rubygems.org/api/v1/versions/<parent>.json --jq '.[:6][] | "\(.number) \(.created_at)"'
+gh api -X GET https://rubygems.org/api/v1/versions/<parent>.json --jq '[.[] | select(.prerelease | not) | .number] | reverse | .[]'
 gh api -X GET https://rubygems.org/api/v2/rubygems/<parent>/versions/<version>.json \
   --jq '.ruby_version, (.dependencies.runtime[] | select(.name=="<gem>") | .requirements)'
 ```
+
+Do not cut the list short: the endpoint returns every release (570 stable ones for `fastlane` on 2026-09-30), and the transition can sit anywhere above the locked version.
+Keep reading past the first release that admits the patch, because a later one can tighten the requirement again, and the release you finally resolve to is the one that has to admit it.
 
 GHSA-47m2-wp7j-p9vc (`rubyzip < 3.4.0`) was held by `fastlane` 2.238.0 and 2.239.0 at `< 3.0.0`; `fastlane` 2.240.0 raised its own requirement to `>= 3.4.0, < 4.0.0`, so the fix was a parent bump with no Gemfile edit.
 If no parent release admits the patch, continue to Step 2b.
@@ -152,6 +156,9 @@ BUNDLE_GEMFILE=/abs/path/Gemfile bundle lock --update <parent> --conservative
 ```
 
 `--conservative` keeps every shared dependency at its locked version unless the parent's new requirements force it off.
+It does not stop the parent at the release found above: `--update` defaults to `--major`, so the parent moves to the newest release the Gemfile admits (the fastlane case landed on 2.240.1, not 2.240.0).
+Read which version the lockfile now names and check that release, not the one you selected.
+If the newest release is further than you want to go, narrow the Gemfile's constraint on the parent to the selected release (`gem "fastlane", "~> 2.240.0"`) before running the command; `--patch` or `--minor` with `--strict` cap the update by semver level, not at a named release.
 If the Gemfile's own constraint on the parent excludes the target release, that is a direct-dependency bump: edit the Gemfile first.
 
 - **Every lockfile is a separate alert and a separate fix.** A mobile app can carry one Gemfile per platform (`android/Gemfile` and `ios/Gemfile`, each only for fastlane), so the same GHSA arrives twice. Update each; compare the two lockfiles afterwards, since they should differ only where the Gemfiles do.
