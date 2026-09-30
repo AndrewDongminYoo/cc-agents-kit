@@ -149,15 +149,16 @@ Keep reading past the first release that admits the patch, because a later one c
 GHSA-47m2-wp7j-p9vc (`rubyzip < 3.4.0`) was held by `fastlane` 2.238.0 and 2.239.0 at `< 3.0.0`; `fastlane` 2.240.0 raised its own requirement to `>= 3.4.0, < 4.0.0`, so the fix was a parent bump with no Gemfile edit.
 If no parent release admits the patch, continue to Step 2b.
 
-Move only the parent, and resolve without installing:
+Move the parent and the vulnerable gem together, and resolve without installing:
 
 ```bash
-BUNDLE_GEMFILE=/abs/path/Gemfile bundle lock --update <parent> --conservative
+BUNDLE_GEMFILE=/abs/path/Gemfile bundle lock --update <parent> <gem> --conservative
 ```
 
-`--conservative` keeps every shared dependency at its locked version unless the parent's new requirements force it off.
+Name both. A parent whose new requirement admits the patch but still admits the locked vulnerable version (`>= 2.0.0, < 4.0.0` instead of `>= 3.4.0`) leaves the gem where it is when only the parent is named, because `--conservative` holds every gem not on the command line at its locked version unless a requirement forces it off.
+The fastlane case needed only the parent because 2.240.0 forced `rubyzip` off 2.4.1; do not rely on that.
 It does not stop the parent at the release found above: `--update` defaults to `--major`, so the parent moves to the newest release the Gemfile admits (the fastlane case landed on 2.240.1, not 2.240.0).
-Read which version the lockfile now names and check that release, not the one you selected.
+Read which versions the lockfile now names, for the parent and for the gem, and check those releases, not the ones you selected.
 If the newest release is further than you want to go, narrow the Gemfile's constraint on the parent to the selected release (`gem "fastlane", "~> 2.240.0"`) before running the command; `--patch` or `--minor` with `--strict` cap the update by semver level, not at a named release.
 If the Gemfile's own constraint on the parent excludes the target release, that is a direct-dependency bump: edit the Gemfile first.
 

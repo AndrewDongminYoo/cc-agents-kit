@@ -8,7 +8,8 @@ Entries are grouped by release; the topmost section collects work that has not y
 ### Added
 
 - `repo-gate` 0.2.2 `fix-osv-vulnerabilities` covers Bundler.
-  Bundler has no overrides, so a transitive gem is fixed by bumping the parent that pins it: the skill shows how to find the first parent release whose requirement admits the patch through the rubygems.org API, how to move only that parent with `bundle lock --update <parent> --conservative`, and what to check afterwards: one fix per lockfile, the other gems the parent moved, the Ruby floor, and which code paths only a real lane exercises.
+  Bundler has no overrides, so a transitive gem is fixed by bumping the parent that pins it: the skill shows how to find the first parent release whose requirement admits the patch through the rubygems.org API, how to move that parent and the vulnerable gem together with `bundle lock --update <parent> <gem> --conservative`, and what to check afterwards: the versions the lockfile actually resolved (`--update` goes to the newest release the Gemfile admits), one fix per lockfile, the other gems the parent moved, the Ruby floor, and which code paths only a real lane exercises.
+  The workflow diagram routes Bundler direct and transitive dependencies to these steps.
   It also says how to make a clean `trunk check` fail first: on the pre-fix tree trunk reports the vulnerability as an existing issue and exits 0, so pass `--show-existing` and read the output, and pin that tree by SHA rather than `HEAD`, which a parallel commit can move past the fix.
 
 ### Fixed
