@@ -146,7 +146,7 @@ A Gemfile that says `gemspec` takes its direct dependencies from the `.gemspec` 
 
 One requirement per parent is normal, not the rule: `faraday` had eight parents in a fastlane-only lockfile.
 A Gemfile constraint that excludes the patch is a direct-dependency bump: edit it.
-For each parent whose requirement excludes the patch, find the first release of that parent whose requirement admits it.
+For each parent whose requirement excludes the patch, find the first release of that parent whose requirement admits it, or that no longer depends on the gem at all.
 The lookup below is for parents listed in `Gemfile.lock` under a `GEM` section with `remote: https://rubygems.org/`; a parent under `GIT`, `PATH` or another `remote:` is a shape this procedure does not name, so handle it as the closing paragraph says rather than querying rubygems.org, which knows nothing about that source.
 List every stable release oldest first, then query each one above the locked version until the requirement changes:
 
@@ -156,11 +156,13 @@ gh api -X GET https://rubygems.org/api/v2/rubygems/<parent>/versions/<version>.j
   --jq '.ruby_version, (.dependencies.runtime[] | select(.name=="<gem>") | .requirements)'
 ```
 
+The second query prints the release's `ruby_version` first (an empty line when the release sets none, as `rake` 0.8.7 does), then one line per runtime requirement on the gem.
+A release that prints only that first line no longer depends on the gem: it is a fix, not a gap in the data, because it removes this parent's path to the gem.
 Do not cut the list short: the endpoint returns every release (570 stable ones for `fastlane` on 2026-09-30), and the transition can sit anywhere above the locked version.
-Keep reading past the first release that admits the patch, because a later one can tighten the requirement again, and the release you finally resolve to is the one that has to admit it.
+Keep reading past the first release that admits the patch or drops the gem, because a later one can tighten the requirement again or depend on the gem again, and the release you finally resolve to is the one that has to admit the patch or not depend on the gem.
 
 GHSA-47m2-wp7j-p9vc (`rubyzip < 3.4.0`) was held by `fastlane` 2.238.0 and 2.239.0 at `< 3.0.0`; `fastlane` 2.240.0 raised its own requirement to `>= 3.4.0, < 4.0.0`, so the fix was a parent bump with no Gemfile edit.
-If any blocking parent has no release that admits the patch, continue to Step 2b.
+If any blocking parent has no release that admits the patch or drops the gem, continue to Step 2b.
 
 Update the vulnerable gem and every blocking parent in one resolve, without installing:
 
@@ -170,6 +172,7 @@ BUNDLE_GEMFILE=/abs/path/Gemfile bundle lock --update <gem> <each blocking paren
 
 Name the gem even when a parent bump seems enough. `--conservative` holds every gem not on the command line at its locked version unless a requirement forces it off, so a parent whose new requirement admits the patch but still admits the locked vulnerable version (`>= 2.0.0, < 4.0.0` instead of `>= 3.4.0`) leaves the gem where it is.
 The fastlane case needed only the parent because 2.240.0 forced `rubyzip` off 2.4.1; do not rely on that.
+Name it also when every blocking parent dropped it: the gem is still in the lockfile when the command starts, and the resolve removes it once no requirement reaches it, while a Gemfile declaration or a parent that still depends on it keeps it in the bundle at whatever version its requirements allow.
 
 Every gem named on the command line moves to the newest release its requirements admit, not to the release you selected: `--update` defaults to `--major` (the fastlane case landed on 2.240.1, not 2.240.0, and `rubyzip` on 3.7.0, not 3.4.0).
 Read which versions the lockfile now names for each gem you named, and check those releases.
@@ -183,6 +186,7 @@ When the lockfile shows a shape it does not name, resolve with Bundler itself (`
 - **Every lockfile is a separate alert and a separate fix.** A mobile app can carry one Gemfile per platform (`android/Gemfile` and `ios/Gemfile`, each only for fastlane), so the same GHSA arrives twice. Update each; compare the two lockfiles afterwards, since they should differ only where the Gemfiles do.
 - **Read the diff for what else moved.** A parent bump carries its other requirement changes with it (the fastlane bump above also added `cgi` and moved `security` 0.1.5 → 0.3.0, which is a boundary crossing under the 0.x rule above).
 - **Check the Ruby floor.** Compare the `ruby_version` of every gem the lockfile moved against each place that picks the Ruby: `.ruby-version`, a `RUBY VERSION` section in the lockfile, and `ruby-version` in any CI workflow that runs the tool.
+- **Confirm a dropped gem is gone.** Where every path to the gem was dropped, both `grep -n '^    <gem> (' <each Gemfile.lock>` and `grep -nE '^      <gem>( |$)' <each Gemfile.lock>` print nothing. If either prints, a path still reaches the gem, so the version the lockfile names has to be patched, which the next bullet checks. With the gem out of the bundle there is nothing to load, but code that used it without declaring it now fails: at its `require`, or, where the parent loaded the gem for it, at the first constant it names (`Zip::File` in a Fastfile). Search the whole project for the gem's name as a whole word in any case, rather than for a call shape, a quoting style or a file type: a call can span lines (`require(` then `"zip"`), go through `autoload`, or spell the path as `%q(zip)` or a symbol, and Ruby also loads from a `Rakefile`, `.rake` tasks, a `Podfile`, a `Fastfile` and extensionless scripts under `bin/` (`grep -rnwi zip --exclude-dir=vendor --exclude-dir=.git --exclude-dir=node_modules .` for `rubyzip`, which matches `zip/filesystem` and `Zip::File` and skips `gzip`). Read each hit, since the same word can appear for another reason. The search is a lead, not a proof: an empty result still misses a path or a constant the code computes at runtime, so the proof is running the paths that used the gem, and the next bullet's rule for paths that cannot be run applies.
 - **Load it, then say what did not run.** After `bundle install`, confirm the resolved version with `grep -n '^    <gem> (' <each Gemfile.lock>` and load it through the bundle by the path its consumers require, which need not be the gem name (`BUNDLE_GEMFILE=… bundle exec ruby -e 'require "zip"'` for `rubyzip`; 2.x ships no `rubyzip.rb`, so `require "rubyzip"` is a `LoadError` there and loads only from 3.x). `fastlane lanes` proves only that the Fastfile parses; the actions that use the moved gem (uploads, archive handling, keychain access) run only in a real lane, which has external impact, so report them as unexercised instead of running one.
 
 ### Apply and verify
