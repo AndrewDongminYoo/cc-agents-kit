@@ -131,14 +131,14 @@ with tempfile.TemporaryDirectory() as tmp:
         hook_rc == 0 and not out and not err,
         f"exit={hook_rc} stdout={out[:120]}",
     )
-    _, hook_rc, out, _ = _optout.run_piped(HOOK, DISABLE_VAR, warning_payload, False)
+    _, hook_rc, out, err = _optout.run_piped(HOOK, DISABLE_VAR, warning_payload, False)
     if have_shellcheck:
         check("opt-out off: warning still fires", bool(out), f"stdout={out[:120]}")
     else:
         check(
             "opt-out off: degrades quietly without shellcheck",
-            hook_rc == 0 and not out,
-            f"exit={hook_rc} stdout={out[:120]}",
+            hook_rc == 0 and not out and not err,
+            f"exit={hook_rc} stdout={out[:120]} stderr={err[:120]}",
         )
 
 fails += _optout.drain(HOOK, DISABLE_VAR)
