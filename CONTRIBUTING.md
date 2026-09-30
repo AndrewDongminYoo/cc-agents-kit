@@ -30,7 +30,7 @@ An entry pointing at a missing directory breaks installation for everyone, so ad
 
 ```bash
 find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck
-cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done
+(cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done)
 for t in plugins/*/bin/*.test.py; do python3 "$t" || exit 1; done
 ```
 

@@ -11,7 +11,7 @@ Every change is therefore judged on two things: does the manifest still resolve,
 
 ```bash
 shellcheck plugins/*/hooks/*.sh
-cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done
+(cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done)
 for t in plugins/*/bin/*.test.py; do python3 "$t" || exit 1; done
 python3 plugins/guard-hooks/hooks/<name>.test.py     # a single suite
 /bin/bash -n plugins/guard-hooks/hooks/<name>.sh     # macOS system bash 3.2, not your shell's bash
