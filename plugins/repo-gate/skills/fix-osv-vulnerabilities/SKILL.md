@@ -147,6 +147,7 @@ A Gemfile that says `gemspec` takes its direct dependencies from the `.gemspec` 
 One requirement per parent is normal, not the rule: `faraday` had eight parents in a fastlane-only lockfile.
 A Gemfile constraint that excludes the patch is a direct-dependency bump: edit it.
 For each parent whose requirement excludes the patch, find the first release of that parent whose requirement admits it.
+The lookup below is for parents listed in `Gemfile.lock` under a `GEM` section with `remote: https://rubygems.org/`; a parent under `GIT`, `PATH` or another `remote:` is a shape this procedure does not name, so handle it as the closing paragraph says rather than querying rubygems.org, which knows nothing about that source.
 List every stable release oldest first, then query each one above the locked version until the requirement changes:
 
 ```bash
