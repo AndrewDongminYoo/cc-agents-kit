@@ -153,11 +153,24 @@ HEREDOC_DELIMS=()
 HEREDOC_TABS=()
 heredoc_doubt=""
 heredoc_start=""
+# Both searches below resume where the last heredoc left them, so a command of
+# many heredocs costs one pass, not one pass per heredoc: rescanning from the
+# start took 500 small `cat` heredocs past the hook's 10 s timeout, where it
+# fails open. Tokens are only ever appended, and the lines are split once.
+prefix_index=0
+prefix_at_start=1
+HEREDOC_LINES=()
+HEREDOC_LINE_STARTS=()
+line_cursor=0
 # Called at an unquoted `<<` that is not `<<<`. Reads the delimiter bash would
 # read -- the whole word up to a blank or metacharacter, quotes removed -- and
 # the simple command the heredoc belongs to.
 note_heredoc() {
-  local pos=$((command_pos + 2)) c delim="" q="" tabs="" first_index quoted="" index word at_start=1
+  local pos=$((command_pos + 2)) c delim="" q="" tabs="" first_index quoted="" word
+  if [[ -z "$heredoc_skip_ok" ]]; then
+    heredoc_doubt=1
+    return
+  fi
   if [[ "${COMMAND:pos:1}" == "-" ]]; then
     tabs=1
     pos=$((pos + 1))
@@ -205,34 +218,38 @@ note_heredoc() {
     return
   fi
   # Only a quoted string holds a newline, and one that spans lines is where a
-  # drifted quote state would show.
-  for ((index = 0; index < ${#TOKENS[@]}; index++)); do
-    word=${TOKENS[index]}
+  # drifted quote state would show. A doubt found here is about the prefix,
+  # which only grows, so it turns skipping off for the rest of the command.
+  for ((; prefix_index < ${#TOKENS[@]}; prefix_index++)); do
+    word=${TOKENS[prefix_index]}
     # shellcheck disable=SC2016  # a literal ${ to match, not an expansion
     case "$word" in
       *"$NEWLINE"* | *'`'* | *'${'* | "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$"* \
         | PATH | path | PATH=* | path=* | PATH+=* | path+=*)
+        heredoc_skip_ok=""
         heredoc_doubt=1
         return
         ;;
       "$BOUNDARY_PREFIX"*)
-        at_start=1
+        prefix_at_start=1
         continue
         ;;
     esac
-    [[ -n "$at_start" ]] || continue
-    if [[ -z "${TOKEN_EXPANSION[index]-}" && "$word" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+    [[ -n "$prefix_at_start" ]] || continue
+    if [[ -z "${TOKEN_EXPANSION[prefix_index]-}" && "$word" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
       # A variable the shell looks commands up through (PATH, FPATH, zsh's
       # path and fpath) can make `cat` something else.
       case "${word%%=*}" in
         *[Pp][Aa][Tt][Hh])
+          heredoc_skip_ok=""
           heredoc_doubt=1
           return
           ;;
       esac
       continue
     fi
-    if [[ -n "${TOKEN_EXPANSION[index]-}" ]]; then
+    if [[ -n "${TOKEN_EXPANSION[prefix_index]-}" ]]; then
+      heredoc_skip_ok=""
       heredoc_doubt=1
       return
     fi
@@ -245,11 +262,12 @@ note_heredoc() {
     case "$word" in
       cat | tee | mkdir | touch | rm | ls | git | echo | pwd | true) ;;
       *)
+        heredoc_skip_ok=""
         heredoc_doubt=1
         return
         ;;
     esac
-    at_start=""
+    prefix_at_start=""
   done
   # The command's first word is the first token after the last boundary; one
   # still being built (`cat<<X`) has not been flushed, and is not trusted.
@@ -270,7 +288,7 @@ note_heredoc() {
 # skip, command_pos moves to the newline that ends the last terminator line, so
 # the loop's own increment starts the next command after it.
 skip_heredoc_bodies() {
-  local index=0 offset=0 line raw count=${#HEREDOC_DELIMS[@]} token skipped=""
+  local index=0 offset=0 line raw count=${#HEREDOC_DELIMS[@]} token skipped="" total line_index
   if [[ -n "$heredoc_skip_ok" && -z "$heredoc_doubt" ]]; then
     for ((index = heredoc_start; index < ${#TOKENS[@]}; index++)); do
       token=${TOKENS[index]}
@@ -281,17 +299,32 @@ skip_heredoc_bodies() {
     done
     index=0
     if [[ -z "$heredoc_doubt" ]]; then
-      while IFS= read -r raw; do
-        offset=$((offset + ${#raw} + 1))
-        line=$raw
+      # Split the command into lines once, with each line's start in the same
+      # units as command_pos, then walk forward from the line after this one.
+      if ((${#HEREDOC_LINE_STARTS[@]} == 0)); then
+        while IFS= read -r raw; do
+          HEREDOC_LINES+=("$raw")
+          HEREDOC_LINE_STARTS+=("$offset")
+          offset=$((offset + ${#raw} + 1))
+        done <<<"$COMMAND"
+      fi
+      total=${#HEREDOC_LINE_STARTS[@]}
+      while ((line_cursor < total)) && ((HEREDOC_LINE_STARTS[line_cursor] <= command_pos)); do
+        line_cursor=$((line_cursor + 1))
+      done
+      for ((line_index = line_cursor; line_index < total; line_index++)); do
+        line=${HEREDOC_LINES[line_index]}
         [[ -z "${HEREDOC_TABS[index]}" ]] || line=${line#"${line%%[!$'\t']*}"}
         if [[ "$line" == "${HEREDOC_DELIMS[index]}" ]]; then
           index=$((index + 1))
-          ((index < count)) || break
+          if ((index == count)); then
+            skipped=1
+            command_pos=$((HEREDOC_LINE_STARTS[line_index] + ${#HEREDOC_LINES[line_index]}))
+            line_cursor=$((line_index + 1))
+            break
+          fi
         fi
-      done <<<"${COMMAND:command_pos+1}"
-      ((index < count)) || skipped=1
-      [[ -z "$skipped" ]] || command_pos=$((command_pos + offset))
+      done
     fi
   fi
   # A body read as commands may itself open a heredoc (`bash <<'X' | bash` over
