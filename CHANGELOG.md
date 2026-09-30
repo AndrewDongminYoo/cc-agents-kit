@@ -22,8 +22,8 @@ Entries are grouped by release; the topmost section collects work that has not y
   The quote-state conditions exist because the tokenizer can disagree with the shell: in `eval "$( # "` the `"` sits in a comment for zsh and bash 5, which run the following `cat <<'Y'` body, while the tokenizer took it as the closing quote.
   The two costs are listed under Known limits: a script written through `cat` is no longer scanned when it later runs, and a heredoc inside a double-quoted substitution is still read as commands.
   Skipping a body also stops an apostrophe in its prose from flipping the tokenizer's quoting and swallowing the commands after the terminator, so a commit that follows a message written through `cat` is now seen.
-  Replayed against 1,283 distinct transcript commands that open a heredoc and mention `commit`, 63 commands whose commit the previous version never read are now scanned, and 2 commands that only wrote files are no longer refused; no command that runs a commit stopped being scanned.
-  One visible consequence: 19 of those 63 are now refused even with a clean index, because the commit the hook finally reads has a shape it already refuses to parse (a pipe or redirection on the commit, an unquoted `-F $S/msg.txt`, a `-C "$WT"`).
+  Replayed against 1,297 distinct transcript commands that open a heredoc and mention `commit`, 51 commands whose commit the previous version never read are now scanned, and 2 commands that only wrote files are no longer refused; no command that runs a commit stopped being scanned.
+  One visible consequence: 13 of those 51 are now refused even with a clean index, because the commit the hook finally reads has a shape it already refuses to parse (a pipe or redirection on the commit, an unquoted `-F $S/msg.txt`, a `-C "$WT"`).
   Run the commit on its own with literal paths, as the refusal says.
   Tracked as #25.
 - `shellcheck-on-edit.test.py` passes without `shellcheck`, as `CLAUDE.md` says it does.
