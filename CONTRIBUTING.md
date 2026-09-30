@@ -10,6 +10,9 @@ plugins/<plugin>/
   hooks/*.sh                      # the hooks themselves
   hooks/*.test.py                 # one regression suite per hook, beside it
   hooks/_optout.py                # the opt-out contract every suite shares
+  skills/<skill>/SKILL.md         # frontmatter name matches the directory
+  bin/<tool>                      # on PATH while the plugin is enabled
+  bin/<tool>.test.py              # its regression suite, beside it
 ```
 
 A plugin's `source` in `marketplace.json` must point at a directory that exists in this repository.
@@ -19,7 +22,7 @@ An entry pointing at a missing directory breaks installation for everyone, so ad
 
 1. Read the hook JSON from stdin and **fail open** — empty, malformed, or key-less input must exit `0` with no output. A guard that errors on unrelated tool calls gets uninstalled.
 2. Give it an opt-out: `CC_GUARD_DISABLE_<NAME>=1`, and add it to the README table. Check it *after* stdin is drained, never before — a `Write` payload carries the whole file content, so exiting early leaves the harness writing to a closed pipe and surfaces a hook error exactly when the user asked for the hook to be off.
-3. `PreToolUse` guards exit `2` to block. `PostToolUse` hooks must never block — emit `hookSpecificOutput.additionalContext` and exit `0`.
+3. `PreToolUse` guards exit `2` to block. `PostToolUse` hooks must never block — emit `hookSpecificOutput.additionalContext` (or `hookSpecificOutput.updatedToolOutput` to rewrite a Bash result, as `output-secret-mask` does) and exit `0`.
 4. Write the regression suite next to the script. It resolves the hook via `Path(__file__).resolve().with_name(...)` and imports `_optout` as a plain sibling module, so all three files stay in the same directory.
 5. Cover the opt-out with `_optout.contract(HOOK, DISABLE_VAR, BLOCKING, SAFE)` for a hook that blocks, or `_optout.drain(HOOK, DISABLE_VAR)` for one that only warns and needs its own cases. Do not re-copy the machinery — it was byte-identical in seven suites before 0.3.6 collapsed it.
 
@@ -27,10 +30,12 @@ An entry pointing at a missing directory breaks installation for everyone, so ad
 
 ```bash
 find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck
-cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done
+(cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done)
+for t in plugins/*/bin/*.test.py; do python3 "$t" || exit 1; done
 ```
 
 CI also lints and parses extensionless Bash entries under `plugins/*/bin/`; local verification must include any such entry changed by the contribution.
+`session-to-md.test.py` needs `node`, as the helper it tests does.
 
 A passing suite is not on its own evidence.
 Before claiming a suite covers the logic, remove that logic and confirm the suite fails: flip `exit 2` to `exit 0`, invert the comparison, or delete the reporting line.
