@@ -237,6 +237,10 @@ for label, command in (
     ("a read-only git behind exec", "exec git status"),
     ("a read-only git behind exec -a", "exec -a g git log -1"),
     ("exec that only redirects", "exec 3>&1"),
+    ("a read-only git after a quoted redirection target", 'git >"/tmp/out" status'),
+    ("a search term after a quoted redirection target", 'git >"/tmp/out" log --grep commit'),
+    ("a pathspec after a quoted redirection target", 'git >"/tmp/out" diff -- commit'),
+    ("a clobber redirection on a read-only git", "git log -1 >| out.txt"),
     # A function may be named exec: defining it runs nothing, and calling it
     # runs its body, not the builtin.
     ("a function named exec, defined only", 'exec() { git commit -m x; }; echo defined'),
@@ -473,6 +477,16 @@ for label, command in (
     ("commit after two redirections in one word", "git 2>err.txt> out.txt commit -m x"),
     ("commit after >& with a separate target", "git >& out.txt commit -m x"),
     ("commit after -C glued to a redirection", "git -C.>/dev/null commit -m x"),
+    # >| is the clobber redirection, and its target is a word like any other.
+    ("commit after a clobber redirection", "git >| out.txt commit -m x"),
+    ("commit after a glued clobber redirection", "git >|out.txt commit -m x"),
+    # A redirection with a quoted part is still removed by bash, so the word
+    # after it, or after its separate target, is the subcommand.
+    ("commit after a quoted redirection target", 'git >"/tmp/out" commit -m x'),
+    # command and builtin skip functions, so they reach the builtin exec even
+    # when a function of that name exists.
+    ("commit behind command exec past a function named exec", "exec() { :; }; command exec git commit -m x"),
+    ("commit behind builtin exec past a function named exec", "exec() { :; }; builtin exec git commit -m x"),
 ):
     rc, err = check_hook(command, continued_commit_repo)
     check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
@@ -493,6 +507,9 @@ for label, command, reason in (
     # Nor is a redirection with a quoted part stepped over: a quoted > at its
     # end is part of a file name, not an operator waiting for a target.
     ("a redirection target ending in a quoted >", 'sink=out; git >"${sink}>" commit -m x', "could not safely parse"),
+    # When the last > may be quoted, the next word may be git's own option
+    # rather than a target, so a commit anywhere after it is refused.
+    ("a quoted > before git's own options", 'sink=/tmp/out; git >"${sink}>" -C . commit -m x', "could not safely parse"),
     ("two redirections in one word with a quoted target", 'sink=/dev/null; git 2>"$sink"> /dev/null commit -m x', "could not safely parse"),
     # A word glued to a redirection whose target is the next word is not cut:
     # the target, here a file named commit, would be read as the subcommand.

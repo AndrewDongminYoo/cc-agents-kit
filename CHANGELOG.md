@@ -16,9 +16,9 @@ Entries are grouped by release; the topmost section collects work that has not y
 ### Fixed
 
 - `guard-hooks` 0.3.4 `staged-secret-guard` recognises a commit behind `exec`, and one whose subcommand follows a redirection.
-  `exec` is read past as `command` is, with its `-c`, `-l` and `-a NAME` options, so `exec git commit -m x` is scanned.
-  A redirection between `git` and its subcommand is stepped over, target and all, as the shell removes it, so `git >/dev/null commit`, `git 2>&1 commit`, `git > out.txt commit` and `git -C . 2>/dev/null commit` are scanned; a word glued to a redirection stays a word, so `git commit>out.txt` is scanned too.
-  A redirection with any quoted part is not stepped over, because quote removal loses which `>` was quoted (`-C"/a>b">/dev/null`, `>"${sink}>"`), and neither is a glued word whose target is the next word (`-C.> commit commit`); those are refused as before.
+  `exec` is read past as `command` is, with its `-c`, `-l` and `-a NAME` options, so `exec git commit -m x` is scanned, and so is `command exec` or `builtin exec` past a function named `exec`.
+  A redirection between `git` and its subcommand is stepped over, target and all, as the shell removes it, so `git >/dev/null commit`, `git 2>&1 commit`, `git >| out.txt commit`, `git > out.txt commit` and `git -C . 2>/dev/null commit` are scanned; a word glued to a redirection stays a word, so `git commit>out.txt` is scanned too.
+  Quote removal loses which `>` was quoted, so a redirection with a quoted part is stepped over only as far as is certain: `git >"/tmp/out" commit` is scanned, while one whose last operator may be quoted (`>"${sink}>"`), a `-C` value holding a quoted `>` (`-C"/a>b">/dev/null`), and a glued word whose target is the next word (`-C.> commit commit`) are refused when a commit follows.
   Each of these ran `git commit` unscanned before, with a credential staged.
   A command substitution inside double quotes (`out="$(git commit …)"`), runners such as `nohup`, `sudo` and `xargs`, and backticks remain unrecognised; #24 records why the double-quoted substitution is not a small change after the heredoc skip.
   Tracked as #24.

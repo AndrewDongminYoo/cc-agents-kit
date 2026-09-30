@@ -431,7 +431,9 @@ while ((command_pos < command_len)); do
         [[ -z "${HEREDOC_DELIMS[*]-}$heredoc_doubt" ]] || skip_heredoc_bodies
         ;;
       ";" | "|" | "&")
-        if [[ "$char" == "&" && -n "$prev_redirect" ]]; then
+        # `>|` is the clobber redirection, not a pipe, as `>&` is not a job.
+        if [[ "$char" == "&" && -n "$prev_redirect" ]] \
+          || [[ "$char" == "|" && -n "$prev_redirect" && "${COMMAND:command_pos-1:1}" == ">" ]]; then
           token="$token$char"
         else
           flush_token
@@ -785,9 +787,11 @@ while :; do
   # `exec` runs its words as a program, in place of the shell, as `command` does:
   # never a shell function. Its own options are -c and -l, which take nothing,
   # and -a, which takes the name to give the program. A function may itself be
-  # named exec, and then a definition is not a call and a call runs the body.
+  # named exec, and then a definition is not a call and a call runs the body,
+  # unless `command` or `builtin` came first, which skip functions.
   if ((at_command_start)) && [[ "$current" == "exec" && -z "${TOKEN_EXPANSION[token_index]-}" ]] \
-    && [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX(" && "$FUNC_NAME_SET" != *" exec "* ]]; then
+    && [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX(" ]] \
+    && [[ -z "$function_lookup" || "$FUNC_NAME_SET" != *" exec "* ]]; then
     exec_prefix=1
     function_lookup=""
     token_index=$((token_index + 1))
@@ -1230,21 +1234,40 @@ while :; do
       # one glued to a word before it is that word (`commit>out.txt`, `-C.>x`)
       # when its target is glued too. When the target is the next word, reading
       # the word alone would leave that target to be read as the subcommand
-      # (`-C.> commit commit`), so such a word is also left as before.
-      if [[ "${TOKEN_EXPANSION[scan_index]-}" != literal && "$current" == *[\<\>]* ]] \
-        && ((scan_index < orig_end)) && [[ "$QUOTED_TOKENS" != *" $scan_index "* ]]; then
+      # (`-C.> commit commit`), so such a word is also left as before. A word
+      # that starts like a redirection but has a quoted part (`>"/tmp/out"`) is
+      # still stepped over, but its last operator may be part of a quoted name
+      # (`>"${sink}>"`), and then the next word is git's, not a target: a
+      # `commit` anywhere after it is refused, and otherwise the next word is
+      # stepped over as the target it would be if the operator was real.
+      if [[ "${TOKEN_EXPANSION[scan_index]-}" != literal && "$current" == *[\<\>]* ]]; then
         redirect_word=${current%%[<>]*}
+        redirect_unsure=""
+        if ((scan_index >= orig_end)) || [[ "$QUOTED_TOKENS" == *" $scan_index "* ]]; then
+          redirect_unsure=1
+        fi
         if [[ -z "$redirect_word" || "$redirect_word" != *[!0-9]* ]]; then
           # Several can share a word (`2>"$sink">`): whether the next word is a
           # target depends on how the word ends, not on its first operator.
           scan_index=$((scan_index + 1))
-          if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& ]] \
+          if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]] \
             && [[ "${TOKENS[scan_index]-}" != "$BOUNDARY_PREFIX"* ]]; then
+            # Unsure, both readings stand: the next word is a target, or it
+            # starts git's own words (`-C . commit`). Any commit later in the
+            # command is refused rather than guessed at.
+            if [[ -n "$redirect_unsure" ]]; then
+              for ((lookahead = scan_index; lookahead < token_count; lookahead++)); do
+                [[ "${TOKENS[lookahead]}" != "$BOUNDARY_PREFIX"* ]] || break
+                if [[ "${TOKENS[lookahead]}" == commit ]]; then
+                  [[ -z "$indirect" ]] || block_indirect_commit
+                  block_unparsed
+                fi
+              done
+            fi
             scan_index=$((scan_index + 1))
           fi
           continue
-        fi
-        if [[ "$current" != *[\<\>] && "$current" != *[\<\>]\& ]]; then
+        elif [[ -z "$redirect_unsure" && "$current" != *[\<\>] && "$current" != *[\<\>]\& && "$current" != *\>\| ]]; then
           current=$redirect_word
         fi
       fi
