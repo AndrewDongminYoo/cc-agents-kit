@@ -248,6 +248,8 @@ for label, command in (
     ("a read-only git behind exec -a with its name attached", "exec -afoo git log -1"),
     ("a redirection before a read-only git", "2>/dev/null git log -1"),
     ("a redirection with a separate target before a read-only git", "2> /dev/null git log -1"),
+    ("a command substitution target after a read-only git's subcommand", "git log -1 > $(echo f)"),
+    ("a function without git given a process substitution target", 'g() { echo "$@"; }; g > >(cat) hi'),
     # A function may be named exec: defining it runs nothing, and calling it
     # runs its body, not the builtin.
     ("a function named exec, defined only", 'exec() { git commit -m x; }; echo defined'),
@@ -500,6 +502,12 @@ for label, command in (
     ("commit behind exec -a with its name attached", "exec -afoo git commit -m x"),
     ("commit behind exec -la with its name attached", "exec -lafoo git commit -m x"),
     ("commit behind exec -a with an attached name ending in a", "exec -afooa git commit -m x"),
+    # A function's arguments lose their redirections too, so none narrows the scan to a path.
+    ("commit through a function with an &> redirection", 'g() { git "$@"; }; g commit -m x &>/dev/null'),
+    ("commit through a function with a separate &> target", 'g() { git "$@"; }; g commit -m x &> /dev/null'),
+    ("commit through a function with a separate >| target", 'g() { git "$@"; }; g commit -m x >| /dev/null'),
+    ("commit through a function with a {varname} redirection", 'g() { git "$@"; }; g commit -m x {fd}>/dev/null'),
+    ("commit through a function after a closed descriptor", 'g() { git "$@"; }; g 2>&- commit -m x'),
     ("commit after -C's glued path runs into an &> redirection", "git -C.&>/dev/null commit -m x"),
     # A redirection with a quoted part is still removed by bash, so the word
     # after it, or after its separate target, is the subcommand.
@@ -551,9 +559,14 @@ for label, command, reason in (
     ("an alias commit after a redirection where -C's path should be", "git -C >/dev/null . -c alias.ci=commit ci -m x", "could not safely parse"),
     ("git after a process substitution target before the program", "> >(cat) git -c alias.ci=commit ci -m x", "could not safely parse"),
     ("git after exec -a whose name is a redirection", "exec -a >/dev/null git-commit git -m x", "could not safely parse"),
+    ("a commit after a command substitution target", "git > $(echo f) commit -m x", "could not safely parse"),
+    ("git after a command substitution target before the program", "> $(echo f) git commit -m x", "could not safely parse"),
+    ("a commit through a function after a process substitution target", 'g() { git "$@"; }; g > >(cat) commit -m x', "unquoted expansion"),
+    ("a commit through a function after a command substitution target", 'g() { git "$@"; }; g > $(echo f) commit -m x', "unquoted expansion"),
     ("git after a redirection and exec -a under a git- name", "exec >/dev/null -a git-commit git -m x", "could not safely parse"),
     ("git after a quoted redirection before the program", 'sink=/dev/null; >"${sink}>" git log -1', "could not safely parse"),
     ("git glued to a redirection whose target is the next word", "git> /dev/null commit -m x", "could not safely parse"),
+    ("git glued to a command substitution target", "git>$(echo f) commit -m x", "could not safely parse"),
     # Among commit's own arguments, &> is refused as > always was.
     ("an &> redirection glued to commit", "git commit&>/dev/null -m x", "could not safely parse"),
     ("two redirections in one word with a quoted target", 'sink=/dev/null; git 2>"$sink"> /dev/null commit -m x', "could not safely parse"),

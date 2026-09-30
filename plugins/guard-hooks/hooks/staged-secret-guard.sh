@@ -866,12 +866,18 @@ while :; do
             ;;
         esac
       fi
+      # A target that runs on into a command substitution (`> $(echo f)`).
+      case "${TOKENS[next_index]-}" in
+        "$BOUNDARY_PREFIX\$("*) refuse_git_ahead "$next_index" ;;
+      esac
       token_index=$next_index
       continue
     fi
     # A program glued to a redirection (`git>out commit`) is that program, and
-    # its target is glued too unless the word ends in an operator.
-    if [[ "$QUOTED_TOKENS" == *" $token_index "* || "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]]; then
+    # its target is glued too unless the word ends in an operator or runs on
+    # into a command substitution (`git>$(echo f)`).
+    if [[ "$QUOTED_TOKENS" == *" $token_index "* || "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]] \
+      || [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX\$("* ]]; then
       [[ "${redirect_word##*/}" != git && "$redirect_word" != *'$'* ]] || block_unparsed
     else
       current=$redirect_word
@@ -1076,28 +1082,43 @@ while :; do
     # is not one of them: bash sets it up and removes it, target and all,
     # wherever it stands, so `g >/dev/null commit -m x` runs g with `commit -m
     # x`. A word is cut at its first < or >, and what came before stays unless
-    # it only numbers a descriptor (`2>err`); an operator with nothing after it
-    # takes the next word as its target.
+    # it only names a descriptor (`2>err`, `{fd}>err`) or is the & of `&>`; an
+    # operator with nothing after it (`>`, `>&`, `>|`) takes the next word as
+    # its target.
     CALL_WORDS=()
     CALL_KINDS=()
     redirect_target=""
+    redirect_last=""
     for ((arg_index = token_index + 1; arg_index < call_end; arg_index++)); do
       arg_word=${TOKENS[arg_index]}
       arg_kind=${TOKEN_EXPANSION[arg_index]-}
       if [[ -n "$redirect_target" ]]; then
         redirect_target=""
+        redirect_last=$arg_index
         continue
       fi
       if [[ "$arg_kind" != literal && "$arg_word" == *[\<\>]* ]]; then
+        redirect_last=$arg_index
         redirect_op=${arg_word#*[<>]}
-        [[ "$redirect_op" == *[!\<\>\&-]* ]] || redirect_target=1
+        [[ "$redirect_op" == *[!\<\>\&\|]* ]] || redirect_target=1
         arg_word=${arg_word%%[<>]*}
-        [[ "$arg_word" == *[!0-9]* ]] || continue
+        if [[ "$arg_word" != *[!0-9]* || "$arg_word" == "&" ]] || [[ "$arg_word" =~ $FD_VARNAME ]]; then
+          continue
+        fi
       fi
       CALL_WORDS+=("$arg_word")
       CALL_KINDS+=("$arg_kind")
     done
     call_count=${#CALL_WORDS[@]}
+    # A target that is a process or command substitution (`g > >(cat) commit`,
+    # `g > $(echo f) commit`, tokenized with the parenthesis apart) ends the
+    # words here, so those after it are not known.
+    call_unplaced=""
+    case "${TOKENS[call_end]-}" in
+      "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX\$("*)
+        [[ -z "$redirect_target" && "$redirect_last" != $((call_end - 1)) ]] || call_unplaced=1
+        ;;
+    esac
     # The first of the call's words that can split into several. Up to it each
     # word is exactly one positional parameter; from it on, which word lands in
     # which parameter is unknown.
@@ -1122,6 +1143,7 @@ while :; do
       # of its own. In any of those the expansions are left unresolved, and the
       # parse refuses what it cannot place.
       substitute=1
+      [[ -z "$call_unplaced" ]] || substitute=""
       for ((body_index = body_start; body_index < body_end; body_index++)); do
         case "${TOKENS[body_index]}" in
           shift | function) substitute="" ;;
@@ -1373,6 +1395,15 @@ while :; do
             [[ -z "$redirect_unsure" ]] || refuse_commit_ahead "$scan_index"
             scan_index=$((scan_index + 1))
           fi
+          # A target that runs on into a command substitution (`> $(echo f)`,
+          # tokenized as `$` then the substitution) ends where this parse does
+          # not follow.
+          case "${TOKENS[scan_index]-}" in
+            "$BOUNDARY_PREFIX\$("*)
+              refuse_commit_ahead "$scan_index"
+              break
+              ;;
+          esac
           continue
         elif [[ -z "$redirect_unsure" && "$current" != *[\<\>] && "$current" != *[\<\>]\& && "$current" != *\>\| ]]; then
           current=$redirect_word
