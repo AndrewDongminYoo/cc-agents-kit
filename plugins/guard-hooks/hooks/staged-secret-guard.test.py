@@ -661,6 +661,26 @@ try:
 except subprocess.TimeoutExpired:
     check("many calls in a long command finish within the hook timeout", False, "timed out")
 
+# The tokenizer reads bytes whatever the caller's locale, because under a
+# multibyte one each character read walks the command from its start: this
+# 22 KB command took 6 s under en_US.UTF-8 and 1 s under C.
+UTF8 = dict(os.environ)
+UTF8["LC_ALL"] = UTF8["LANG"] = "en_US.UTF-8" if os.uname().sysname == "Darwin" else "C.UTF-8"
+long_line = "echo " + " ".join(f"word{i}" for i in range(2600))
+try:
+    rc, _ = check_hook(long_line, plain, env=UTF8, timeout=4)
+    check("a long command under a UTF-8 locale finishes in bytes' time", rc == 0, f"exit={rc}")
+except subprocess.TimeoutExpired:
+    check("a long command under a UTF-8 locale finishes in bytes' time", False, "timed out")
+# Reading bytes must not change what a multibyte command means.
+for label, command in (
+    ("commit whose message is multibyte", 'git commit -m "한국어 메시지 ✓"'),
+    ("commit after a skipped multibyte body", "cat > k.md <<'EOF'\n한국어 본문입니다 — 예시\nEOF\ngit commit -m x"),
+    ("commit after a multibyte word in a chain", 'echo "한글" && git commit -m x'),
+):
+    rc, err = check_hook(command, continued_commit_repo, env=UTF8)
+    check(f"{label}, under a UTF-8 locale, scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
 # The token budget is what bounds functions that multiply their arguments in a
 # cycle: each is only one deep in its own body, so the recursion bound lets all
 # three through eight times over, and without the budget this ran past 30 s.
