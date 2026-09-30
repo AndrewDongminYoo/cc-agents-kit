@@ -1,6 +1,6 @@
 ---
 name: fix-osv-vulnerabilities
-description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn project and you need to triage and fix them.
+description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn or Bundler project and you need to triage and fix them.
 metadata:
   category: dependencies
 ---
@@ -10,7 +10,7 @@ metadata:
 ## Overview
 
 For each reported GHSA, check if a patched version exists via the GitHub Advisory API.
-If a patch exists → upgrade via package manager overrides or direct dependency bump.
+If a patch exists → upgrade via package manager overrides or direct dependency bump; where the manager has no overrides (Bundler), bump the parent that pins the vulnerable package.
 If no compatible reachable patch exists → collect reachability evidence and request a suppression decision.
 
 ## Workflow
@@ -23,8 +23,8 @@ digraph fix_osv {
     "Reachability evidence collected?" [shape=diamond];
     "Explicit suppression approval?" [shape=diamond];
     "Is it a direct dependency?" [shape=diamond];
-    "Bump version in package.json" [shape=box];
-    "Add/update overrides (or resolutions)" [shape=box];
+    "Bump the direct dependency (package.json or Gemfile)" [shape=box];
+    "Override it (pnpm/npm/yarn) or bump the parent that pins it (Bundler)" [shape=box];
     "Add IgnoredVulns entry to osv-scanner.toml" [shape=box];
     "Run install + verify build" [shape=box];
 
@@ -36,10 +36,10 @@ digraph fix_osv {
     "Reachability evidence collected?" -> "Stop and report" [label="no"];
     "Explicit suppression approval?" -> "Add IgnoredVulns entry to osv-scanner.toml" [label="yes"];
     "Explicit suppression approval?" -> "Stop and report" [label="no"];
-    "Is it a direct dependency?" -> "Bump version in package.json" [label="yes"];
-    "Is it a direct dependency?" -> "Add/update overrides (or resolutions)" [label="no, transitive"];
-    "Bump version in package.json" -> "Run install + verify build";
-    "Add/update overrides (or resolutions)" -> "Run install + verify build";
+    "Is it a direct dependency?" -> "Bump the direct dependency (package.json or Gemfile)" [label="yes"];
+    "Is it a direct dependency?" -> "Override it (pnpm/npm/yarn) or bump the parent that pins it (Bundler)" [label="no, transitive"];
+    "Bump the direct dependency (package.json or Gemfile)" -> "Run install + verify build";
+    "Override it (pnpm/npm/yarn) or bump the parent that pins it (Bundler)" -> "Run install + verify build";
     "Add IgnoredVulns entry to osv-scanner.toml" -> "Run install + verify build";
 }
 ```
@@ -129,6 +129,62 @@ Bump the version in the relevant workspace `package.json` directly:
 }
 ```
 
+A gem declared in a Gemfile follows the Bundler section below.
+
+### Bundler: direct and transitive gems
+
+Bundler has no overrides, so a gem moves only as far as every requirement on it allows: the Gemfile's, if the gem is declared there, and each parent's in `Gemfile.lock`, where a parent's requirement is the indented line under the parent's own entry (`rubyzip (>= 2.0.0, < 3.0.0)` under `fastlane (2.238.0)`).
+The resolver intersects them, so one requirement that excludes the patch blocks it however many others admit it.
+List them all before deciding anything:
+
+```bash
+awk '/^    [^ ]/{p=$1} /^      <gem>( |$)/{print p": "$0}' Gemfile.lock   # every parent and its requirement
+grep -rn --include=Gemfile --include='*.gemspec' --exclude-dir=vendor '<gem>' .   # a direct declaration, if any
+```
+
+A Gemfile that says `gemspec` takes its direct dependencies from the `.gemspec` (`add_dependency`), and the lockfile then lists the local gem itself as a parent; that requirement is edited in the gemspec, not looked up on rubygems.org.
+
+One requirement per parent is normal, not the rule: `faraday` had eight parents in a fastlane-only lockfile.
+A Gemfile constraint that excludes the patch is a direct-dependency bump: edit it.
+For each parent whose requirement excludes the patch, find the first release of that parent whose requirement admits it.
+The lookup below is for parents listed in `Gemfile.lock` under a `GEM` section with `remote: https://rubygems.org/`; a parent under `GIT`, `PATH` or another `remote:` is a shape this procedure does not name, so handle it as the closing paragraph says rather than querying rubygems.org, which knows nothing about that source.
+List every stable release oldest first, then query each one above the locked version until the requirement changes:
+
+```bash
+gh api -X GET https://rubygems.org/api/v1/versions/<parent>.json --jq '[.[] | select(.prerelease | not) | .number] | reverse | .[]'
+gh api -X GET https://rubygems.org/api/v2/rubygems/<parent>/versions/<version>.json \
+  --jq '.ruby_version, (.dependencies.runtime[] | select(.name=="<gem>") | .requirements)'
+```
+
+Do not cut the list short: the endpoint returns every release (570 stable ones for `fastlane` on 2026-09-30), and the transition can sit anywhere above the locked version.
+Keep reading past the first release that admits the patch, because a later one can tighten the requirement again, and the release you finally resolve to is the one that has to admit it.
+
+GHSA-47m2-wp7j-p9vc (`rubyzip < 3.4.0`) was held by `fastlane` 2.238.0 and 2.239.0 at `< 3.0.0`; `fastlane` 2.240.0 raised its own requirement to `>= 3.4.0, < 4.0.0`, so the fix was a parent bump with no Gemfile edit.
+If any blocking parent has no release that admits the patch, continue to Step 2b.
+
+Update the vulnerable gem and every blocking parent in one resolve, without installing:
+
+```bash
+BUNDLE_GEMFILE=/abs/path/Gemfile bundle lock --update <gem> <each blocking parent> --conservative
+```
+
+Name the gem even when a parent bump seems enough. `--conservative` holds every gem not on the command line at its locked version unless a requirement forces it off, so a parent whose new requirement admits the patch but still admits the locked vulnerable version (`>= 2.0.0, < 4.0.0` instead of `>= 3.4.0`) leaves the gem where it is.
+The fastlane case needed only the parent because 2.240.0 forced `rubyzip` off 2.4.1; do not rely on that.
+
+Every gem named on the command line moves to the newest release its requirements admit, not to the release you selected: `--update` defaults to `--major` (the fastlane case landed on 2.240.1, not 2.240.0, and `rubyzip` on 3.7.0, not 3.4.0).
+Read which versions the lockfile now names for each gem you named, and check those releases.
+Where one went further than you want, narrow that gem's own constraint in the Gemfile before running the command (`gem "fastlane", "~> 2.240.0"`; for a transitive gem, declaring it there makes it direct).
+Do not reach for `--patch` or `--minor` with `--strict` instead: the level applies to every named gem at once, and the gem and its parent usually need different levels (`--minor --strict` would have blocked the required `rubyzip` 2.x → 3.x move).
+If the Gemfile's own constraint on a parent excludes the release it needs, edit that constraint too.
+
+This is a triage procedure, not a model of Bundler's resolver.
+When the lockfile shows a shape it does not name, resolve with Bundler itself (`bundle lock --update … --print` shows the result without writing it) and report what it chose, rather than extending this list.
+
+- **Every lockfile is a separate alert and a separate fix.** A mobile app can carry one Gemfile per platform (`android/Gemfile` and `ios/Gemfile`, each only for fastlane), so the same GHSA arrives twice. Update each; compare the two lockfiles afterwards, since they should differ only where the Gemfiles do.
+- **Read the diff for what else moved.** A parent bump carries its other requirement changes with it (the fastlane bump above also added `cgi` and moved `security` 0.1.5 → 0.3.0, which is a boundary crossing under the 0.x rule above).
+- **Check the Ruby floor.** Compare the `ruby_version` of every gem the lockfile moved against each place that picks the Ruby: `.ruby-version`, a `RUBY VERSION` section in the lockfile, and `ruby-version` in any CI workflow that runs the tool.
+- **Load it, then say what did not run.** After `bundle install`, confirm the resolved version with `grep -n '^    <gem> (' <each Gemfile.lock>` and load it through the bundle by the path its consumers require, which need not be the gem name (`BUNDLE_GEMFILE=… bundle exec ruby -e 'require "zip"'` for `rubyzip`; 2.x ships no `rubyzip.rb`, so `require "rubyzip"` is a `LoadError` there and loads only from 3.x). `fastlane lanes` proves only that the Fastfile parses; the actions that use the moved gem (uploads, archive handling, keychain access) run only in a real lane, which has external impact, so report them as unexercised instead of running one.
+
 ### Apply and verify
 
 ```bash
@@ -156,6 +212,10 @@ Map each override to a check that actually executes it, rather than assuming `pn
 | Script runner (`esbuild` via tsx)    | the test/script command that runs through `tsx` |
 
 Gotcha: `trunk check`'s osv-scanner cache can report a false green after edits — `touch` the lockfiles to bust the cache before trusting a clean run (Dependabot is the independent oracle when in doubt).
+
+To make that green fail first on the pre-fix tree, pass `--show-existing` and read the output, not the exit code.
+Trunk holds the line against upstream, so a vulnerability already on the base branch is an "existing issue": in a worktree of the pre-fix commit, `trunk check --no-fix --filter=osv-scanner Gemfile.lock` printed `1 existing issue` and `✔ No new issues` and exited 0; only `--show-existing` printed the GHSA line, and that run exited 0 too.
+Pin the pre-fix tree by SHA (`git worktree add --detach <dir> <sha>`), never `HEAD`: a parallel commit can move `HEAD` past the fix between two commands, and a "pre-fix" copy taken from it is already fixed and scans clean for the right reason.
 
 ## Step 2b — No compatible reachable patch: request a suppression decision
 
