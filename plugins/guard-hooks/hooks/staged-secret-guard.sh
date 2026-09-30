@@ -139,17 +139,15 @@ flush_token() {
 # duplication, each delimiter is quoted and parses completely, and each
 # terminator line is found. Any doubt reads the bodies as before, where the cost
 # is a refusal. An unquoted delimiter leaves the body's $(...) and backticks to
-# run. Top level is checked on the tokens before the heredoc, not by naming each
-# context that can reach one: every command there has to start with a literal
-# program name (after any NAME=value), and none of them may be a group, branch,
-# loop, function, exec, coproc, eval, source, trap, or a builtin that can make
-# `cat` something else (alias, hash, enable, builtin, command); no token may
-# hold a parenthesis or substitution boundary, a backtick, `${` or a newline, or
-# name PATH at all (`read -r PATH`, `printf -v PATH`, `path+=`), however it is
-# then assigned. Reviews found each of those reaching a heredoc one at a time:
+# run. Top level is checked on the tokens before the heredoc, against a short
+# allowlist rather than a list of dangers: every command there has to be one of
+# a few programs that cannot change how the shell finds `cat` (after any
+# NAME=value whose name does not end in PATH), and no token may hold a
+# parenthesis or substitution boundary, a backtick, `${` or a newline, or name
+# PATH. Reviews found a new way in each round while this was a denylist:
 # `{ cat <<'X' … } | bash`, `` eval ` ``, `hash -p /bin/bash cat`, `cat ${v:-
-# <<'X'}`. Checking tokens rather than the raw text also keeps prose in a body
-# that says "commit hash" from counting.
+# <<'X'}`, `read -r PATH`, zsh's `autoload cat` from FPATH. Checking tokens
+# rather than the raw text also keeps prose in a body from counting.
 heredoc_skip_ok=1
 HEREDOC_DELIMS=()
 HEREDOC_TABS=()
@@ -224,17 +222,29 @@ note_heredoc() {
     esac
     [[ -n "$at_start" ]] || continue
     if [[ -z "${TOKEN_EXPANSION[index]-}" && "$word" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      # A variable the shell looks commands up through (PATH, FPATH, zsh's
+      # path and fpath) can make `cat` something else.
+      case "${word%%=*}" in
+        *[Pp][Aa][Tt][Hh])
+          heredoc_doubt=1
+          return
+          ;;
+      esac
       continue
     fi
-    # A program name is a plain word: this rules out `!`, a leading
-    # redirection, `[[` and `((`, whose effect on what follows is not read here.
-    if [[ -n "${TOKEN_EXPANSION[index]-}" || ! "$word" =~ ^[A-Za-z0-9_][A-Za-z0-9_./+-]*$ ]]; then
+    if [[ -n "${TOKEN_EXPANSION[index]-}" ]]; then
       heredoc_doubt=1
       return
     fi
+    # Only programs that cannot change how this shell finds `cat` may run before
+    # the heredoc: external ones, and builtins that change no state. A list of
+    # the shell features that can (alias, hash, rehash, autoload with FPATH,
+    # enable, read or printf -v into PATH, …) kept growing under review, so
+    # anything not named here, including `!`, a redirection or `[[`, keeps the
+    # body read.
     case "$word" in
-      if | then | else | elif | do | while | until | for | case | select | function | exec | coproc | time \
-        | eval | source | trap | alias | hash | rehash | unhash | enable | builtin | command)
+      cat | tee | mkdir | touch | rm | ls | git | echo | pwd | true) ;;
+      *)
         heredoc_doubt=1
         return
         ;;

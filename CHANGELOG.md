@@ -17,7 +17,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 - `guard-hooks` 0.3.2 `staged-secret-guard` no longer reads a heredoc body as commands where nothing can run it.
   Writing a script or a Makefile through a heredoc (`cat > r.sh <<'X'` with `$GIT commit` inside) was refused although the file is only being written, even with a clean index.
-  A body is now skipped as data only when it is fed to a literal `cat` or `tee` with a quoted delimiter, after nothing but plain words and separators; the full set of conditions is under Known limits in the README.
+  A body is now skipped as data only when it is fed to a literal `cat` or `tee` with a quoted delimiter, after nothing but a short allowlist of programs that cannot change how the shell finds `cat`; the full set of conditions is under Known limits in the README.
   Every other body is still read as commands, because reading it is what catches a commit in `bash <<X`, `cat <<X | sh`, `cat <<X > >(sh)`, `{ cat <<'X' … } | bash`, `` eval ` `` or `eval $(` around a `cat <<'X'`, a `$(…)` inside an unquoted `cat <<X` body, a `cat <<'Y'` nested in a body that is itself run, and a `cat` repointed by `hash -p`, however `hash` is spelled.
   The quote-state conditions exist because the tokenizer can disagree with the shell: in `eval "$( # "` the `"` sits in a comment for zsh and bash 5, which run the following `cat <<'Y'` body, while the tokenizer took it as the closing quote.
   The two costs are listed under Known limits: a script written through `cat` is no longer scanned when it later runs, and a heredoc inside a double-quoted substitution is still read as commands.

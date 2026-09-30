@@ -540,6 +540,8 @@ for label, command in (
     # The skip is counted in characters, as the tokenizer reads them.
     # Those words only count at a command's start, not in a body's prose.
     ("a body whose prose names hash, enable and alias", "cat > m.txt <<'X'\nrecord the commit hash; enable it with an alias\n$GIT commit -m x\nX"),
+    # The shape agents write: a variable, a directory, then the file.
+    ("a file written after an assignment and mkdir", "S=/tmp/x\nmkdir -p \"$S\"\ncat > \"$S/m.txt\" <<'X'\n$GIT commit -m x\nX"),
     ("a multibyte body, then a read-only command", "cat > k.md <<'EOF'\n한국어 본문 예시\n$GIT commit -m x\nEOF\ngit status"),
 ):
     rc, err = check_hook(command, plain)
@@ -604,6 +606,10 @@ for label, command in (
     # PATH can be set by a builtin that names it, and zsh's rehash applies it.
     ("a heredoc fed to cat after read sets PATH", "read -r PATH <<< /tmp/evil; rehash; cat <<'X'\n$GIT commit -m x\nX"),
     ("a heredoc fed to cat after printf -v sets PATH", "printf -v PATH %s /tmp/evil\ncat <<'X'\n$GIT commit -m x\nX"),
+    # zsh can autoload a function named cat from FPATH; only programs on a
+    # short list may run before a skipped heredoc, and autoload is not one.
+    ("a heredoc fed to cat after FPATH and autoload", "FPATH=/tmp/fns; autoload cat; cat <<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc fed to cat after autoload alone", "autoload cat\ncat <<'X'\n$GIT commit -m x\nX"),
     # A string that spans lines is where a drifted quote state shows, so a
     # heredoc after one is read even when, as here, nothing would run it.
     ("a heredoc after a string that spans lines", 'echo "a\nb"\ncat > f.sh <<\'X\'\n$GIT commit -m x\nX'),
