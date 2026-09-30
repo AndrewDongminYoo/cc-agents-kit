@@ -56,6 +56,24 @@ block_indirect_commit() {
   exit 2
 }
 
+# A redirection this parse does not follow (a process substitution target, one
+# where -C's value should be, one after exec, one whose quoting is unsure) sits
+# where git's words are read, so the words after it cannot be placed. Rather
+# than guess, a `commit` anywhere later in the same command is refused; the
+# search crosses parentheses and stops at the next ;, | or &.
+refuse_commit_ahead() {
+  local ahead
+  for ((ahead = $1; ahead < token_count; ahead++)); do
+    case "${TOKENS[ahead]}" in
+      "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&") return 0 ;;
+      commit)
+        [[ -z "$indirect" ]] || block_indirect_commit
+        block_unparsed
+        ;;
+    esac
+  done
+}
+
 unsafe_value() {
   [[ "$1" == *'$'* || "$1" == *'`'* || "$1" == *'<'* || "$1" == *'>'* ]]
 }
@@ -431,10 +449,17 @@ while ((command_pos < command_len)); do
         [[ -z "${HEREDOC_DELIMS[*]-}$heredoc_doubt" ]] || skip_heredoc_bodies
         ;;
       ";" | "|" | "&")
-        # `>|` is the clobber redirection, not a pipe, as `>&` is not a job.
+        # `>|` is the clobber redirection, not a pipe, as `>&` is not a job, and
+        # `&>` and `&>>` redirect both streams, and end the word before them
+        # (`commit&>x` is `commit` then `&>x`). `&&>x` then reads as `&` and
+        # `&>x`, which starts the next command with a redirection all the same.
         if [[ "$char" == "&" && -n "$prev_redirect" ]] \
           || [[ "$char" == "|" && -n "$prev_redirect" && "${COMMAND:command_pos-1:1}" == ">" ]]; then
           token="$token$char"
+        elif [[ "$char" == "&" && "${COMMAND:command_pos+1:1}" == ">" ]]; then
+          flush_token
+          token="$char"
+          token_started=1
         else
           flush_token
           TOKENS+=("$BOUNDARY_PREFIX$char")
@@ -796,6 +821,12 @@ while :; do
     function_lookup=""
     token_index=$((token_index + 1))
     continue
+  fi
+  # A redirection before the program (`>/dev/null git commit`, `exec 3>&1 git
+  # commit`) is removed by the shell; where the program then stands is not
+  # followed here.
+  if ((at_command_start)) && [[ "${TOKEN_EXPANSION[token_index]-}" != literal && "$current" == *[\<\>]* ]]; then
+    refuse_commit_ahead "$token_index"
   fi
   if ((at_command_start)) && [[ -n "$exec_prefix" ]]; then
     case "$current" in
@@ -1246,24 +1277,31 @@ while :; do
         if ((scan_index >= orig_end)) || [[ "$QUOTED_TOKENS" == *" $scan_index "* ]]; then
           redirect_unsure=1
         fi
-        if [[ -z "$redirect_word" || "$redirect_word" != *[!0-9]* ]]; then
+        if [[ -z "$redirect_word" || "$redirect_word" == "&" || "$redirect_word" != *[!0-9]* ]]; then
           # Several can share a word (`2>"$sink">`): whether the next word is a
           # target depends on how the word ends, not on its first operator.
           scan_index=$((scan_index + 1))
-          if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]] \
-            && [[ "${TOKENS[scan_index]-}" != "$BOUNDARY_PREFIX"* ]]; then
+          if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]]; then
+            # A target that is a process or command substitution
+            # (`> >(cat)`, tokenized as `>` then a parenthesis) spans several
+            # tokens; where it ends is not followed here.
+            case "${TOKENS[scan_index]-}" in
+              "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX\$("*)
+                refuse_commit_ahead "$scan_index"
+                break
+                ;;
+              "<" | ">")
+                if [[ "${TOKENS[scan_index + 1]-}" == "$BOUNDARY_PREFIX("* ]]; then
+                  refuse_commit_ahead "$scan_index"
+                  break
+                fi
+                ;;
+              "$BOUNDARY_PREFIX"*) continue ;;
+            esac
             # Unsure, both readings stand: the next word is a target, or it
             # starts git's own words (`-C . commit`). Any commit later in the
             # command is refused rather than guessed at.
-            if [[ -n "$redirect_unsure" ]]; then
-              for ((lookahead = scan_index; lookahead < token_count; lookahead++)); do
-                [[ "${TOKENS[lookahead]}" != "$BOUNDARY_PREFIX"* ]] || break
-                if [[ "${TOKENS[lookahead]}" == commit ]]; then
-                  [[ -z "$indirect" ]] || block_indirect_commit
-                  block_unparsed
-                fi
-              done
-            fi
+            [[ -z "$redirect_unsure" ]] || refuse_commit_ahead "$scan_index"
             scan_index=$((scan_index + 1))
           fi
           continue
@@ -1273,6 +1311,11 @@ while :; do
       fi
       case "$current" in
         -C)
+          # A redirection where -C's path should be (`-C >out . commit`) is
+          # removed by the shell, and the path is the word after it.
+          if [[ "${TOKEN_EXPANSION[scan_index + 1]-}" != literal && "${TOKENS[scan_index + 1]-}" == *[\<\>]* ]]; then
+            refuse_commit_ahead "$((scan_index + 1))"
+          fi
           if ((scan_index + 1 < token_count)) && [[ "${TOKENS[scan_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
             unsafe_value "${TOKENS[scan_index + 1]}" && pending_block=1
             [[ "${TOKEN_EXPANSION[scan_index + 1]-}" != split* ]] || split_risk=1

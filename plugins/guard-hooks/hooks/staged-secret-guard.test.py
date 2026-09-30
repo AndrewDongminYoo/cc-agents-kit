@@ -241,6 +241,11 @@ for label, command in (
     ("a search term after a quoted redirection target", 'git >"/tmp/out" log --grep commit'),
     ("a pathspec after a quoted redirection target", 'git >"/tmp/out" diff -- commit'),
     ("a clobber redirection on a read-only git", "git log -1 >| out.txt"),
+    ("an &> redirection on a read-only git", "git log -1 &>/dev/null && echo ok"),
+    ("&& straight before a redirection", "true &&>/dev/null git status"),
+    ("a process substitution target on a read-only git", "git > >(cat) log -1"),
+    ("exec with a redirection before a read-only program", "exec 3>&1 ls"),
+    ("a redirection before a read-only git", "2>/dev/null git log -1"),
     # A function may be named exec: defining it runs nothing, and calling it
     # runs its body, not the builtin.
     ("a function named exec, defined only", 'exec() { git commit -m x; }; echo defined'),
@@ -480,6 +485,10 @@ for label, command in (
     # >| is the clobber redirection, and its target is a word like any other.
     ("commit after a clobber redirection", "git >| out.txt commit -m x"),
     ("commit after a glued clobber redirection", "git >|out.txt commit -m x"),
+    # &> and &>> redirect both streams; the & is not a background job.
+    ("commit after an &> redirection", "git &>out.txt commit -m x"),
+    ("commit after an &>> redirection with a separate target", "git &>> out.txt commit -m x"),
+    ("commit after -C's glued path runs into an &> redirection", "git -C.&>/dev/null commit -m x"),
     # A redirection with a quoted part is still removed by bash, so the word
     # after it, or after its separate target, is the subcommand.
     ("commit after a quoted redirection target", 'git >"/tmp/out" commit -m x'),
@@ -510,6 +519,14 @@ for label, command, reason in (
     # When the last > may be quoted, the next word may be git's own option
     # rather than a target, so a commit anywhere after it is refused.
     ("a quoted > before git's own options", 'sink=/tmp/out; git >"${sink}>" -C . commit -m x', "could not safely parse"),
+    # Where a redirection is not followed, a commit after it is refused.
+    ("a commit after exec and a redirection", "exec 3>&1 git commit -m x", "could not safely parse"),
+    ("a redirection where -C's path should be", "git -C >out . commit -m x", "could not safely parse"),
+    ("a commit after a process substitution target", "git > >(cat) commit -m x", "could not safely parse"),
+    ("a redirection before git", ">/dev/null git commit -m x", "could not safely parse"),
+    ("a redirection straight after &&, before git", "true &&>/dev/null git commit -m x", "could not safely parse"),
+    # Among commit's own arguments, &> is refused as > always was.
+    ("an &> redirection glued to commit", "git commit&>/dev/null -m x", "could not safely parse"),
     ("two redirections in one word with a quoted target", 'sink=/dev/null; git 2>"$sink"> /dev/null commit -m x', "could not safely parse"),
     # A word glued to a redirection whose target is the next word is not cut:
     # the target, here a file named commit, would be read as the subcommand.
