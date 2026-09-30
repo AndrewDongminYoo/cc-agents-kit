@@ -340,6 +340,15 @@ skip_heredoc_bodies() {
   heredoc_doubt=""
   heredoc_start=""
 }
+# The loop below reads one character at a time with ${COMMAND:pos:1}, and under
+# a multibyte locale, the macOS default, each read walks the string from its
+# start: a 59 KB command took 45 s under en_US.UTF-8 against 10 s under C, well
+# past the hook's 10 s timeout, where it fails open. Every delimiter the loop
+# looks for is ASCII and no byte of a multibyte UTF-8 character equals one, so
+# reading bytes finds the same tokens. The locale is restored after the loop.
+lc_all_was_set=${LC_ALL+set}
+saved_lc_all=${LC_ALL-}
+LC_ALL=C
 command_len=${#COMMAND}
 command_pos=0
 while ((command_pos < command_len)); do
@@ -480,6 +489,7 @@ while ((command_pos < command_len)); do
   fi
   ((command_pos += 1))
 done
+if [[ -n "$lc_all_was_set" ]]; then LC_ALL=$saved_lc_all; else unset LC_ALL; fi
 [[ -z "$quote" && -z "$escaped" ]] || TOKENIZATION_ERROR=1
 flush_token
 

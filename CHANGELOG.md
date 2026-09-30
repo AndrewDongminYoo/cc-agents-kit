@@ -15,6 +15,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Fixed
 
+- `guard-hooks` 0.3.3 `staged-secret-guard` tokenizes a command in bytes whatever the caller's locale.
+  Its tokenizer reads one character at a time, and under a multibyte locale, the macOS default, each read walked the command from its start, so a large command ran past the hook's 10 s timeout, where it fails open: a 59 KB command took 45 s under `en_US.UTF-8` against 10 s under `C`, and a 22 KB one took 6 s against 1 s.
+  Every delimiter it looks for is ASCII and no byte of a multibyte UTF-8 character equals one, so bytes give the same tokens: replayed under `en_US.UTF-8` against the previous version, 1,216 distinct transcript commands that open a heredoc and mention `commit` got the same verdict in a clean repository and with a credential staged.
+  The locale is set to `C` for the tokenizing loop only and restored after it.
+  The 59 KB command still takes about 10 s, now in the per-character loop itself; that remainder stays open in #26.
 - `guard-hooks` 0.3.2 `staged-secret-guard` no longer reads a heredoc body as commands where nothing can run it.
   Writing a script or a Makefile through a heredoc (`cat > r.sh <<'X'` with `$GIT commit` inside) was refused although the file is only being written, even with a clean index.
   A body is now skipped as data only when it is fed to a literal `cat` or `tee` with a quoted delimiter, after nothing but a short allowlist of programs that cannot change how the shell finds `cat`; the full set of conditions is under Known limits in the README.
