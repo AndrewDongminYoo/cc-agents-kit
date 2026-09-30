@@ -610,6 +610,9 @@ for label, command in (
     # short list may run before a skipped heredoc, and autoload is not one.
     ("a heredoc fed to cat after FPATH and autoload", "FPATH=/tmp/fns; autoload cat; cat <<'X'\n$GIT commit -m x\nX"),
     ("a heredoc fed to cat after autoload alone", "autoload cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    # A ${ opened after the heredoc on its line can span lines, and what runs
+    # inside it is not a body.
+    ("a parameter expansion spanning lines after the heredoc", "cat <<'X' ${v:-\n$($GIT commit -m x >&2)\nX\n}\nactual body\nX"),
     # A string that spans lines is where a drifted quote state shows, so a
     # heredoc after one is read even when, as here, nothing would run it.
     ("a heredoc after a string that spans lines", 'echo "a\nb"\ncat > f.sh <<\'X\'\n$GIT commit -m x\nX'),

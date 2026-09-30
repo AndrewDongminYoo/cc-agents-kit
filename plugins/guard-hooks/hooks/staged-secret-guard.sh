@@ -292,9 +292,12 @@ skip_heredoc_bodies() {
   if [[ -n "$heredoc_skip_ok" && -z "$heredoc_doubt" ]]; then
     for ((index = heredoc_start; index < ${#TOKENS[@]}; index++)); do
       token=${TOKENS[index]}
+      # A ${ left open on the heredoc's line can span lines, so the newline the
+      # body seems to start after may be inside it (`cat <<'X' ${v:-`).
+      # shellcheck disable=SC2016  # a literal ${ to match, not an expansion
       case "$token" in
         "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$"*) heredoc_doubt=1 ;;
-        *'>&'* | *'<&'* | *'`'*) heredoc_doubt=1 ;;
+        *'>&'* | *'<&'* | *'`'* | *'${'* | *"$NEWLINE"*) heredoc_doubt=1 ;;
       esac
     done
     index=0
