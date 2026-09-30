@@ -60,12 +60,15 @@ block_indirect_commit() {
 # where -C's value should be, one after exec, one whose quoting is unsure) sits
 # where git's words are read, so the words after it cannot be placed. Rather
 # than guess, a `commit` anywhere later in the same command is refused; the
-# search crosses parentheses and stops at the next ;, | or &.
+# search crosses parentheses and stops at the next ;, | or & outside them (one
+# inside, as in `> >(cat | cat) commit`, does not end the outer command).
 refuse_commit_ahead() {
-  local ahead
+  local ahead depth=0
   for ((ahead = $1; ahead < token_count; ahead++)); do
     case "${TOKENS[ahead]}" in
-      "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&") return 0 ;;
+      "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(") depth=$((depth + 1)) ;;
+      "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+") ((depth == 0)) || depth=$((depth - 1)) ;;
+      "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&") ((depth > 0)) || return 0 ;;
       commit)
         [[ -z "$indirect" ]] || block_indirect_commit
         block_unparsed
@@ -99,6 +102,7 @@ token_expansion=""
 TOKEN_EXPANSION=()
 TOKENIZATION_ERROR=""
 BOUNDARY_PREFIX=$'\034'
+FD_VARNAME='^[{][A-Za-z_][A-Za-z0-9_]*[}]$'
 # A parenthesis opened straight after an unquoted `$` is a command substitution,
 # not a subshell, and the parser needs to know which one closed: `$(echo git)
 # commit` runs the substitution's output with `commit` as its first argument,
@@ -835,15 +839,23 @@ while :; do
         token_index=$((token_index + 1))
         continue
         ;;
-      -*a)
-        if [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX"* ]]; then
+      -*a | -a?* | -[cl]a?* | -[cl][cl]a?*)
+        # The name is the next word, or the rest of this one (`-afoo`).
+        if [[ "$current" == *a ]]; then
+          name_index=$((token_index + 1))
+          exec_name=${TOKENS[name_index]-}
+        else
+          name_index=$token_index
+          exec_name=${current#*a}
+        fi
+        if [[ "$exec_name" != "$BOUNDARY_PREFIX"* ]]; then
           # Run under a name starting git-, git takes the rest as its
           # subcommand, so `exec -a git-commit git -m x` commits. Under such a
           # name, or one this hook cannot read, a git (or a program this hook
           # cannot read) is refused.
-          exec_name=${TOKENS[token_index + 1]##*/}
-          if [[ -n "${TOKEN_EXPANSION[token_index + 1]-}" || "$exec_name" == git-* ]]; then
-            for ((ahead = token_index + 2; ahead < token_count; ahead++)); do
+          exec_name=${exec_name##*/}
+          if [[ -n "${TOKEN_EXPANSION[name_index]-}" || "$exec_name" == git-* ]]; then
+            for ((ahead = name_index + 1; ahead < token_count; ahead++)); do
               case "${TOKENS[ahead]}" in
                 "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&") break ;;
                 git | */git) block_unparsed ;;
@@ -851,7 +863,7 @@ while :; do
               [[ -z "${TOKEN_EXPANSION[ahead]-}" || "${TOKEN_EXPANSION[ahead]}" == literal ]] || block_unparsed
             done
           fi
-          token_index=$((token_index + 2))
+          token_index=$((name_index + 1))
           continue
         fi
         ;;
@@ -1291,7 +1303,10 @@ while :; do
         if ((scan_index >= orig_end)) || [[ "$QUOTED_TOKENS" == *" $scan_index "* ]]; then
           redirect_unsure=1
         fi
-        if [[ -z "$redirect_word" || "$redirect_word" == "&" || "$redirect_word" != *[!0-9]* ]]; then
+        # A descriptor is a number or, since bash 4.1, a `{varname}` the shell
+        # allocates (`{fd}>out`).
+        if [[ -z "$redirect_word" || "$redirect_word" == "&" || "$redirect_word" != *[!0-9]* ]] \
+          || [[ "$redirect_word" =~ $FD_VARNAME ]]; then
           # Several can share a word (`2>"$sink">`): whether the next word is a
           # target depends on how the word ends, not on its first operator.
           scan_index=$((scan_index + 1))

@@ -245,6 +245,9 @@ for label, command in (
     ("&& straight before a redirection", "true &&>/dev/null git status"),
     ("a process substitution target on a read-only git", "git > >(cat) log -1"),
     ("exec with a redirection before a read-only program", "exec 3>&1 ls"),
+    ("a {varname} descriptor redirection on a read-only git", "git {fd}>out log -1"),
+    ("a read-only git behind exec -a with its name attached", "exec -afoo git log -1"),
+    ("a process substitution with a pipe on a read-only git", "git > >(cat | cat) log -1"),
     ("a redirection before a read-only git", "2>/dev/null git log -1"),
     # A function may be named exec: defining it runs nothing, and calling it
     # runs its body, not the builtin.
@@ -488,6 +491,9 @@ for label, command in (
     # &> and &>> redirect both streams; the & is not a background job.
     ("commit after an &> redirection", "git &>out.txt commit -m x"),
     ("commit after an &>> redirection with a separate target", "git &>> out.txt commit -m x"),
+    ("commit after a {varname} descriptor redirection", "git {fd}>out commit -m x"),
+    ("commit behind exec -a with its name attached", "exec -afoo git commit -m x"),
+    ("commit behind exec -la with its name attached", "exec -lafoo git commit -m x"),
     ("commit after -C's glued path runs into an &> redirection", "git -C.&>/dev/null commit -m x"),
     # A redirection with a quoted part is still removed by bash, so the word
     # after it, or after its separate target, is the subcommand.
@@ -523,10 +529,15 @@ for label, command, reason in (
     ("a commit after exec and a redirection", "exec 3>&1 git commit -m x", "could not safely parse"),
     # Run as git-commit, git commits whatever its arguments say.
     ("git run by exec under a git- name", "exec -a git-commit git -m x", "could not safely parse"),
+    ("git run by exec under an attached git- name", "exec -agit-commit git -m x", "could not safely parse"),
     ("git run by exec under a git- name with a path", "exec -a /usr/libexec/git-core/git-commit /usr/bin/git -m x", "could not safely parse"),
     ("an expanded program run by exec under a git- name", 'g=/usr/bin/git; exec -a git-commit "$g" -m x', "could not safely parse"),
     ("a redirection where -C's path should be", "git -C >out . commit -m x", "could not safely parse"),
     ("a commit after a process substitution target", "git > >(cat) commit -m x", "could not safely parse"),
+    # An operator inside the substitution does not end the command around it.
+    ("a commit after a process substitution holding a pipe", "git > >(cat | cat) commit -m x", "could not safely parse"),
+    ("a commit after a process substitution holding a ;", "git > >(cat; cat) commit -m x", "could not safely parse"),
+    ("a commit after a process substitution holding &&", "git > >(cat && cat) commit -m x", "could not safely parse"),
     ("a redirection before git", ">/dev/null git commit -m x", "could not safely parse"),
     ("a redirection straight after &&, before git", "true &&>/dev/null git commit -m x", "could not safely parse"),
     # Among commit's own arguments, &> is refused as > always was.
