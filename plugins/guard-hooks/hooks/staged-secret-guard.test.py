@@ -521,6 +521,10 @@ for label, command, reason in (
     ("a quoted > before git's own options", 'sink=/tmp/out; git >"${sink}>" -C . commit -m x', "could not safely parse"),
     # Where a redirection is not followed, a commit after it is refused.
     ("a commit after exec and a redirection", "exec 3>&1 git commit -m x", "could not safely parse"),
+    # Run as git-commit, git commits whatever its arguments say.
+    ("git run by exec under a git- name", "exec -a git-commit git -m x", "could not safely parse"),
+    ("git run by exec under a git- name with a path", "exec -a /usr/libexec/git-core/git-commit /usr/bin/git -m x", "could not safely parse"),
+    ("an expanded program run by exec under a git- name", 'g=/usr/bin/git; exec -a git-commit "$g" -m x', "could not safely parse"),
     ("a redirection where -C's path should be", "git -C >out . commit -m x", "could not safely parse"),
     ("a commit after a process substitution target", "git > >(cat) commit -m x", "could not safely parse"),
     ("a redirection before git", ">/dev/null git commit -m x", "could not safely parse"),

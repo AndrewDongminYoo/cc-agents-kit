@@ -837,6 +837,20 @@ while :; do
         ;;
       -*a)
         if [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX"* ]]; then
+          # Run under a name starting git-, git takes the rest as its
+          # subcommand, so `exec -a git-commit git -m x` commits. Under such a
+          # name, or one this hook cannot read, a git (or a program this hook
+          # cannot read) is refused.
+          exec_name=${TOKENS[token_index + 1]##*/}
+          if [[ -n "${TOKEN_EXPANSION[token_index + 1]-}" || "$exec_name" == git-* ]]; then
+            for ((ahead = token_index + 2; ahead < token_count; ahead++)); do
+              case "${TOKENS[ahead]}" in
+                "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&") break ;;
+                git | */git) block_unparsed ;;
+              esac
+              [[ -z "${TOKEN_EXPANSION[ahead]-}" || "${TOKEN_EXPANSION[ahead]}" == literal ]] || block_unparsed
+            done
+          fi
           token_index=$((token_index + 2))
           continue
         fi
