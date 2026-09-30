@@ -57,13 +57,16 @@ block_indirect_commit() {
 }
 
 # A redirection this parse does not follow (a process substitution target, one
-# where -C's value should be, one after exec, one whose quoting is unsure) sits
-# where git's words are read, so the words after it cannot be placed. Rather
-# than guess, a `commit` anywhere later in the same command is refused; the
-# search crosses parentheses and stops at the next ;, | or & outside them (one
-# inside, as in `> >(cat | cat) commit`, does not end the outer command).
+# where -C's value should be, one whose quoting is unsure) sits where git's
+# words are read, so the words after it cannot be placed. Rather than guess,
+# git itself is refused: its subcommand can be spelled many ways (`-c
+# alias.ci=commit ci`). A program this hook cannot read is judged, as
+# elsewhere, only on a `commit` later in the same command; the search crosses
+# parentheses and stops at the next ;, | or & outside them (one inside, as in
+# `> >(cat | cat) commit`, does not end the outer command).
 refuse_commit_ahead() {
   local ahead depth=0
+  [[ -n "$indirect" ]] || block_unparsed
   for ((ahead = $1; ahead < token_count; ahead++)); do
     case "${TOKENS[ahead]}" in
       "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(") depth=$((depth + 1)) ;;
@@ -74,6 +77,22 @@ refuse_commit_ahead() {
         block_unparsed
         ;;
     esac
+  done
+}
+
+# Where the program itself cannot be placed (the name exec -a gives it, a
+# process substitution before it), a git or a program this hook cannot read
+# anywhere later in the same command is refused, over the same span.
+refuse_git_ahead() {
+  local ahead depth=0
+  for ((ahead = $1; ahead < token_count; ahead++)); do
+    case "${TOKENS[ahead]}" in
+      "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(") depth=$((depth + 1)) ;;
+      "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+") ((depth == 0)) || depth=$((depth - 1)) ;;
+      "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&") ((depth > 0)) || return 0 ;;
+      git | */git) block_unparsed ;;
+    esac
+    [[ -z "${TOKEN_EXPANSION[ahead]-}" || "${TOKEN_EXPANSION[ahead]}" == literal ]] || block_unparsed
   done
 }
 
@@ -827,10 +846,35 @@ while :; do
     continue
   fi
   # A redirection before the program (`>/dev/null git commit`, `exec 3>&1 git
-  # commit`) is removed by the shell; where the program then stands is not
-  # followed here.
+  # commit`) is removed by the shell, target and all, and the words after it
+  # are read as if it were not there. Where the target cannot be placed (a
+  # process substitution, or a last operator that may be quoted), a git or a
+  # program this hook cannot read after it is refused.
   if ((at_command_start)) && [[ "${TOKEN_EXPANSION[token_index]-}" != literal && "$current" == *[\<\>]* ]]; then
-    refuse_commit_ahead "$token_index"
+    redirect_word=${current%%[<>]*}
+    if [[ -z "$redirect_word" || "$redirect_word" == "&" || "$redirect_word" != *[!0-9]* ]] \
+      || [[ "$redirect_word" =~ $FD_VARNAME ]]; then
+      next_index=$((token_index + 1))
+      if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]]; then
+        case "${TOKENS[next_index]-}" in
+          "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX\$("* | "<" | ">") refuse_git_ahead "$next_index" ;;
+          "$BOUNDARY_PREFIX"*) ;;
+          *)
+            [[ "$QUOTED_TOKENS" != *" $token_index "* ]] || refuse_git_ahead "$next_index"
+            next_index=$((next_index + 1))
+            ;;
+        esac
+      fi
+      token_index=$next_index
+      continue
+    fi
+    # A program glued to a redirection (`git>out commit`) is that program, and
+    # its target is glued too unless the word ends in an operator.
+    if [[ "$QUOTED_TOKENS" == *" $token_index "* || "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]]; then
+      [[ "${redirect_word##*/}" != git && "$redirect_word" != *'$'* ]] || block_unparsed
+    else
+      current=$redirect_word
+    fi
   fi
   if ((at_command_start)) && [[ -n "$exec_prefix" ]]; then
     case "$current" in
@@ -853,15 +897,9 @@ while :; do
           # subcommand, so `exec -a git-commit git -m x` commits. Under such a
           # name, or one this hook cannot read, a git (or a program this hook
           # cannot read) is refused.
-          exec_name=${exec_name##*/}
-          if [[ -n "${TOKEN_EXPANSION[name_index]-}" || "$exec_name" == git-* ]]; then
-            for ((ahead = name_index + 1; ahead < token_count; ahead++)); do
-              case "${TOKENS[ahead]}" in
-                "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&") break ;;
-                git | */git) block_unparsed ;;
-              esac
-              [[ -z "${TOKEN_EXPANSION[ahead]-}" || "${TOKEN_EXPANSION[ahead]}" == literal ]] || block_unparsed
-            done
+          # A redirection where the name should be is not followed either.
+          if [[ -n "${TOKEN_EXPANSION[name_index]-}" || "$exec_name" == *[\<\>]* || "${exec_name##*/}" == git-* ]]; then
+            refuse_git_ahead "$((name_index + 1))"
           fi
           token_index=$((name_index + 1))
           continue
