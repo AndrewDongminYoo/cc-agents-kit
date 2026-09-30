@@ -90,7 +90,8 @@ refuse_git_ahead() {
       "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(") depth=$((depth + 1)) ;;
       "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+") ((depth == 0)) || depth=$((depth - 1)) ;;
       "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&") ((depth > 0)) || return 0 ;;
-      git | */git) block_unparsed ;;
+      # git with a redirection glued on (`git>/dev/null`) is git too.
+      git | */git | git[\<\>]* | */git[\<\>]*) block_unparsed ;;
     esac
     [[ -z "${TOKEN_EXPANSION[ahead]-}" || "${TOKEN_EXPANSION[ahead]}" == literal ]] || block_unparsed
   done
@@ -883,9 +884,10 @@ while :; do
         token_index=$((token_index + 1))
         continue
         ;;
-      -*a | -a?* | -[cl]a?* | -[cl][cl]a?*)
-        # The name is the next word, or the rest of this one (`-afoo`).
-        if [[ "$current" == *a ]]; then
+      -a* | -[cl]a* | -[cl][cl]a*)
+        # The name is the rest of this word after its first a (`-afoo`,
+        # `-afooa`), or the next word when nothing follows that a.
+        if [[ "$current" == -a || "$current" == -[cl]a || "$current" == -[cl][cl]a ]]; then
           name_index=$((token_index + 1))
           exec_name=${TOKENS[name_index]-}
         else

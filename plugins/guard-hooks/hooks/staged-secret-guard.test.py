@@ -499,6 +499,7 @@ for label, command in (
     ("commit after a program glued to a redirection", "git>/dev/null commit -m x"),
     ("commit behind exec -a with its name attached", "exec -afoo git commit -m x"),
     ("commit behind exec -la with its name attached", "exec -lafoo git commit -m x"),
+    ("commit behind exec -a with an attached name ending in a", "exec -afooa git commit -m x"),
     ("commit after -C's glued path runs into an &> redirection", "git -C.&>/dev/null commit -m x"),
     # A redirection with a quoted part is still removed by bash, so the word
     # after it, or after its separate target, is the subcommand.
@@ -535,6 +536,7 @@ for label, command, reason in (
     ("git run by exec under a git- name", "exec -a git-commit git -m x", "could not safely parse"),
     ("an alias commit after a redirection before git", ">/dev/null git -c alias.ci=commit ci -m x", "sets git configuration"),
     ("git run by exec under an attached git- name", "exec -agit-commit git -m x", "could not safely parse"),
+    ("git glued to a redirection run by exec under a git- name", "exec -a git-commit git>/dev/null -m x", "could not safely parse"),
     ("git run by exec under a git- name with a path", "exec -a /usr/libexec/git-core/git-commit /usr/bin/git -m x", "could not safely parse"),
     ("an expanded program run by exec under a git- name", 'g=/usr/bin/git; exec -a git-commit "$g" -m x', "could not safely parse"),
     ("a redirection where -C's path should be", "git -C >out . commit -m x", "could not safely parse"),
