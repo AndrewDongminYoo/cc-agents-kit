@@ -47,9 +47,9 @@ def check(label, condition, detail=""):
 
 # The hook exits 0 when no shellcheck binary is reachable, which would make
 # every assertion below vacuously "quiet". Detect that and say so instead.
+# Mirror the hook's own lookup: a binary the hook never tries cannot warn.
 have_shellcheck = bool(
     shutil.which("shellcheck")
-    or Path.home().joinpath(".claude/.trunk/tools/shellcheck").is_file()
     or Path("/opt/homebrew/bin/shellcheck").is_file()
 )
 
@@ -131,8 +131,15 @@ with tempfile.TemporaryDirectory() as tmp:
         hook_rc == 0 and not out and not err,
         f"exit={hook_rc} stdout={out[:120]}",
     )
-    _, _, out, _ = _optout.run_piped(HOOK, DISABLE_VAR, warning_payload, False)
-    check("opt-out off: warning still fires", bool(out), f"stdout={out[:120]}")
+    _, hook_rc, out, err = _optout.run_piped(HOOK, DISABLE_VAR, warning_payload, False)
+    if have_shellcheck:
+        check("opt-out off: warning still fires", bool(out), f"stdout={out[:120]}")
+    else:
+        check(
+            "opt-out off: degrades quietly without shellcheck",
+            hook_rc == 0 and not out and not err,
+            f"exit={hook_rc} stdout={out[:120]} stderr={err[:120]}",
+        )
 
 fails += _optout.drain(HOOK, DISABLE_VAR)
 
