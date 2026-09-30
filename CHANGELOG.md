@@ -19,6 +19,10 @@ Entries are grouped by release; the topmost section collects work that has not y
   Its opt-out case expected a warning that only `shellcheck` can produce; with no binary reachable it now asserts the silent no-op instead.
   The suite also stopped counting `~/.claude/.trunk/tools/shellcheck` as available, because the hook never looks there, so a machine with only that copy failed the findings cases too.
   Tracked as #27.
+- `repo-gate` 0.2.3 `fix-osv-vulnerabilities` counts a parent release that no longer depends on the vulnerable gem as a fix.
+  The rubygems.org lookup prints only the release's `ruby_version` for such a release, and the Bundler section used to read that as "no release admits the patch", which routed a reachable fix to suppression.
+  Step 2b now applies only when a blocking parent has no release that admits the patch or drops the gem, and verification checks that a dropped gem is gone from every `Gemfile.lock` and that no code still requires it.
+  Raised by Codex on #28 and tracked as #29.
 - `repo-gate` 0.2.1 `ci-babysit` no longer reads an empty `steps` array as a billing or runner block on its own.
   This supersedes the 0.3.9 wording, "a billing or runner block upstream of the workflow, read from the run's annotation, not from a diff": the guidance now requires the annotation on `gh run view <id>` to name the upstream cause — billing, a spending limit, or the runner — before the failure is classified Environmental.
   An annotation that names an ordinary cause is the diagnosis instead, and only when the annotation is absent or inconclusive does the reader move on to the run's other jobs and the normal failure diagnosis: a reusable-workflow caller fails with the same `steps: []` for an ordinary reason.
