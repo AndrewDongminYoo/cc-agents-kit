@@ -29,7 +29,7 @@ Column meanings:
 | --- | --- | --- | --- |
 | `handoff` | original | Apache-2.0 | Written for this repository. Conceptually in the same family as the session-continuity skills in [oh-my-opencode](https://github.com/alvinunreal/oh-my-opencode-slim); no text is shared. |
 | `session-export` | original | Apache-2.0 | Written for this repository. |
-| `session-to-md` | original | Apache-2.0 | Written for this repository; the `bin/` helper `session-export` runs. |
+| `session-to-md` | original | Apache-2.0 | Written for this repository. The `session-export` skill runs this `bin/` helper. |
 | `log-it` | original | Apache-2.0 | Written for this repository. |
 | `wayfinder` | [mattpocock/skills](https://github.com/mattpocock/skills), `skills/engineering/wayfinder` | MIT | Rewritten around a `docs/plans` ticket substrate. 14% of the shipped file is verbatim upstream, measured line-wise. |
 | `context-budget` | [affaan-m/ecc](https://github.com/affaan-m/ecc), `skills/context-budget` | MIT | **Largely upstream** — 87% of the shipped file is verbatim, measured line-wise. Included as an MIT redistribution rather than as original work. |
