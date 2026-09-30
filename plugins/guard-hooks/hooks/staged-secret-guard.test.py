@@ -601,6 +601,9 @@ for label, command in (
     # cat<<B is a heredoc to the shell; left unnoted, it hides where its body
     # ends, and a later cat <<'C' inside it would look top-level.
     ("a heredoc after one glued to its command", "cat <<'A'; cat<<B\ndata\nA\ncat <<'C'\n$($GIT commit -m x)\nC\nB"),
+    # PATH can be set by a builtin that names it, and zsh's rehash applies it.
+    ("a heredoc fed to cat after read sets PATH", "read -r PATH <<< /tmp/evil; rehash; cat <<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc fed to cat after printf -v sets PATH", "printf -v PATH %s /tmp/evil\ncat <<'X'\n$GIT commit -m x\nX"),
     # A string that spans lines is where a drifted quote state shows, so a
     # heredoc after one is read even when, as here, nothing would run it.
     ("a heredoc after a string that spans lines", 'echo "a\nb"\ncat > f.sh <<\'X\'\n$GIT commit -m x\nX'),

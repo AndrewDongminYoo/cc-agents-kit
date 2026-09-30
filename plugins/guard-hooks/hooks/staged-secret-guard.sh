@@ -144,8 +144,9 @@ flush_token() {
 # program name (after any NAME=value), and none of them may be a group, branch,
 # loop, function, exec, coproc, eval, source, trap, or a builtin that can make
 # `cat` something else (alias, hash, enable, builtin, command); no token may
-# hold a parenthesis or substitution boundary, a backtick, `${`, a newline or a
-# PATH assignment. Reviews found each of those reaching a heredoc one at a time:
+# hold a parenthesis or substitution boundary, a backtick, `${` or a newline, or
+# name PATH at all (`read -r PATH`, `printf -v PATH`, `path+=`), however it is
+# then assigned. Reviews found each of those reaching a heredoc one at a time:
 # `{ cat <<'X' … } | bash`, `` eval ` ``, `hash -p /bin/bash cat`, `cat ${v:-
 # <<'X'}`. Checking tokens rather than the raw text also keeps prose in a body
 # that says "commit hash" from counting.
@@ -211,7 +212,8 @@ note_heredoc() {
     word=${TOKENS[index]}
     # shellcheck disable=SC2016  # a literal ${ to match, not an expansion
     case "$word" in
-      *"$NEWLINE"* | *'`'* | *'${'* | PATH=* | "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$"*)
+      *"$NEWLINE"* | *'`'* | *'${'* | "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$"* \
+        | PATH | path | PATH=* | path=* | PATH+=* | path+=*)
         heredoc_doubt=1
         return
         ;;
@@ -232,7 +234,7 @@ note_heredoc() {
     fi
     case "$word" in
       if | then | else | elif | do | while | until | for | case | select | function | exec | coproc | time \
-        | eval | source | trap | alias | hash | enable | builtin | command)
+        | eval | source | trap | alias | hash | rehash | unhash | enable | builtin | command)
         heredoc_doubt=1
         return
         ;;
