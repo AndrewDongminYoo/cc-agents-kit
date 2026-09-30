@@ -1,6 +1,6 @@
 ---
 name: fix-osv-vulnerabilities
-description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn project and you need to triage and fix them.
+description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn or Bundler project and you need to triage and fix them.
 metadata:
   category: dependencies
 ---
@@ -10,7 +10,7 @@ metadata:
 ## Overview
 
 For each reported GHSA, check if a patched version exists via the GitHub Advisory API.
-If a patch exists → upgrade via package manager overrides or direct dependency bump.
+If a patch exists → upgrade via package manager overrides or direct dependency bump; where the manager has no overrides (Bundler), bump the parent that pins the vulnerable package.
 If no compatible reachable patch exists → collect reachability evidence and request a suppression decision.
 
 ## Workflow
@@ -129,6 +129,36 @@ Bump the version in the relevant workspace `package.json` directly:
 }
 ```
 
+### Transitive dependency pinned by a parent (Bundler)
+
+Bundler has no overrides, so a transitive gem moves only when the gem that requires it allows the move.
+In `Gemfile.lock` the parent's requirement is the indented line under the parent's own entry (`rubyzip (>= 2.0.0, < 3.0.0)` under `fastlane (2.238.0)`); if it excludes the patched version, `bundle update <gem>` cannot reach the fix.
+
+Find the first parent release whose requirement admits the patch:
+
+```bash
+gh api -X GET https://rubygems.org/api/v1/versions/<parent>.json --jq '.[:6][] | "\(.number) \(.created_at)"'
+gh api -X GET https://rubygems.org/api/v2/rubygems/<parent>/versions/<version>.json \
+  --jq '.ruby_version, (.dependencies.runtime[] | select(.name=="<gem>") | .requirements)'
+```
+
+GHSA-47m2-wp7j-p9vc (`rubyzip < 3.4.0`) was held by `fastlane` 2.238.0 and 2.239.0 at `< 3.0.0`; `fastlane` 2.240.0 raised its own requirement to `>= 3.4.0, < 4.0.0`, so the fix was a parent bump with no Gemfile edit.
+If no parent release admits the patch, continue to Step 2b.
+
+Move only the parent, and resolve without installing:
+
+```bash
+BUNDLE_GEMFILE=/abs/path/Gemfile bundle lock --update <parent> --conservative
+```
+
+`--conservative` keeps every shared dependency at its locked version unless the parent's new requirements force it off.
+If the Gemfile's own constraint on the parent excludes the target release, that is a direct-dependency bump: edit the Gemfile first.
+
+- **Every lockfile is a separate alert and a separate fix.** A mobile app can carry one Gemfile per platform (`android/Gemfile` and `ios/Gemfile`, each only for fastlane), so the same GHSA arrives twice. Update each; compare the two lockfiles afterwards, since they should differ only where the Gemfiles do.
+- **Read the diff for what else moved.** A parent bump carries its other requirement changes with it (the fastlane bump above also added `cgi` and moved `security` 0.1.5 → 0.3.0, which is a boundary crossing under the 0.x rule above).
+- **Check the Ruby floor.** Compare the `ruby_version` of every gem the lockfile moved against each place that picks the Ruby: `.ruby-version`, a `RUBY VERSION` section in the lockfile, and `ruby-version` in any CI workflow that runs the tool.
+- **Load it, then say what did not run.** After `bundle install`, confirm the resolved version with `grep -n '^    <gem> (' <each Gemfile.lock>` and load it through the bundle by the path its consumers require, which need not be the gem name (`BUNDLE_GEMFILE=… bundle exec ruby -e 'require "zip"'` for `rubyzip`; 2.x ships no `rubyzip.rb`, so `require "rubyzip"` is a `LoadError` there and loads only from 3.x). `fastlane lanes` proves only that the Fastfile parses; the actions that use the moved gem (uploads, archive handling, keychain access) run only in a real lane, which has external impact, so report them as unexercised instead of running one.
+
 ### Apply and verify
 
 ```bash
@@ -156,6 +186,10 @@ Map each override to a check that actually executes it, rather than assuming `pn
 | Script runner (`esbuild` via tsx)    | the test/script command that runs through `tsx` |
 
 Gotcha: `trunk check`'s osv-scanner cache can report a false green after edits — `touch` the lockfiles to bust the cache before trusting a clean run (Dependabot is the independent oracle when in doubt).
+
+To make that green fail first on the pre-fix tree, pass `--show-existing` and read the output, not the exit code.
+Trunk holds the line against upstream, so a vulnerability already on the base branch is an "existing issue": in a worktree of the pre-fix commit, `trunk check --no-fix --filter=osv-scanner Gemfile.lock` printed `1 existing issue` and `✔ No new issues` and exited 0; only `--show-existing` printed the GHSA line, and that run exited 0 too.
+Pin the pre-fix tree by SHA (`git worktree add --detach <dir> <sha>`), never `HEAD`: a parallel commit can move `HEAD` past the fix between two commands, and a "pre-fix" copy taken from it is already fixed and scans clean for the right reason.
 
 ## Step 2b — No compatible reachable patch: request a suppression decision
 

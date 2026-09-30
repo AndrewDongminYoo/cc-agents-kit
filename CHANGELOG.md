@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Added
+
+- `repo-gate` 0.2.2 `fix-osv-vulnerabilities` covers Bundler.
+  Bundler has no overrides, so a transitive gem is fixed by bumping the parent that pins it: the skill shows how to find the first parent release whose requirement admits the patch through the rubygems.org API, how to move only that parent with `bundle lock --update <parent> --conservative`, and what to check afterwards: one fix per lockfile, the other gems the parent moved, the Ruby floor, and which code paths only a real lane exercises.
+  It also says how to make a clean `trunk check` fail first: on the pre-fix tree trunk reports the vulnerability as an existing issue and exits 0, so pass `--show-existing` and read the output, and pin that tree by SHA rather than `HEAD`, which a parallel commit can move past the fix.
+
 ### Fixed
 
 - `repo-gate` 0.2.1 `ci-babysit` no longer reads an empty `steps` array as a billing or runner block on its own.
