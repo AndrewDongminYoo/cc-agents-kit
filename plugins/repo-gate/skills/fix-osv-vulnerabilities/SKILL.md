@@ -139,8 +139,10 @@ List them all before deciding anything:
 
 ```bash
 awk '/^    [^ ]/{p=$1} /^      <gem>( |$)/{print p": "$0}' Gemfile.lock   # every parent and its requirement
-grep -n '<gem>' Gemfile                                                   # a direct declaration, if any
+grep -rn --include=Gemfile --include='*.gemspec' --exclude-dir=vendor '<gem>' .   # a direct declaration, if any
 ```
+
+A Gemfile that says `gemspec` takes its direct dependencies from the `.gemspec` (`add_dependency`), and the lockfile then lists the local gem itself as a parent; that requirement is edited in the gemspec, not looked up on rubygems.org.
 
 One requirement per parent is normal, not the rule: `faraday` had eight parents in a fastlane-only lockfile.
 A Gemfile constraint that excludes the patch is a direct-dependency bump: edit it.
@@ -170,8 +172,12 @@ The fastlane case needed only the parent because 2.240.0 forced `rubyzip` off 2.
 
 Every gem named on the command line moves to the newest release its requirements admit, not to the release you selected: `--update` defaults to `--major` (the fastlane case landed on 2.240.1, not 2.240.0, and `rubyzip` on 3.7.0, not 3.4.0).
 Read which versions the lockfile now names for each gem you named, and check those releases.
-Where one went further than you want, narrow its constraint in the Gemfile before running the command (`gem "fastlane", "~> 2.240.0"`; for a transitive gem, declaring it there makes it direct), or cap every named gem by semver level with `--patch` or `--minor` plus `--strict`, which stops at a level, not at a named release.
+Where one went further than you want, narrow that gem's own constraint in the Gemfile before running the command (`gem "fastlane", "~> 2.240.0"`; for a transitive gem, declaring it there makes it direct).
+Do not reach for `--patch` or `--minor` with `--strict` instead: the level applies to every named gem at once, and the gem and its parent usually need different levels (`--minor --strict` would have blocked the required `rubyzip` 2.x → 3.x move).
 If the Gemfile's own constraint on a parent excludes the release it needs, edit that constraint too.
+
+This is a triage procedure, not a model of Bundler's resolver.
+When the lockfile shows a shape it does not name, resolve with Bundler itself (`bundle lock --update … --print` shows the result without writing it) and report what it chose, rather than extending this list.
 
 - **Every lockfile is a separate alert and a separate fix.** A mobile app can carry one Gemfile per platform (`android/Gemfile` and `ios/Gemfile`, each only for fastlane), so the same GHSA arrives twice. Update each; compare the two lockfiles afterwards, since they should differ only where the Gemfiles do.
 - **Read the diff for what else moved.** A parent bump carries its other requirement changes with it (the fastlane bump above also added `cgi` and moved `security` 0.1.5 → 0.3.0, which is a boundary crossing under the 0.x rule above).
