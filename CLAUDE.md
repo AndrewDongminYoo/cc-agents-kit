@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Claude Code **plugin marketplace** — not an application. Nothing here is imported or built; the artifacts are shell hooks plus the JSON manifests that make an installer find them.
+A Claude Code **plugin marketplace** — not an application. Nothing here is imported or built; the artifacts are shell hooks, skills and their `bin/` helpers, plus the JSON manifests that make an installer find them.
 Every change is therefore judged on two things: does the manifest still resolve, and does the hook still hold its contract.
 
 ## Commands
@@ -12,13 +12,14 @@ Every change is therefore judged on two things: does the manifest still resolve,
 ```bash
 shellcheck plugins/*/hooks/*.sh
 cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done
+for t in plugins/*/bin/*.test.py; do python3 "$t" || exit 1; done
 python3 plugins/guard-hooks/hooks/<name>.test.py     # a single suite
 /bin/bash -n plugins/guard-hooks/hooks/<name>.sh     # macOS system bash 3.2, not your shell's bash
 ```
 
 There is no build, no package manager, and no test framework.
-Suites are plain `python3` scripts requiring `bash` and `jq`; `shellcheck` is optional (`shellcheck-on-edit.test.py` skips its findings checks and asserts the silent no-op instead).
-`.github/workflows/ci.yml` runs exactly the commands above plus manifest validation.
+Suites are plain `python3` scripts requiring `bash` and `jq`, and `node` for `session-to-md.test.py`; `shellcheck` is optional (`shellcheck-on-edit.test.py` skips its findings checks and asserts the silent no-op instead).
+`.github/workflows/ci.yml` runs the commands above, shellchecks and `bash -n`-parses every shipped shell script including the extensionless Bash entries under `plugins/*/bin/`, and checks the manifests, skill frontmatter, private references, `bin/` executability, and the demo's quoted guard message.
 
 ## Layout contract
 
@@ -30,6 +31,9 @@ plugins/<plugin>/
   hooks/*.sh
   hooks/*.test.py                 # beside its hook, never in a tests/ directory
   hooks/_optout.py                # shared suite helper; leading _ keeps it out of the *.test.py glob
+  skills/<skill>/SKILL.md         # frontmatter name must equal the directory name
+  bin/<tool>                      # on PATH while the plugin is enabled; executable, with a shebang
+  bin/<tool>.test.py              # beside its tool, resolved the same way as a hook suite
 ```
 
 This mirrors Anthropic's own multi-plugin marketplace (`claude-code-plugins`), which is the layout to check against — **not** `rn-agents-kit`, whose single plugin uses `"source": "./"` and says nothing about nesting.

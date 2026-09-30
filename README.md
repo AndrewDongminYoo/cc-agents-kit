@@ -65,7 +65,7 @@ These are the three properties that matter, and each is pinned by a case that fa
 
 - **A passing suite is not taken as evidence.** Delete the logic a regression covers — `exit 2` → `exit 0`, `-ot` → `-nt`, drop the reporting line — and confirm that regression fails. Mutants are parse-checked first, because `bash` exits `2` on a syntax error and an unparseable mutant would otherwise produce a vacuous pass.
 - **Guards fail open, never closed.** Empty, malformed, or key-less input exits `0` silently. A broken guard degrades to no guard, and never to a blocked tool call.
-- **The three `PostToolUse` hooks cannot block you.** Two only attach a warning; the third rewrites a Bash result to mask a credential-shaped value, and says so in the transcript. Every hook also has its own kill switch, and a disabled hook still drains its input, so turning one off cannot itself break a large `Write`.
+- **The four `PostToolUse` hooks cannot block you.** Three only attach a warning; the fourth rewrites a Bash result to mask a credential-shaped value, and says so in the transcript. Every hook also has its own kill switch, and a disabled hook still drains its input, so turning one off cannot itself break a large `Write`.
 
 Nothing here is a sandbox — see [Known limits](#known-limits) for what these guards do not stop.
 
@@ -231,8 +231,6 @@ Each hook has a regression suite next to it — plain `python3` + `bash` + `jq`,
 ```bash
 cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done
 ```
-
-The mutation counts above are re-derived from these files, not quoted from a past run.
 
 Two details worth knowing if you extend them.
 The opt-out cases feed the hook a 200KB payload over a real pipe and read the *writer's* exit status, because Python's `subprocess` swallows `BrokenPipeError` — an `input=`-style test cannot see the bug they exist to catch, and moving the opt-out check above the stdin read fails them with `SIGPIPE` rather than passing quietly.
