@@ -231,6 +231,16 @@ for label, command in (
     ("commit as a --grep value", "git --no-pager log --grep commit"),
     ("commit inside a pathspec", "git --no-pager diff -- README.commit"),
     ("git log inside command substitution", 'c=$(git -C "$HOME/x" log --since=30.days --oneline); echo "$c"'),
+    # Stepping over a redirection or exec still finds the real subcommand.
+    ("git log after a redirection", "git >/dev/null log -1"),
+    ("git log after a descriptor duplication", "git 2>&1 log -1"),
+    ("a read-only git behind exec", "exec git status"),
+    ("a read-only git behind exec -a", "exec -a g git log -1"),
+    ("exec that only redirects", "exec 3>&1"),
+    # A function may be named exec: defining it runs nothing, and calling it
+    # runs its body, not the builtin.
+    ("a function named exec, defined only", 'exec() { git commit -m x; }; echo defined'),
+    ("a function named exec, called for a read-only verb", 'exec() { git "$@"; }; exec status'),
 ):
     rc, _ = check_hook(command, d)
     check(f"ignores {label}", rc == 0, f"exit={rc}")
@@ -442,6 +452,27 @@ for label, command in (
     # An assignment's substitution leaves the next word a command.
     ("commit behind an assignment's substitution", "out=$(date) git commit -m x"),
     ("commit inside an assignment's substitution", "x=$(git commit -m y)"),
+    # exec runs its words as a program, as command does, with its own options.
+    ("commit behind exec", "exec git commit -m x"),
+    ("commit behind exec -c", "exec -c git commit -m x"),
+    ("commit behind exec -cl", "exec -cl git commit -m x"),
+    ("commit behind exec -a and its name", "exec -a mygit git commit -m x"),
+    ("commit behind exec --", "exec -- git commit -m x"),
+    # A redirection before the subcommand is set up and removed by the shell,
+    # target and all, so the word after it is still git's subcommand.
+    ("commit after a redirection to /dev/null", "git >/dev/null commit -m x"),
+    ("commit after a redirection with a separate target", "git > out.txt commit -m x"),
+    ("commit after a descriptor duplication", "git 2>&1 commit -m x"),
+    ("commit after an input redirection", "git </dev/null commit -m x"),
+    ("commit after -C and a redirection", 'git -C . 2>/dev/null commit -m x'),
+    # A word glued to a redirection is still a word: commit>x runs commit.
+    ("commit glued to a redirection", "git commit>out.txt -m x"),
+    ("commit through a function named exec", 'exec() { git "$@"; }; exec commit -m x'),
+    # Several redirections can share a word, and the last one's target is the
+    # next word: `2>err>` takes out.txt.
+    ("commit after two redirections in one word", "git 2>err.txt> out.txt commit -m x"),
+    ("commit after >& with a separate target", "git >& out.txt commit -m x"),
+    ("commit after -C glued to a redirection", "git -C.>/dev/null commit -m x"),
 ):
     rc, err = check_hook(command, continued_commit_repo)
     check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
@@ -456,6 +487,16 @@ BUDGET_SPENT = "h() { : " + " ".join(f"w{i}" for i in range(60)) + "; }; " + "h;
 # refused inline is refused through the call too.
 for label, command, reason in (
     ("a wrapper adding -c before a commit", 'GC() { git -c user.name=x "$@"; }; GC commit -q -m y', "could not safely parse"),
+    # A token does not record which of its > were quoted, so a -C value holding
+    # one is not cut there: the path cannot be read, and the commit is refused.
+    ("a -C path holding a quoted > before a redirection", 'git -C"/tmp/clean>dirty">/dev/null commit -m x', "could not safely parse"),
+    # Nor is a redirection with a quoted part stepped over: a quoted > at its
+    # end is part of a file name, not an operator waiting for a target.
+    ("a redirection target ending in a quoted >", 'sink=out; git >"${sink}>" commit -m x', "could not safely parse"),
+    ("two redirections in one word with a quoted target", 'sink=/dev/null; git 2>"$sink"> /dev/null commit -m x', "could not safely parse"),
+    # A word glued to a redirection whose target is the next word is not cut:
+    # the target, here a file named commit, would be read as the subcommand.
+    ("a -C value glued to a redirection with a separate target", "git -C.> commit commit -m x", "could not safely parse"),
     ("a wrapper passed an unquoted -C expansion", 'g() { git "$@"; }; g -C $d log', "unquoted expansion"),
     # After `shift` the call's words no longer line up with $1 and "$@", so they
     # are left unresolved and the parse cannot identify the subcommand.

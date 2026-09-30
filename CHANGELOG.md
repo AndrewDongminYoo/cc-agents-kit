@@ -15,6 +15,13 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Fixed
 
+- `guard-hooks` 0.3.4 `staged-secret-guard` recognises a commit behind `exec`, and one whose subcommand follows a redirection.
+  `exec` is read past as `command` is, with its `-c`, `-l` and `-a NAME` options, so `exec git commit -m x` is scanned.
+  A redirection between `git` and its subcommand is stepped over, target and all, as the shell removes it, so `git >/dev/null commit`, `git 2>&1 commit`, `git > out.txt commit` and `git -C . 2>/dev/null commit` are scanned; a word glued to a redirection stays a word, so `git commit>out.txt` is scanned too.
+  A redirection with any quoted part is not stepped over, because quote removal loses which `>` was quoted (`-C"/a>b">/dev/null`, `>"${sink}>"`), and neither is a glued word whose target is the next word (`-C.> commit commit`); those are refused as before.
+  Each of these ran `git commit` unscanned before, with a credential staged.
+  A command substitution inside double quotes (`out="$(git commit …)"`), runners such as `nohup`, `sudo` and `xargs`, and backticks remain unrecognised; #24 records why the double-quoted substitution is not a small change after the heredoc skip.
+  Tracked as #24.
 - `guard-hooks` 0.3.3 `staged-secret-guard` tokenizes a command in bytes whatever the caller's locale.
   Its tokenizer reads one character at a time, and under a multibyte locale, the macOS default, each read walked the command from its start, so a large command ran past the hook's 10 s timeout, where it fails open: a 59 KB command took 45 s under `en_US.UTF-8` against 10 s under `C`, and a 22 KB one took 6 s against 1 s.
   Every delimiter it looks for is ASCII and no byte of a multibyte UTF-8 character equals one, so bytes give the same tokens: replayed under `en_US.UTF-8` against the previous version, 1,216 distinct transcript commands that open a heredoc and mention `commit` got the same verdict in a clean repository and with a credential staged.

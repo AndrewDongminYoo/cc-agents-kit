@@ -101,6 +101,10 @@ token_quoted=""
 # after an unquoted < or > belongs to it (`2>&1`), not a background job.
 token_redirect=""
 last_unquoted_redirect=""
+# The indexes of the tokens that had any quoted or escaped part, space-separated.
+# Quote removal loses which < or > was quoted, so only a token with none is
+# trusted to be a redirection where git's subcommand is looked for.
+QUOTED_TOKENS=" "
 # An unquoted # at the start of a word opens a comment that runs to the end of
 # the line. Read as words, `git commit -m x # note` passed # and note as
 # pathspecs, scanned a candidate git never commits, and let the commit through.
@@ -119,6 +123,7 @@ flush_token() {
         '$'[@*] | '${'[@*]'}' | '${'[@*]':'[1-9]'}') token_expansion="split-words" ;;
       esac
     fi
+    [[ -z "$token_quoted" ]] || QUOTED_TOKENS="$QUOTED_TOKENS${#TOKENS[@]} "
     TOKENS+=("$token")
     TOKEN_EXPANSION+=("$token_expansion")
     token=""
@@ -621,6 +626,7 @@ token_index=0
 at_command_start=1
 command_prefix=""
 env_prefix=""
+exec_prefix=""
 # `command` runs a builtin or a program, never a shell function, so a name behind
 # it is not looked up among the functions defined below.
 function_lookup=1
@@ -713,6 +719,7 @@ while :; do
     at_command_start=$resume
     command_prefix=""
     env_prefix=""
+    exec_prefix=""
     function_lookup=1
     if ((scan_start < 0)); then
       token_index=$((token_index + 1))
@@ -774,6 +781,37 @@ while :; do
       -p) token_index=$((token_index + 1)); continue ;;
       --) command_prefix=""; token_index=$((token_index + 1)); continue ;;
     esac
+  fi
+  # `exec` runs its words as a program, in place of the shell, as `command` does:
+  # never a shell function. Its own options are -c and -l, which take nothing,
+  # and -a, which takes the name to give the program. A function may itself be
+  # named exec, and then a definition is not a call and a call runs the body.
+  if ((at_command_start)) && [[ "$current" == "exec" && -z "${TOKEN_EXPANSION[token_index]-}" ]] \
+    && [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX(" && "$FUNC_NAME_SET" != *" exec "* ]]; then
+    exec_prefix=1
+    function_lookup=""
+    token_index=$((token_index + 1))
+    continue
+  fi
+  if ((at_command_start)) && [[ -n "$exec_prefix" ]]; then
+    case "$current" in
+      --)
+        exec_prefix=""
+        token_index=$((token_index + 1))
+        continue
+        ;;
+      -*a)
+        if [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX"* ]]; then
+          token_index=$((token_index + 2))
+          continue
+        fi
+        ;;
+      -[cl] | -[cl][cl])
+        token_index=$((token_index + 1))
+        continue
+        ;;
+    esac
+    exec_prefix=""
   fi
   if ((at_command_start)) && [[ "$current" == "env" || "$current" == */env ]]; then
     env_prefix=1
@@ -1151,6 +1189,7 @@ while :; do
         paren_stack="${paren_stack}c"
         command_prefix=""
         env_prefix=""
+        exec_prefix=""
         function_lookup=1
         token_index=$((token_index + 2))
         continue
@@ -1179,6 +1218,36 @@ while :; do
       # words it expands to are git's arguments and never reach this parser, so
       # nothing read after it can be trusted to be the subcommand.
       [[ "${TOKEN_EXPANSION[scan_index]-}" != split* ]] || split_risk=1
+      # A redirection is set up and removed by the shell, target and all,
+      # wherever it stands, so `git >/dev/null commit` and `git 2>&1 commit`
+      # still run commit: step over it. An operator with nothing after it takes
+      # the next word as its target. Only a word with no quoted part, read from
+      # the command itself rather than an inlined body, is trusted to be one:
+      # quote removal loses which < or > was quoted, so `-C"/a>b">/dev/null`
+      # would be cut in the wrong place and `>"${sink}>"` would seem to take the
+      # next word; those are left to the scan below, as before. A word that
+      # starts with the operator, or with a descriptor number, is stepped over;
+      # one glued to a word before it is that word (`commit>out.txt`, `-C.>x`)
+      # when its target is glued too. When the target is the next word, reading
+      # the word alone would leave that target to be read as the subcommand
+      # (`-C.> commit commit`), so such a word is also left as before.
+      if [[ "${TOKEN_EXPANSION[scan_index]-}" != literal && "$current" == *[\<\>]* ]] \
+        && ((scan_index < orig_end)) && [[ "$QUOTED_TOKENS" != *" $scan_index "* ]]; then
+        redirect_word=${current%%[<>]*}
+        if [[ -z "$redirect_word" || "$redirect_word" != *[!0-9]* ]]; then
+          # Several can share a word (`2>"$sink">`): whether the next word is a
+          # target depends on how the word ends, not on its first operator.
+          scan_index=$((scan_index + 1))
+          if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& ]] \
+            && [[ "${TOKENS[scan_index]-}" != "$BOUNDARY_PREFIX"* ]]; then
+            scan_index=$((scan_index + 1))
+          fi
+          continue
+        fi
+        if [[ "$current" != *[\<\>] && "$current" != *[\<\>]\& ]]; then
+          current=$redirect_word
+        fi
+      fi
       case "$current" in
         -C)
           if ((scan_index + 1 < token_count)) && [[ "${TOKENS[scan_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
