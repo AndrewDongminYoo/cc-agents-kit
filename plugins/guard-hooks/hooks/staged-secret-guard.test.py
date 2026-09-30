@@ -526,6 +526,103 @@ for label, command in (
     check(f"{label} is refused", rc == 2, f"exit={rc}")
     check(f"{label} names the unreadable program", "program name this hook cannot read" in err, f"stderr={err.strip()[:160]}")
 
+# A heredoc fed to a literal cat or tee is only written, so its body is not read
+# as commands, and a line in it that names git through a variable is no refusal.
+for label, command in (
+    ("a script written through a heredoc", "cat > r.sh <<'X'\n$GIT commit -m release\nX"),
+    ("a Makefile written through a heredoc", "cat > Makefile <<'X'\nrelease:\n\t$(GIT) commit -am rel\nX"),
+    ("a script with -c written through a heredoc", "cat > s.sh <<'X'\ngit -c user.name=bot commit -m x\nX"),
+    ("a script written through tee", "tee r.sh <<'X'\n$GIT commit -m release\nX"),
+    ("a <<- body whose terminator is tab-indented", "cat > t.sh <<-'X'\n\t$GIT commit -m x\n\tX"),
+    ("two heredocs opened on one line", "cat > a <<'A' > b <<\\B\n$GIT commit -m a\nA\n$GIT commit -m b\nB"),
+    # bash reads the whole word as the delimiter, not its identifier prefix.
+    ("a delimiter that is not an identifier", "cat > d.sh <<'A-B'\n$GIT commit -m x\nA-B"),
+    # The skip is counted in characters, as the tokenizer reads them.
+    # Those words only count at a command's start, not in a body's prose.
+    ("a body whose prose names hash, enable and alias", "cat > m.txt <<'X'\nrecord the commit hash; enable it with an alias\n$GIT commit -m x\nX"),
+    ("a multibyte body, then a read-only command", "cat > k.md <<'EOF'\n한국어 본문 예시\n$GIT commit -m x\nEOF\ngit status"),
+):
+    rc, err = check_hook(command, plain)
+    check(f"{label} is not refused", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
+# Anywhere the body can still run, it is read as commands as before, so the
+# unreadable program name in it is refused. Each case holds one condition of
+# the skip, and fails if that condition is dropped.
+for label, command in (
+    ("a heredoc fed to bash", "bash <<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc piped to sh", "cat <<'X' | sh\n$GIT commit -m x\nX"),
+    ("a heredoc written into a process substitution", "cat <<'X' > >(sh)\n$GIT commit -m x\nX"),
+    ("a heredoc written to a duplicated descriptor", "cat <<'X' >&3\n$GIT commit -m x\nX"),
+    ("a heredoc inside a substitution that eval runs", "eval $(cat <<'X'\n$GIT commit -m x\nX\n)"),
+    ("a heredoc fed to a function named cat", "cat() { bash; }; cat <<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc after PATH is changed", "PATH=/tmp/bin:$PATH; cat <<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc glued to its command word", "cat<<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc behind an assignment prefix", "LC_ALL=C cat <<'X'\n$GIT commit -m x\nX"),
+    # No terminator means the parse may disagree with bash about where it ends.
+    ("an unterminated heredoc", "cat > u.sh <<'X'\n$GIT commit -m x"),
+    # An arithmetic shift is not a heredoc, and y is no delimiter.
+    ("an arithmetic shift", "(( x << y ))\n$GIT commit -m x\ny"),
+    # An unquoted delimiter leaves the body's substitutions to run, even for cat.
+    ("a heredoc whose unquoted body substitutes a command", "cat > o.txt <<EOF\n$($GIT commit -m x)\nEOF"),
+    # A group, loop or branch can pipe the whole body onward after its end.
+    ("a heredoc inside a group piped to bash", "{\ncat <<'EOF'\n$GIT commit -m x\nEOF\n} | bash"),
+    ("a heredoc inside a loop piped to sh", "for i in 1; do cat <<'EOF'\n$GIT commit -m x\nEOF\ndone | sh"),
+    # exec can point the command's own output at a shell.
+    ("a heredoc after exec redirects the output", "exec > >(bash)\ncat <<'EOF'\n$GIT commit -m x\nEOF"),
+    # A body that is read may open a heredoc of its own, which then runs in the
+    # outer body's context: substituted by an unquoted outer, or fed onward.
+    ("a quoted heredoc inside an unquoted outer body", "cat <<OUTER\ncat <<'INNER'\n$($GIT commit -m x)\nINNER\nOUTER"),
+    ("a quoted heredoc inside a body piped to bash", "bash <<'OUTER' | bash\ncat <<'INNER'\n$GIT commit -m x\nINNER\nOUTER"),
+    # bash removes a backslash inside a double-quoted delimiter, so E\OF ends it.
+    ("a double-quoted delimiter holding a backslash", 'cat <<"E\\\\OF"\nbody\nE\\OF\n$GIT commit -m x\nE\\\\OF'),
+    # Quote state can drift from the shell's: a quote in a comment inside a
+    # double-quoted substitution closes nothing for zsh or bash 5, which run
+    # this body through eval, but it did close the string here.
+    ("a heredoc inside a double-quoted substitution whose comment holds a quote", 'eval "$( # "\ncat <<\'Y\'\n$GIT commit -m x\nY\n)"'),
+    # A backtick substitution is not tracked, so a heredoc inside one runs.
+    ("a heredoc inside a backtick substitution that eval runs", "eval `\ncat <<'X'\n$GIT commit -m x\nX\n`"),
+    # Only a prefix of plain words and separators is trusted, so even a closed
+    # subshell before the heredoc keeps its body read.
+    ("a heredoc after a subshell", "(true)\ncat > f.sh <<'X'\n$GIT commit -m x\nX"),
+    # hash -p points cat at another program without a function, alias or PATH.
+    ("a heredoc fed to cat after hash -p", "hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    # Mid-word, << is not an operator: here it is a default value, and the
+    # command after it runs.
+    ("a << inside a parameter expansion", 'cat ${v:-<<"X"}\n$GIT commit -m x\nX}'),
+    # However hash is spelled or reached, it can repoint cat.
+    ("a heredoc fed to cat after builtin hash", "builtin hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc fed to cat after a quoted hash", "'hash' -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc fed to cat after a hash named by a variable", "h=hash; $h -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    ("a << after a space inside a parameter expansion", "cat ${v:- <<'X'}\n$GIT commit -m x\nX}"),
+    # A prefix word the hook does not read as a program keeps the body read.
+    ("a heredoc in a negated group piped to bash", "! {\ncat <<'X'\n$GIT commit -m x\nX\n} | bash"),
+    ("a heredoc fed to cat after time hash", "time hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    ("a heredoc fed to cat after a redirected hash", ">/dev/null hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    # cat<<B is a heredoc to the shell; left unnoted, it hides where its body
+    # ends, and a later cat <<'C' inside it would look top-level.
+    ("a heredoc after one glued to its command", "cat <<'A'; cat<<B\ndata\nA\ncat <<'C'\n$($GIT commit -m x)\nC\nB"),
+    # A string that spans lines is where a drifted quote state shows, so a
+    # heredoc after one is read even when, as here, nothing would run it.
+    ("a heredoc after a string that spans lines", 'echo "a\nb"\ncat > f.sh <<\'X\'\n$GIT commit -m x\nX'),
+):
+    rc, err = check_hook(command, plain)
+    check(f"{label} is still read and refused", rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
+# What follows a skipped body is read from the right place, with a credential
+# staged, so a commit there is scanned.
+for label, command in (
+    ("commit after a skipped body", "cat > a.txt <<'EOF'\nhello\nEOF\ngit commit -m x"),
+    ("commit after a skipped multibyte body", "cat > k.md <<'EOF'\n한국어 본문입니다 — 예시\nEOF\ngit commit -m x"),
+    ("commit after a skipped <<- body", "cat > t.txt <<-'EOF'\n\tbody\n\tEOF\ngit commit -m x"),
+    ("commit after two skipped bodies", "cat > a <<'A' > b <<\"B\"\na\nA\nb\nB\ngit commit -m x"),
+    ("commit after a line that only starts with the delimiter", "cat > a <<'EOF'\nEOFX\nEOF\ngit commit -m x"),
+    ("commit on the line that opens the heredoc", "cat > a <<'EOF'; git commit -m x\nbody\nEOF"),
+    ("commit after a delimiter that is not an identifier", "cat <<\\A-B\nx\nA-B\ngit commit -m x\nA"),
+    ("commit after a here-string", "cat <<<EOF\ngit commit -m x"),
+):
+    rc, err = check_hook(command, continued_commit_repo)
+    check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
 # Recursion is bounded: the hook must return, not inline forever.
 try:
     rc, _ = check_hook("a() { b; }; b() { a; }; a commit -m x", plain, timeout=20)

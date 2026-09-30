@@ -15,6 +15,17 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Fixed
 
+- `guard-hooks` 0.3.2 `staged-secret-guard` no longer reads a heredoc body as commands where nothing can run it.
+  Writing a script or a Makefile through a heredoc (`cat > r.sh <<'X'` with `$GIT commit` inside) was refused although the file is only being written, even with a clean index.
+  A body is now skipped as data only when it is fed to a literal `cat` or `tee` with a quoted delimiter, after nothing but plain words and separators; the full set of conditions is under Known limits in the README.
+  Every other body is still read as commands, because reading it is what catches a commit in `bash <<X`, `cat <<X | sh`, `cat <<X > >(sh)`, `{ cat <<'X' … } | bash`, `` eval ` `` or `eval $(` around a `cat <<'X'`, a `$(…)` inside an unquoted `cat <<X` body, a `cat <<'Y'` nested in a body that is itself run, and a `cat` repointed by `hash -p`, however `hash` is spelled.
+  The quote-state conditions exist because the tokenizer can disagree with the shell: in `eval "$( # "` the `"` sits in a comment for zsh and bash 5, which run the following `cat <<'Y'` body, while the tokenizer took it as the closing quote.
+  The two costs are listed under Known limits: a script written through `cat` is no longer scanned when it later runs, and a heredoc inside a double-quoted substitution is still read as commands.
+  Skipping a body also stops an apostrophe in its prose from flipping the tokenizer's quoting and swallowing the commands after the terminator, so a commit that follows a message written through `cat` is now seen.
+  Replayed against 1,283 distinct transcript commands that open a heredoc and mention `commit`, 63 commands whose commit the previous version never read are now scanned, and 2 commands that only wrote files are no longer refused; no command that runs a commit stopped being scanned.
+  One visible consequence: 19 of those 63 are now refused even with a clean index, because the commit the hook finally reads has a shape it already refuses to parse (a pipe or redirection on the commit, an unquoted `-F $S/msg.txt`, a `-C "$WT"`).
+  Run the commit on its own with literal paths, as the refusal says.
+  Tracked as #25.
 - `shellcheck-on-edit.test.py` passes without `shellcheck`, as `CLAUDE.md` says it does.
   Its opt-out case expected a warning that only `shellcheck` can produce; with no binary reachable it now asserts the silent no-op instead.
   The suite also stopped counting `~/.claude/.trunk/tools/shellcheck` as available, because the hook never looks there, so a machine with only that copy failed the findings cases too.

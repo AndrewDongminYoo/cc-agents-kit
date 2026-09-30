@@ -128,6 +128,170 @@ flush_token() {
     token_redirect=""
   fi
 }
+
+# A heredoc body is data, not commands, but only where nothing can run it.
+# Parsing `cat > r.sh <<'X'` / `$GIT commit` / `X` as commands refused a file
+# that is only being written. Skipping every body would be the opposite error:
+# `bash <<X`, `cat <<X | sh`, `eval $(cat <<X` and `cat <<X > >(sh)` run their
+# body, and reading it as commands is what catches a commit there today. So a
+# body is skipped only when every heredoc opened on the line is fed to a literal
+# `cat` or `tee` at the top level, the line has no pipe, parenthesis or fd
+# duplication, each delimiter is quoted and parses completely, and each
+# terminator line is found. Any doubt reads the bodies as before, where the cost
+# is a refusal. An unquoted delimiter leaves the body's $(...) and backticks to
+# run. Top level is checked on the tokens before the heredoc, not by naming each
+# context that can reach one: every command there has to start with a literal
+# program name (after any NAME=value), and none of them may be a group, branch,
+# loop, function, exec, coproc, eval, source, trap, or a builtin that can make
+# `cat` something else (alias, hash, enable, builtin, command); no token may
+# hold a parenthesis or substitution boundary, a backtick, `${`, a newline or a
+# PATH assignment. Reviews found each of those reaching a heredoc one at a time:
+# `{ cat <<'X' … } | bash`, `` eval ` ``, `hash -p /bin/bash cat`, `cat ${v:-
+# <<'X'}`. Checking tokens rather than the raw text also keeps prose in a body
+# that says "commit hash" from counting.
+heredoc_skip_ok=1
+HEREDOC_DELIMS=()
+HEREDOC_TABS=()
+heredoc_doubt=""
+heredoc_start=""
+# Called at an unquoted `<<` that is not `<<<`. Reads the delimiter bash would
+# read -- the whole word up to a blank or metacharacter, quotes removed -- and
+# the simple command the heredoc belongs to.
+note_heredoc() {
+  local pos=$((command_pos + 2)) c delim="" q="" tabs="" first_index quoted="" index word at_start=1
+  if [[ "${COMMAND:pos:1}" == "-" ]]; then
+    tabs=1
+    pos=$((pos + 1))
+  fi
+  while [[ "${COMMAND:pos:1}" == " " || "${COMMAND:pos:1}" == $'\t' ]]; do pos=$((pos + 1)); done
+  while ((pos < command_len)); do
+    c=${COMMAND:pos:1}
+    if [[ -n "$q" ]]; then
+      [[ "$c" != $'\n' ]] || break
+      # Inside double quotes bash still removes some backslashes; rather than
+      # model which, such a delimiter is not trusted.
+      if [[ "$q" == '"' ]] && [[ "$c" == "\\" || "$c" == '$' || "$c" == '`' ]]; then
+        heredoc_doubt=1
+        return
+      fi
+      if [[ "$c" == "$q" ]]; then q=""; else delim="$delim$c"; fi
+    else
+      case "$c" in
+        "'" | '"')
+          q=$c
+          quoted=1
+          ;;
+        "\\")
+          quoted=1
+          pos=$((pos + 1))
+          c=${COMMAND:pos:1}
+          if [[ -z "$c" || "$c" == $'\n' ]]; then
+            heredoc_doubt=1
+            return
+          fi
+          delim="$delim$c"
+          ;;
+        '$' | '`')
+          heredoc_doubt=1
+          return
+          ;;
+        " " | $'\t' | $'\n' | ";" | "&" | "|" | "(" | ")" | "<" | ">") break ;;
+        *) delim="$delim$c" ;;
+      esac
+    fi
+    pos=$((pos + 1))
+  done
+  if [[ -n "$q" || -z "$delim" || -z "$quoted" || -n "$subst_stack" ]]; then
+    heredoc_doubt=1
+    return
+  fi
+  # Only a quoted string holds a newline, and one that spans lines is where a
+  # drifted quote state would show.
+  for ((index = 0; index < ${#TOKENS[@]}; index++)); do
+    word=${TOKENS[index]}
+    # shellcheck disable=SC2016  # a literal ${ to match, not an expansion
+    case "$word" in
+      *"$NEWLINE"* | *'`'* | *'${'* | PATH=* | "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$"*)
+        heredoc_doubt=1
+        return
+        ;;
+      "$BOUNDARY_PREFIX"*)
+        at_start=1
+        continue
+        ;;
+    esac
+    [[ -n "$at_start" ]] || continue
+    if [[ -z "${TOKEN_EXPANSION[index]-}" && "$word" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      continue
+    fi
+    # A program name is a plain word: this rules out `!`, a leading
+    # redirection, `[[` and `((`, whose effect on what follows is not read here.
+    if [[ -n "${TOKEN_EXPANSION[index]-}" || ! "$word" =~ ^[A-Za-z0-9_][A-Za-z0-9_./+-]*$ ]]; then
+      heredoc_doubt=1
+      return
+    fi
+    case "$word" in
+      if | then | else | elif | do | while | until | for | case | select | function | exec | coproc | time \
+        | eval | source | trap | alias | hash | enable | builtin | command)
+        heredoc_doubt=1
+        return
+        ;;
+    esac
+    at_start=""
+  done
+  # The command's first word is the first token after the last boundary; one
+  # still being built (`cat<<X`) has not been flushed, and is not trusted.
+  first_index=${#TOKENS[@]}
+  while ((first_index > 0)) && [[ "${TOKENS[first_index - 1]}" != "$BOUNDARY_PREFIX"* ]]; do
+    first_index=$((first_index - 1))
+  done
+  if ((first_index == ${#TOKENS[@]})) || [[ -n "${TOKEN_EXPANSION[first_index]}" ]] \
+    || [[ "${TOKENS[first_index]}" != cat && "${TOKENS[first_index]}" != tee ]]; then
+    heredoc_doubt=1
+    return
+  fi
+  [[ -n "$heredoc_start" ]] || heredoc_start=$first_index
+  HEREDOC_DELIMS+=("$delim")
+  HEREDOC_TABS+=("$tabs")
+}
+# Called at the unquoted newline that ends a line which opened heredocs. On a
+# skip, command_pos moves to the newline that ends the last terminator line, so
+# the loop's own increment starts the next command after it.
+skip_heredoc_bodies() {
+  local index=0 offset=0 line raw count=${#HEREDOC_DELIMS[@]} token skipped=""
+  if [[ -n "$heredoc_skip_ok" && -z "$heredoc_doubt" ]]; then
+    for ((index = heredoc_start; index < ${#TOKENS[@]}; index++)); do
+      token=${TOKENS[index]}
+      case "$token" in
+        "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$"*) heredoc_doubt=1 ;;
+        *'>&'* | *'<&'* | *'`'*) heredoc_doubt=1 ;;
+      esac
+    done
+    index=0
+    if [[ -z "$heredoc_doubt" ]]; then
+      while IFS= read -r raw; do
+        offset=$((offset + ${#raw} + 1))
+        line=$raw
+        [[ -z "${HEREDOC_TABS[index]}" ]] || line=${line#"${line%%[!$'\t']*}"}
+        if [[ "$line" == "${HEREDOC_DELIMS[index]}" ]]; then
+          index=$((index + 1))
+          ((index < count)) || break
+        fi
+      done <<<"${COMMAND:command_pos+1}"
+      ((index < count)) || skipped=1
+      [[ -z "$skipped" ]] || command_pos=$((command_pos + offset))
+    fi
+  fi
+  # A body read as commands may itself open a heredoc (`bash <<'X' | bash` over
+  # `cat <<'Y'`), and that one runs in the outer body's context, not at the top
+  # level. Where the outer body ends is not tracked, so once any body is read,
+  # none after it is skipped.
+  [[ -n "$skipped" ]] || heredoc_skip_ok=""
+  HEREDOC_DELIMS=()
+  HEREDOC_TABS=()
+  heredoc_doubt=""
+  heredoc_start=""
+}
 command_len=${#COMMAND}
 command_pos=0
 while ((command_pos < command_len)); do
@@ -154,10 +318,24 @@ while ((command_pos < command_len)); do
       if [[ "$char" == '$' || "$char" == '`' ]] && [[ -z "$token_expansion" ]]; then
         token_expansion="quoted"
       fi
+      # A substitution inside double quotes is not parsed here, so a quote or a
+      # comment inside it can leave this quote state wrong for the rest of the
+      # command, and a heredoc that looks top-level may be inside it.
+      if [[ "$char" == '`' ]] || [[ "$char" == '(' && "${COMMAND:command_pos-1:1}" == '$' ]]; then
+        heredoc_skip_ok=""
+      fi
     fi
   else
     case "$char" in
-      "'" | '"') quote="$char"; token_started=1; token_quoted=1 ;;
+      "'" | '"')
+        quote="$char"
+        token_started=1
+        token_quoted=1
+        # $'…' honours \' where plain single quotes do not, so the quote state
+        # can drift from bash's after it. No case was found where that drift
+        # hides a body the shell runs; this is hardening, not a known leak.
+        [[ "$char" != "'" || -z "$prev_dollar" ]] || heredoc_skip_ok=""
+        ;;
       "#")
         if [[ -n "$token_started" ]]; then
           token="$token$char"
@@ -188,6 +366,7 @@ while ((command_pos < command_len)); do
           TOKENS+=("$BOUNDARY_PREFIX;")
           TOKEN_EXPANSION+=("")
         fi
+        [[ -z "${HEREDOC_DELIMS[*]-}$heredoc_doubt" ]] || skip_heredoc_bodies
         ;;
       ";" | "|" | "&")
         if [[ "$char" == "&" && -n "$prev_redirect" ]]; then
@@ -230,6 +409,20 @@ while ((command_pos < command_len)); do
         # "$base"$d splits, however the first half was written.
         [[ "$char" == '$' || "$char" == '`' ]] && token_expansion="split"
         [[ "$char" != '$' ]] || last_unquoted_dollar=1
+        # The first `<` of exactly two opens a heredoc; `<<<` is a here-string.
+        # Only at the start of a word, or after a descriptor number: mid-word,
+        # as in ${v:-<<X}, it is not an operator, and a body left unnoted is
+        # read as commands.
+        if [[ "$char" == '<' && -z "$prev_redirect" && "${COMMAND:command_pos+1:1}" == '<' ]] \
+          && [[ "${COMMAND:command_pos+2:1}" != '<' ]]; then
+          if [[ "${token%?}" != *[!0-9]* ]]; then
+            note_heredoc
+          else
+            # `cat<<B` is a heredoc to bash too, and one that is not noted
+            # leaves where its body ends unknown for everything after it.
+            heredoc_skip_ok=""
+          fi
+        fi
         if [[ "$char" == '<' || "$char" == '>' ]]; then
           token_redirect=1
           last_unquoted_redirect=1
