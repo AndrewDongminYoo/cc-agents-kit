@@ -856,7 +856,7 @@ while :; do
     if [[ -z "$redirect_word" || "$redirect_word" == "&" || "$redirect_word" != *[!0-9]* ]] \
       || [[ "$redirect_word" =~ $FD_VARNAME ]]; then
       next_index=$((token_index + 1))
-      if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]]; then
+      if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| || "$current" == *\<\<- ]]; then
         case "${TOKENS[next_index]-}" in
           "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX\$("* | "<" | ">") refuse_git_ahead "$next_index" ;;
           "$BOUNDARY_PREFIX"*) ;;
@@ -876,7 +876,7 @@ while :; do
     # A program glued to a redirection (`git>out commit`) is that program, and
     # its target is glued too unless the word ends in an operator or runs on
     # into a command substitution (`git>$(echo f)`).
-    if [[ "$QUOTED_TOKENS" == *" $token_index "* || "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]] \
+    if [[ "$QUOTED_TOKENS" == *" $token_index "* || "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| || "$current" == *\<\<- ]] \
       || [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX\$("* ]]; then
       [[ "${redirect_word##*/}" != git && "$redirect_word" != *'$'* ]] || block_unparsed
     else
@@ -890,15 +890,21 @@ while :; do
         token_index=$((token_index + 1))
         continue
         ;;
-      -a* | -[cl]a* | -[cl][cl]a*)
-        # The name is the rest of this word after its first a (`-afoo`,
-        # `-afooa`), or the next word when nothing follows that a.
-        if [[ "$current" == -a || "$current" == -[cl]a || "$current" == -[cl][cl]a ]]; then
+      -?*)
+        # Any cluster of c and l (`-clc`), then, if an a follows, the name:
+        # the rest of this word after that a (`-afoo`, `-afooa`), or the next
+        # word when nothing follows it. Any other letter makes exec fail, so
+        # reading it as an option only errs toward a scan.
+        exec_opts=${current#-}
+        if [[ "$exec_opts" != *a* ]]; then
+          token_index=$((token_index + 1))
+          continue
+        fi
+        name_index=$token_index
+        exec_name=${exec_opts#*a}
+        if [[ -z "$exec_name" ]]; then
           name_index=$((token_index + 1))
           exec_name=${TOKENS[name_index]-}
-        else
-          name_index=$token_index
-          exec_name=${current#*a}
         fi
         if [[ "$exec_name" != "$BOUNDARY_PREFIX"* ]]; then
           # Run under a name starting git-, git takes the rest as its
@@ -912,10 +918,6 @@ while :; do
           token_index=$((name_index + 1))
           continue
         fi
-        ;;
-      -[cl] | -[cl][cl])
-        token_index=$((token_index + 1))
-        continue
         ;;
     esac
     exec_prefix=""
@@ -1100,7 +1102,7 @@ while :; do
       if [[ "$arg_kind" != literal && "$arg_word" == *[\<\>]* ]]; then
         redirect_last=$arg_index
         redirect_op=${arg_word#*[<>]}
-        [[ "$redirect_op" == *[!\<\>\&\|]* ]] || redirect_target=1
+        [[ "$redirect_op" == *[!\<\>\&\|]* && "$redirect_op" != "<-" ]] || redirect_target=1
         arg_word=${arg_word%%[<>]*}
         if [[ "$arg_word" != *[!0-9]* || "$arg_word" == "&" ]] || [[ "$arg_word" =~ $FD_VARNAME ]]; then
           continue
@@ -1233,9 +1235,10 @@ while :; do
       INLINE_TOKENS+=("$BOUNDARY_PREFIX;")
       INLINE_EXPANSION+=("")
     done
-    if [[ -z "$call_certain" && "$current" == "git" ]]; then
-      # No definition of git is sure to be in effect, so git itself may run.
-      INLINE_TOKENS+=(command git)
+    if [[ -z "$call_certain" ]] && [[ "$current" == "git" || "$current" == "exec" ]]; then
+      # No definition of git (or exec) is sure to be in effect, so git itself
+      # (or the exec builtin) may run.
+      INLINE_TOKENS+=(command "$current")
       INLINE_EXPANSION+=("" "")
       for ((arg_index = 0; arg_index < call_count; arg_index++)); do
         inline_word "${CALL_WORDS[arg_index]}" "${CALL_KINDS[arg_index]}"
@@ -1372,7 +1375,7 @@ while :; do
           # Several can share a word (`2>"$sink">`): whether the next word is a
           # target depends on how the word ends, not on its first operator.
           scan_index=$((scan_index + 1))
-          if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| ]]; then
+          if [[ "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| || "$current" == *\<\<- ]]; then
             # A target that is a process or command substitution
             # (`> >(cat)`, tokenized as `>` then a parenthesis) spans several
             # tokens; where it ends is not followed here.
@@ -1405,7 +1408,7 @@ while :; do
               ;;
           esac
           continue
-        elif [[ -z "$redirect_unsure" && "$current" != *[\<\>] && "$current" != *[\<\>]\& && "$current" != *\>\| ]]; then
+        elif [[ -z "$redirect_unsure" && "$current" != *[\<\>] && "$current" != *[\<\>]\& && "$current" != *\>\| && "$current" != *\<\<- ]]; then
           current=$redirect_word
         fi
       fi
