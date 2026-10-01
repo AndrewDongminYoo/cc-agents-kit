@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-01
+
+`staged-secret-guard` now reads a commit in many more shell shapes: through a shell function, inside a brace group, behind `exec`, after a redirection, and past a heredoc that nothing runs, and its tokenizer no longer slows down under a multibyte locale.
+A new `guard-hooks` hook surfaces Claude Code's automatic security-review findings after a commit, `repo-gate`'s `fix-osv-vulnerabilities` covers Bundler, and `session-to-md` makes its turn index opt-in.
+`guard-hooks` moves from 0.2.8 to 0.3.4, `repo-gate` from 0.2.0 to 0.2.3, and `context-handoff` from 0.2.0 to 0.2.1.
+
 ### Added
 
 - `repo-gate` 0.2.2 `fix-osv-vulnerabilities` covers Bundler.
@@ -12,6 +18,17 @@ Entries are grouped by release; the topmost section collects work that has not y
   It then says what to check: the versions the lockfile actually resolved (`--update` goes to the newest release the requirements admit, for every gem it names), one fix per lockfile, the other gems a parent moved, the Ruby floor, and which code paths only a real lane exercises.
   The workflow diagram routes Bundler direct and transitive dependencies to that section.
   It also says how to make a clean `trunk check` fail first: on the pre-fix tree trunk reports the vulnerability as an existing issue and exits 0, so pass `--show-existing` and read the output, and pin that tree by SHA rather than `HEAD`, which a parallel commit can move past the fix.
+- `guard-hooks` 0.3.0 adds a ninth hook, `security-review-findings`, which surfaces Claude Code's automatic security-review findings after a `git commit`.
+  Those reviews run in background sessions that commit and change nothing, so a finding they produced had no way to reach the session that made the edit; the hook reads the ones stored for this session's project in the last two days and adds them to the commit's result as a warning.
+  It never blocks, fires only on a `git … commit` (read by position past git's global options, so `git log --grep commit` is not one), reports a given set of findings once per session, and caps the report at 200 lines.
+  `security-review-findings.sh --print [--full] [cwd]` prints the same list as plain text for a pre-commit action outside Claude Code.
+  The commit shapes it recognises are the ones Claude Code's own Bash calls produce; the README states that scope.
+
+### Changed
+
+- `context-handoff` 0.2.1 `session-to-md` leaves the turn index out of Markdown and HTML exports by default.
+  Pass `--toc` to include it; transcript filtering and the tool and thinking controls are unchanged, and the `session-export` skill adds `--toc` only when navigation is asked for.
+  The change shipped in #22 without a version bump, so installed copies kept 0.2.0 until this one.
 
 ### Fixed
 
@@ -71,6 +88,9 @@ Entries are grouped by release; the topmost section collects work that has not y
   Tracked as #12.
 - `staged-secret-guard` reads an unquoted `#` at the start of a word as a comment.
   `git commit -m x # note` passed `#` and `note` as pathspecs, scanned a candidate git never commits, and let a staged credential through; this was true before this release.
+- `guard-hooks` 0.2.9 `staged-secret-guard` names an unquoted expansion as the reason it refuses a git command whose subcommand it cannot identify.
+  The refusal itself is unchanged, but it used to say `could not safely parse this git commit command`, although the command is usually not a commit (`V=/tmp; git -C $V log`, a `for` loop over an unquoted path); it now says the command may not be a commit and that quoting the expansion is the fix.
+  A commit that was identified and then could not be scanned (`-F -`, an unresolvable `-F $VAR`, a pipe on the commit line) keeps the parse message.
 
 ## [0.5.0] — 2026-09-10
 
