@@ -15,6 +15,17 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Fixed
 
+- `guard-hooks` 0.3.4 `staged-secret-guard` recognises a commit behind `exec`, and one whose subcommand follows a redirection.
+  `exec` is read past as `command` is, with any cluster of its `-c` and `-l` options and `-a NAME`, so `exec git commit -m x` and `exec -clc git commit -m x` are scanned, and so is `command exec` or `builtin exec` past a function named `exec`, or a plain `exec` past one that may have been unset.
+  The name may be attached (`exec -afoo git commit`), and git run under a name starting `git-` takes the rest as its subcommand, so a git after `exec -a git-commit` is refused.
+  A redirection before the program or between `git` and its subcommand is stepped over, target and all, as the shell removes it, so `>/dev/null git commit`, `exec 3>&1 git commit`, `git >/dev/null commit`, `git 2>&1 commit`, `git >| out.txt commit`, `git &>out.txt commit`, `git {fd}>out commit`, `git > out.txt commit`, `git <<- EOF commit` and `git -C . 2>/dev/null commit` are scanned; a word glued to a redirection stays a word, so `git>/dev/null commit` and `git commit>out.txt` are scanned too.
+  Each of these ran `git commit` unscanned before, with a credential staged.
+  Where a redirection cannot be followed, git is refused outright rather than guessed at, since its subcommand can be spelled many ways (`-c alias.ci=commit ci`): a process or command substitution target (`git > >(cat) log`, `> >(cat) git log`, `git > $(echo f) log`), one where `-C`'s path should be (`git -C >out . log`), one whose last operator may be quoted (`>"${sink}>"`), a `-C` value holding a quoted `>` (`-C"/a>b">/dev/null`), and a glued word whose target is the next word (`-C.> log`).
+  A redirection with a quoted part is otherwise stepped over (`git >"/tmp/out" commit` is scanned).
+  A shell function's arguments lose `&>`, `>|`, `{fd}>` and `2>&-` redirections as the shell removes them, so none of them narrows the scan to a path (`g() { git "$@"; }; g commit -m x &>/dev/null` scans the whole index), and a function call whose redirection target is a substitution leaves its arguments unresolved, so a git in the function that takes them is refused.
+  `&>` and `&>>` are now read as redirections rather than a background `&`, so among commit's own arguments (`git commit -m x &>/dev/null`) they are refused as `>` already was, where before the commit was scanned.
+  A command substitution inside double quotes (`out="$(git commit …)"`), runners such as `nohup`, `sudo` and `xargs`, and backticks remain unrecognised; #24 records why the double-quoted substitution is not a small change after the heredoc skip.
+  Tracked as #24.
 - `guard-hooks` 0.3.3 `staged-secret-guard` tokenizes a command in bytes whatever the caller's locale.
   Its tokenizer reads one character at a time, and under a multibyte locale, the macOS default, each read walked the command from its start, so a large command ran past the hook's 10 s timeout, where it fails open: a 59 KB command took 45 s under `en_US.UTF-8` against 10 s under `C`, and a 22 KB one took 6 s against 1 s.
   Every delimiter it looks for is ASCII and no byte of a multibyte UTF-8 character equals one, so bytes give the same tokens: replayed under `en_US.UTF-8` against the previous version, 1,216 distinct transcript commands that open a heredoc and mention `commit` got the same verdict in a clean repository and with a credential staged.
