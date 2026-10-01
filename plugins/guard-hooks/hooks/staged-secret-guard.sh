@@ -143,10 +143,11 @@ token_quoted=""
 # after an unquoted < or > belongs to it (`2>&1`), not a background job.
 token_redirect=""
 last_unquoted_redirect=""
-# The indexes of the tokens that had any quoted or escaped part, space-separated.
+# Set at the index of each token that had any quoted or escaped part (an array,
+# not a growing string, so recording one does not copy all the others).
 # Quote removal loses which < or > was quoted, so only a token with none is
 # trusted to be a redirection where git's subcommand is looked for.
-QUOTED_TOKENS=" "
+TOKEN_QUOTED=()
 # An unquoted # at the start of a word opens a comment that runs to the end of
 # the line. Read as words, `git commit -m x # note` passed # and note as
 # pathspecs, scanned a candidate git never commits, and let the commit through.
@@ -165,7 +166,7 @@ flush_token() {
         '$'[@*] | '${'[@*]'}' | '${'[@*]':'[1-9]'}') token_expansion="split-words" ;;
       esac
     fi
-    [[ -z "$token_quoted" ]] || QUOTED_TOKENS="$QUOTED_TOKENS${#TOKENS[@]} "
+    [[ -z "$token_quoted" ]] || TOKEN_QUOTED[${#TOKENS[@]}]=1
     TOKENS+=("$token")
     TOKEN_EXPANSION+=("$token_expansion")
     token=""
@@ -861,7 +862,7 @@ while :; do
           "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX\$("* | "<" | ">") refuse_git_ahead "$next_index" ;;
           "$BOUNDARY_PREFIX"*) ;;
           *)
-            [[ "$QUOTED_TOKENS" != *" $token_index "* ]] || refuse_git_ahead "$next_index"
+            [[ -z "${TOKEN_QUOTED[token_index]-}" ]] || refuse_git_ahead "$next_index"
             next_index=$((next_index + 1))
             ;;
         esac
@@ -876,7 +877,7 @@ while :; do
     # A program glued to a redirection (`git>out commit`) is that program, and
     # its target is glued too unless the word ends in an operator or runs on
     # into a command substitution (`git>$(echo f)`).
-    if [[ "$QUOTED_TOKENS" == *" $token_index "* || "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| || "$current" == *\<\<- ]] \
+    if [[ -n "${TOKEN_QUOTED[token_index]-}" || "$current" == *[\<\>] || "$current" == *[\<\>]\& || "$current" == *\>\| || "$current" == *\<\<- ]] \
       || [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX\$("* ]]; then
       [[ "${redirect_word##*/}" != git && "$redirect_word" != *'$'* ]] || block_unparsed
     else
@@ -1365,7 +1366,7 @@ while :; do
       if [[ "${TOKEN_EXPANSION[scan_index]-}" != literal && "$current" == *[\<\>]* ]]; then
         redirect_word=${current%%[<>]*}
         redirect_unsure=""
-        if ((scan_index >= orig_end)) || [[ "$QUOTED_TOKENS" == *" $scan_index "* ]]; then
+        if ((scan_index >= orig_end)) || [[ -n "${TOKEN_QUOTED[scan_index]-}" ]]; then
           redirect_unsure=1
         fi
         # A descriptor is a number or, since bash 4.1, a `{varname}` the shell
