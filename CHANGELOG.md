@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-01
+
+`staged-secret-guard` now reads a commit in many more shell shapes: through a shell function, inside a brace group, behind `exec`, after a redirection, and past a heredoc that nothing runs, and its tokenizer no longer slows down under a multibyte locale.
+A new `guard-hooks` hook surfaces Claude Code's automatic security-review findings after a commit, `repo-gate`'s `fix-osv-vulnerabilities` covers Bundler, and `session-to-md` makes its turn index opt-in.
+`guard-hooks` moves from 0.2.8 to 0.3.4, `repo-gate` from 0.2.0 to 0.2.3, and `context-handoff` from 0.2.0 to 0.2.1.
+
 ### Added
 
 - `repo-gate` 0.2.2 `fix-osv-vulnerabilities` covers Bundler.
