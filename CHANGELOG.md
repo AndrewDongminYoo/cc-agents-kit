@@ -13,6 +13,12 @@ Entries are grouped by release; the topmost section collects work that has not y
   The workflow diagram routes Bundler direct and transitive dependencies to that section.
   It also says how to make a clean `trunk check` fail first: on the pre-fix tree trunk reports the vulnerability as an existing issue and exits 0, so pass `--show-existing` and read the output, and pin that tree by SHA rather than `HEAD`, which a parallel commit can move past the fix.
 
+### Changed
+
+- `context-handoff` 0.2.1 `session-to-md` leaves the turn index out of Markdown and HTML exports by default.
+  Pass `--toc` to include it; transcript filtering and the tool and thinking controls are unchanged, and the `session-export` skill adds `--toc` only when navigation is asked for.
+  The change shipped in #22 without a version bump, so installed copies kept 0.2.0 until this one.
+
 ### Fixed
 
 - `guard-hooks` 0.3.4 `staged-secret-guard` recognises a commit behind `exec`, and one whose subcommand follows a redirection.
