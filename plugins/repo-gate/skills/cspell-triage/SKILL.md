@@ -47,6 +47,7 @@ If a runner deliberately points at a non-root path, keep the root config authori
 Otherwise consolidate to the root and delete the orphan.
 
 Set `useGitignore: true` while you are there — without it, ignored trees are still scanned.
+In some linked worktrees the same setting hides every file; see "Reading `Files checked: 0` as a clean run" under Common mistakes.
 
 **Put the scan surface in the config, never in the gate command — and only widen it when the repo has something to widen it for.**
 By default cspell skips every path beginning with `.`. Whether that hides anything is one command:
@@ -254,6 +255,12 @@ The same split applies to inline directives, which is easy to get wrong:
   After injection, the same gate must fail and its output must name the exact canary token.
   If `cmp` fails, restore the pre-existing diff manually before continuing.
   Never create or delete a file in a source directory to test a spell checker — in a Flutter repo, `lib/main.dart` is the conventional entry point, so both creating and removing it carry meaning far beyond this task, and `rm` in a tracked tree is not a scratch operation.
+- **Reading `Files checked: 0` as a clean run.**
+  With `useGitignore: true`, a linked worktree (`git worktree add`) that sits inside another repository's working tree can check nothing: `CSpell: Files checked: 0, Issues found: 0`, which reads as a pass.
+  The enclosing repository is what matters, not the worktree alone.
+  Measured with cspell 9 on one throwaway repository: a linked worktree outside any other repository checked 1 file, the same kind of worktree inside a home directory that is itself a git root ignoring `*` checked 0, a plain clone in that same home directory checked 1, and the home-directory worktree with `--no-gitignore` checked 1 again.
+  The same zero appeared in local worktree runs in three different repositories; in one of them CI, on a plain checkout, then failed on a word the worktree run had passed.
+  In a linked worktree, pass `--no-gitignore` and give cspell the tracked files, `git ls-files -z | xargs -0 cspell --no-progress --no-gitignore`, and read the `Files checked` count before quoting the issue count.
 - **Adding tokenization fragments.**
   `abli`, `alism`, `aliti`, `singl`, `failur` are stemmer output from a committed search index.
   They mean a generated tree is being scanned — that is disposition 5, not 200 dictionary entries.
