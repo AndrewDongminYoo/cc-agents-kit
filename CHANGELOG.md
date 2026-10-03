@@ -5,6 +5,14 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Fixed
+
+- `guard-hooks` 0.3.5 `staged-secret-guard` refuses an unresolved external-git or builtin-exec fallback after a shell function may have been unset and its arguments end at a substitution redirection.
+  `git() { :; }; unset -f git; git > >(cat) commit -m x` and `exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x` previously committed staged credentials without a scan.
+  The fallback now reads the original call through the existing git/exec parser, which can refuse the unresolved redirection without losing the remaining arguments; certain no-op functions and already identified read-only commands such as `git log -1 > $(echo f)` retain their verdicts.
+  Process and command substitution targets, nested targets, aliases, and exec option placements are covered by regressions.
+  This addresses the fallback finding deferred from #34; the other known limits tracked in #24 remain open.
+
 ## [0.6.1] — 2026-10-03
 
 `repo-gate`'s `cspell-triage` now warns that a cspell run in a linked git worktree inside another repository's working tree can check no files at all and still read as a pass, and says how to stop it with one config line.
