@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Fixed
+
+- `repo-gate` 0.2.4 `cspell-triage` names the zero-file trap: with `useGitignore: true`, a linked worktree inside another repository's working tree can report `Files checked: 0, Issues found: 0`, which reads as a pass.
+  A throwaway-repository probe with cspell 9 isolates the enclosing repository as the trigger, and the skill now says to pair `useGitignore: true` with `gitignoreRoot: "."` in the config, which stops the `.gitignore` lookup at the repository root without depending on the gate command forwarding a flag (`--gitignore-root .` for a one-off direct call), and to read the `Files checked` count before quoting a result.
+  Its description also fires before a result from a git worktree, or one reporting no checked files, is trusted, since that run reports no unknown word to trigger the skill on its own.
+
 ## [0.6.0] — 2026-10-01
 
 `staged-secret-guard` now reads a commit in many more shell shapes: through a shell function, inside a brace group, behind `exec`, after a redirection, and past a heredoc that nothing runs, and its tokenizer no longer slows down under a multibyte locale.
