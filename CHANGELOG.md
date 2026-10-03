@@ -7,6 +7,9 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Fixed
 
+- `guard-hooks` 0.3.6 `staged-secret-guard` reads its command through a small byte buffer and appends ordinary character runs together, keeping large executable heredocs and quoted words below the hook's 10 s timeout in the regression fixtures.
+  Quotes, escapes, operators, expansions and heredoc safety decisions keep their existing parsing; buffer-edge and UTF-8 regressions verify that a real commit following large input still scans the staged credentials.
+  This addresses the remaining tokenizer cost in #26; function-name lookup optimization remains separate.
 - `guard-hooks` 0.3.5 `staged-secret-guard` refuses an unresolved external-git or builtin-exec fallback after a shell function may have been unset and its arguments end at a substitution redirection.
   `git() { :; }; unset -f git; git > >(cat) commit -m x` and `exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x` previously committed staged credentials without a scan.
   The fallback now reads the original call through the existing git/exec parser, which can refuse the unresolved redirection without losing the remaining arguments; certain no-op functions and already identified read-only commands such as `git log -1 > $(echo f)` retain their verdicts.
