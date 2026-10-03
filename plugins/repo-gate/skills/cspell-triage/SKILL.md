@@ -266,6 +266,7 @@ The same split applies to inline directives, which is easy to get wrong:
   For a one-off direct cspell call, the CLI equivalent is `--gitignore-root .`: on the same kind of worktree, holding an untracked file, an unstaged deletion, a non-ASCII name and a name starting with `-`, `npx -y cspell --gitignore-root . .` checked 3 files and raised no error.
   Rebuilding the file list instead (`git ls-files` piped into `--no-gitignore`) broke on those same cases one at a time: a dash-led name read as an option, a quoted non-ASCII name, a deleted path reported as an error.
   Read the `Files checked` count before quoting the issue count.
+  Where the gate suppresses that summary — Trunk runs cspell with `--no-summary` (see `references/mechanisms.md`, Trunk integration) — prove the gate with the canary procedure in "Declaring the gate green from a scoped run" above instead: a gate that checked nothing cannot fail on the canary.
 - **Adding tokenization fragments.**
   `abli`, `alism`, `aliti`, `singl`, `failur` are stemmer output from a committed search index.
   They mean a generated tree is being scanned — that is disposition 5, not 200 dictionary entries.
