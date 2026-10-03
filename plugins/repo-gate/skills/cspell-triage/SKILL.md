@@ -260,7 +260,7 @@ The same split applies to inline directives, which is easy to get wrong:
   The enclosing repository is what matters, not the worktree alone.
   Measured with cspell 9 on one throwaway repository: a linked worktree outside any other repository checked 1 file, the same kind of worktree inside a home directory that is itself a git root ignoring `*` checked 0, a plain clone in that same home directory checked 1, and the home-directory worktree with `--no-gitignore` checked 1 again.
   The same zero appeared in local worktree runs in three different repositories; in one of them CI, on a plain checkout, then failed on a word the worktree run had passed.
-  In a linked worktree, pass `--no-gitignore` and give cspell the tracked files, `git ls-files -z | xargs -0 cspell --no-progress --no-gitignore`, and read the `Files checked` count before quoting the issue count.
+  In a linked worktree, keep the repository's own launcher and add `--no-gitignore` with the tracked files as input — for a gate of `npx -y cspell .`, that is `git ls-files -z | xargs -0 npx -y cspell --no-progress --no-gitignore` — and read the `Files checked` count before quoting the issue count.
 - **Adding tokenization fragments.**
   `abli`, `alism`, `aliti`, `singl`, `failur` are stemmer output from a committed search index.
   They mean a generated tree is being scanned — that is disposition 5, not 200 dictionary entries.
