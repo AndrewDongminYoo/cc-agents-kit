@@ -260,9 +260,11 @@ The same split applies to inline directives, which is easy to get wrong:
   The enclosing repository is what matters, not the worktree alone.
   Measured with cspell 9 on one throwaway repository: a linked worktree outside any other repository checked 1 file, the same kind of worktree inside a home directory that is itself a git root ignoring `*` checked 0, a plain clone in that same home directory checked 1, and the home-directory worktree with `--no-gitignore` checked 1 again.
   The same zero appeared in local worktree runs in three different repositories; in one of them CI, on a plain checkout, then failed on a word the worktree run had passed.
-  In a linked worktree, keep the repository's own launcher and add `--no-gitignore` with git's own file list on standard input, tracked plus untracked-but-not-ignored so that a new unstaged file is still checked — for a gate of `npx -y cspell .`, that is `git ls-files --cached --others --exclude-standard | npx -y cspell --no-progress --no-gitignore --file-list stdin`.
+  In a linked worktree, keep the repository's own launcher and add `--no-gitignore` with git's own file list on standard input, tracked plus untracked-but-not-ignored so that a new unstaged file is still checked — for a gate of `npx -y cspell .`, that is `git ls-files -z --cached --others --exclude-standard | tr '\0' '\n' | npx -y cspell --no-progress --no-gitignore --file-list stdin`.
   `--file-list` keeps every path a file name: passed as arguments through `xargs`, a file named `--config.md` stopped cspell with `unknown option '--config.md'` while `xargs` still exited 0.
-  In the probe's home-directory worktree this form checked 2 files where the plain `cspell .` checked 0.
+  `-z` keeps every name verbatim: without it, git's default `core.quotePath` prints a non-ASCII name as a quoted octal escape, and cspell skipped that file.
+  Only a name containing a newline cannot travel one per line.
+  In the probe's home-directory worktree the `--file-list` form checked 2 files where the plain `cspell .` checked 0.
   Read the `Files checked` count before quoting the issue count.
 - **Adding tokenization fragments.**
   `abli`, `alism`, `aliti`, `singl`, `failur` are stemmer output from a committed search index.
