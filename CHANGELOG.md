@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-03
+
+`repo-gate`'s `cspell-triage` now warns that a cspell run in a linked git worktree inside another repository's working tree can check no files at all and still read as a pass, and says how to stop it with one config line.
+`repo-gate` moves from 0.2.3 to 0.2.4; `guard-hooks` (0.3.4) and `context-handoff` (0.2.1) are unchanged.
+
 ### Fixed
 
 - `repo-gate` 0.2.4 `cspell-triage` names the zero-file trap: with `useGitignore: true`, a linked worktree inside another repository's working tree can report `Files checked: 0, Issues found: 0`, which reads as a pass.
