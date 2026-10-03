@@ -47,7 +47,7 @@ If a runner deliberately points at a non-root path, keep the root config authori
 Otherwise consolidate to the root and delete the orphan.
 
 Set `useGitignore: true` while you are there — without it, ignored trees are still scanned.
-In some linked worktrees the same setting hides every file; see "Reading `Files checked: 0` as a clean run" under Common mistakes.
+Pair it with `gitignoreRoot: "."`: in a linked worktree inside another repository, `useGitignore` alone can hide every file; see "Reading `Files checked: 0` as a clean run" under Common mistakes.
 
 **Put the scan surface in the config, never in the gate command — and only widen it when the repo has something to widen it for.**
 By default cspell skips every path beginning with `.`. Whether that hides anything is one command:
@@ -260,8 +260,10 @@ The same split applies to inline directives, which is easy to get wrong:
   The enclosing repository is what matters, not the worktree alone.
   Measured with cspell 9 on one throwaway repository: a linked worktree outside any other repository checked 1 file, the same kind of worktree inside a home directory that is itself a git root ignoring `*` checked 0, a plain clone in that same home directory checked 1, and the home-directory worktree with `--no-gitignore` checked 1 again.
   The same zero appeared in local worktree runs in three different repositories; in one of them CI, on a plain checkout, then failed on a word the worktree run had passed.
-  In a linked worktree, keep the repository's own gate command and add `--gitignore-root .`, which stops cspell from reading `.gitignore` files above the worktree while it still honours the worktree's own — for a gate of `npx -y cspell .`, that is `npx -y cspell --gitignore-root . .`.
-  On the probe's home-directory worktree, holding a directory its own `.gitignore` excludes, an untracked file, an unstaged deletion, a non-ASCII name and a name starting with `-`, that command checked 3 files, kept the excluded directory out and raised no error for the deleted file, while the plain gate checked 0.
+  The fix belongs in the config rather than the gate command, because a wrapper (a package script, a Make target, Trunk) may not forward a cspell flag: add `gitignoreRoot: "."` beside `useGitignore: true`, which stops cspell from reading `.gitignore` files above the repository root while it still honours the repository's own.
+  On the probe's home-directory worktree, that one config line took the unchanged `cspell .` gate from 0 checked files to 2, with a directory the worktree's own `.gitignore` excludes still left out; run from a subdirectory instead of the root, the same gate checked 0 again, so run it from the root, as the gate normally is.
+  These runs called cspell directly; a run through Trunk's sandbox was not measured.
+  For a one-off direct cspell call, the CLI equivalent is `--gitignore-root .`: on the same kind of worktree, holding an untracked file, an unstaged deletion, a non-ASCII name and a name starting with `-`, `npx -y cspell --gitignore-root . .` checked 3 files and raised no error.
   Rebuilding the file list instead (`git ls-files` piped into `--no-gitignore`) broke on those same cases one at a time: a dash-led name read as an option, a quoted non-ASCII name, a deleted path reported as an error.
   Read the `Files checked` count before quoting the issue count.
 - **Adding tokenization fragments.**
