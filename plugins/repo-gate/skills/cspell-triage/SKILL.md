@@ -1,6 +1,6 @@
 ---
 name: cspell-triage
-description: Use when cspell reports unknown words or forbidden words in a repository, when adding entries to a cspell dictionary, or when a cspell config needs setting up, consolidating, or auditing.
+description: "Use when cspell reports unknown words or forbidden words in a repository, when adding entries to a cspell dictionary, when a cspell config needs setting up, consolidating, or auditing, or before trusting a cspell result run inside a git worktree or one that reports `Files checked: 0`."
 metadata:
   category: code-quality
 ---
