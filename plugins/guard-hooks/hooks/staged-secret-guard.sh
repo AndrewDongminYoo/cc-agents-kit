@@ -399,12 +399,43 @@ saved_lc_all=${LC_ALL-}
 LC_ALL=C
 command_len=${#COMMAND}
 command_pos=0
+# Keep substring reads and pattern matching bounded. Reading one byte from the
+# full command, and adding it to a long token, copied growing strings on every
+# iteration: even under C a 60 KB quoted word passed the hook's 10 s timeout.
+# Ordinary bytes cannot change the tokenizer state, so append their whole run
+# from a small window. Syntax still goes through the same single-byte branches
+# below. Exclude `(` in double quotes too: after `$` it disables heredoc skips.
+word_special=$' \t\n\'"\\$`<>;|&()#'
+double_special=$'"\\$`('
+chunk_start=0
+chunk_end=0
 while ((command_pos < command_len)); do
-  char="${COMMAND:command_pos:1}"
+  # Comments and safe heredocs can advance command_pos beyond the window.
+  if ((command_pos >= chunk_end)); then
+    chunk_start=$command_pos
+    chunk=${COMMAND:command_pos:1024}
+    chunk_end=$((command_pos + ${#chunk}))
+  fi
+  chunk_pos=$((command_pos - chunk_start))
+  chunk_remaining=${chunk:chunk_pos}
+  char=${chunk_remaining:0:1}
   prev_dollar=$last_unquoted_dollar
   last_unquoted_dollar=""
   prev_redirect=$last_unquoted_redirect
   last_unquoted_redirect=""
+  if [[ -z "$escaped" ]]; then
+    case "$quote" in
+      "'") ordinary=${chunk_remaining%%"'"*} ;;
+      '"') ordinary=${chunk_remaining%%["$double_special"]*} ;;
+      *) ordinary=${chunk_remaining%%["$word_special"]*} ;;
+    esac
+    if [[ -n "$ordinary" ]]; then
+      token="$token$ordinary"
+      token_started=1
+      command_pos=$((command_pos + ${#ordinary}))
+      continue
+    fi
+  fi
   if [[ -n "$escaped" ]]; then
     if [[ "$char" != $'\n' ]]; then
       token="$token$char"

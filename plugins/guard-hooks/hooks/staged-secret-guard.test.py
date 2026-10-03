@@ -907,6 +907,82 @@ for label, command in (
     rc, err = check_hook(command, continued_commit_repo, env=UTF8)
     check(f"{label}, under a UTF-8 locale, scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
 
+# Large input must still reach the real commit after it before the harness's
+# 10 s timeout. A data-only heredoc can be skipped, but a body piped to node
+# cannot, and a long quoted word used to spend 13 s in the per-byte loop on
+# Linux. Assert the credential finding, not just exit 2 (also a syntax error).
+large_js = "class Example {\n" + "".join(
+    f"  method{i}() {{ return this.value + {i}; }}\n" for i in range(1400)
+) + "}\n"
+large_inputs = (
+    ("61KB executable heredoc", "cat <<'EOF' | node\n" + large_js + "EOF\n"),
+    ("60KB quoted word", 'echo "' + "x" * 60000 + '" >/dev/null\n'),
+)
+for locale in ("C", UTF8["LC_ALL"]):
+    env = dict(os.environ, LC_ALL=locale)
+    for label, prefix in large_inputs:
+        try:
+            rc, err = check_hook(prefix + "git commit -m fixture", continued_commit_repo, env=env, timeout=10)
+            check(f"{label} reaches credential scan within 10 s under {locale}", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+        except subprocess.TimeoutExpired:
+            check(f"{label} reaches credential scan within 10 s under {locale}", False, "timed out")
+
+# Put syntax at and around byte-window edges. The filler is an ordinary word,
+# so it is read rather than skipped as a comment or a safe heredoc. Each form
+# is checked both alone (prose must not commit) and before a genuine commit.
+boundary_forms = (
+    ("opening single quote", "echo 'text\ngit commit -m prose'", "'"),
+    ("closing single quote", "echo 'text\ngit commit -m prose'", "prose'"),
+    ("opening double quote", 'echo "text\ngit commit -m prose"', '"'),
+    ("closing double quote", 'echo "text\ngit commit -m prose"', 'prose"'),
+    ("escaped quote", 'echo "text \\"\ngit commit -m prose"', '\\"'),
+    ("escaped newline", "echo gi\\\nt commit -m prose", "\\\n"),
+    ("substitution opener", "echo $(printf git) commit -m prose", "$("),
+    ("substitution closer", "echo $(printf git) commit -m prose", ")"),
+    ("redirection operator", "echo text 2>&1", ">&"),
+    ("heredoc operator", "cat > note.txt <<'EOF'\n$GIT commit -m prose\nEOF", "<<"),
+    ("multibyte word", 'echo "한국어 ✓"', "한국어"),
+)
+for edge in (1023, 1024, 1025, 2047, 2048, 2049):
+    for label, fragment, marker in boundary_forms:
+        marker_pos = len(fragment[:fragment.index(marker)].encode())
+        # Closing-quote markers include the preceding word to select the
+        # second quote; position the quote itself, rather than that word.
+        if label.startswith("closing"):
+            marker_pos += len("prose")
+        command = "echo " + "x" * (edge - len("echo ; ") - marker_pos) + "; " + fragment
+        for suffix, expected in (("", 0), ("\ngit commit -m fixture", 2)):
+            rc, err = check_hook(command + suffix, continued_commit_repo, env=UTF8)
+            check(f"{label} at byte {edge}, {'commit' if suffix else 'prose'}", rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+
+# Losing quote removal or backslash continuation at an edge must not hide a
+# program/subcommand that really spells git commit. A multibyte pathspec must
+# also survive splitting between the bytes of a character.
+unicode_name = "한국어✓.txt"
+unicode_commit_repo = repo({unicode_name: f"{GITHUB}\n"})
+for edge in (1023, 1024, 1025):
+    for label, fragment, marker, directory in (
+        ("quoted program", '"gi"t commit -m fixture', '"', continued_commit_repo),
+        ("escaped program", "g\\it commit -m fixture", "\\", continued_commit_repo),
+        ("continued program", "gi\\\nt commit -m fixture", "\\\n", continued_commit_repo),
+        ("escaped subcommand", "git co\\mmit -m fixture", "\\", continued_commit_repo),
+        ("multibyte pathspec", f"git commit -m fixture -- '{unicode_name}'", unicode_name, unicode_commit_repo),
+    ):
+        marker_pos = len(fragment[:fragment.index(marker)].encode())
+        command = "echo " + "x" * (edge - len("echo ; ") - marker_pos) + "; " + fragment
+        rc, err = check_hook(command, directory, env=UTF8)
+        check(f"{label} at byte {edge} scans the credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
+# Comment and safe-heredoc skips move the cursor beyond its current window;
+# the next words must be read from their new position, with bytes unchanged.
+for label, command in (
+    ("long comment jump", "# " + "x" * 5000 + "\ngit commit -m fixture"),
+    ("long skipped heredoc jump", "cat > note.txt <<'EOF'\n" + "x" * 5000 + "\nEOF\ngit commit -m fixture"),
+    ("single-quoted multibyte span", "echo '" + "한글 ✓ " * 400 + "'\ngit commit -m fixture"),
+):
+    rc, err = check_hook(command, continued_commit_repo, env=UTF8)
+    check(f"{label} reaches the credential scan", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+
 # The token budget is what bounds functions that multiply their arguments in a
 # cycle: each is only one deep in its own body, so the recursion bound lets all
 # three through eight times over, and without the budget this ran past 30 s.
