@@ -1057,6 +1057,7 @@ while :; do
   # shell, a certain definition replaces everything before it.
   func_index=-1
   call_certain=""
+  call_unplaced=""
   CALL_DEFS=()
   if ((at_command_start)) && [[ -n "$function_lookup" && -z "$env_prefix" && -z "${TOKEN_EXPANSION[token_index]-}" \
     && "$FUNC_NAME_SET" == *" $current "* ]]; then
@@ -1116,7 +1117,6 @@ while :; do
     # A target that is a process or command substitution (`g > >(cat) commit`,
     # `g > $(echo f) commit`, tokenized with the parenthesis apart) ends the
     # words here, so those after it are not known.
-    call_unplaced=""
     case "${TOKENS[call_end]-}" in
       "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX\$("*)
         [[ -z "$redirect_target" && "$redirect_last" != $((call_end - 1)) ]] || call_unplaced=1
@@ -1239,13 +1239,25 @@ while :; do
     if [[ -z "$call_certain" ]] && [[ "$current" == "git" || "$current" == "exec" ]]; then
       # No definition of git (or exec) is sure to be in effect, so git itself
       # (or the exec builtin) may run.
-      INLINE_TOKENS+=(command "$current")
-      INLINE_EXPANSION+=("" "")
-      for ((arg_index = 0; arg_index < call_count; arg_index++)); do
-        inline_word "${CALL_WORDS[arg_index]}" "${CALL_KINDS[arg_index]}"
-      done
-      INLINE_TOKENS+=("$BOUNDARY_PREFIX;")
-      INLINE_EXPANSION+=("")
+      if [[ -n "$call_unplaced" ]]; then
+        # The substitution target cut off the call's words. After reading its
+        # possible bodies, return to the original call behind `command`, which
+        # skips function lookup. The regular git/exec parse then sees the whole
+        # redirection and refuses what it cannot place, while an already known
+        # read-only subcommand still passes. Never rebuild this fallback from
+        # truncated CALL_WORDS or replay the substitution's commands twice.
+        INLINE_TOKENS+=(command)
+        INLINE_EXPANSION+=("")
+        call_end=$token_index
+      else
+        INLINE_TOKENS+=(command "$current")
+        INLINE_EXPANSION+=("" "")
+        for ((arg_index = 0; arg_index < call_count; arg_index++)); do
+          inline_word "${CALL_WORDS[arg_index]}" "${CALL_KINDS[arg_index]}"
+        done
+        INLINE_TOKENS+=("$BOUNDARY_PREFIX;")
+        INLINE_EXPANSION+=("")
+      fi
     fi
     if ((${#INLINE_TOKENS[@]} <= inline_room)); then
       TOKENS+=("${INLINE_TOKENS[@]}")
@@ -1294,6 +1306,13 @@ while :; do
         done
         closure_index=$((closure_index + 1))
       done
+    fi
+    # Even if no room remains for the bodies, an uncertain external git or
+    # builtin exec still needs its original arguments checked. Re-enter once
+    # without function lookup; the inlining bounds themselves stay unchanged.
+    if [[ -z "$call_certain" && -n "$call_unplaced" ]] && [[ "$current" == git || "$current" == exec ]]; then
+      function_lookup=""
+      continue
     fi
     at_command_start=0
     token_index=$((token_index + 1))

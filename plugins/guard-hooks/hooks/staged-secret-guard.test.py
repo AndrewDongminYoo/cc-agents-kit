@@ -530,9 +530,109 @@ for label, command in (
 
 # A clean index, so a refusal below cannot be a credential that was found.
 plain = repo({"README.md": "# hello\n"})
+# An uncertain git/exec function can have fallen back to the external program
+# or builtin. Substitution redirections truncate the call words used to inline
+# its body; those words must not silently clear the fallback as a non-commit.
+uncertain_substitution_commands = (
+    ("unset git with a process substitution", "git() { :; }; unset -f git; git > >(cat) commit -m x"),
+    ("unset git with a command substitution", "git() { :; }; unset -f git; git > $(echo f) commit -m x"),
+    ("unset git with a glued process target", "git() { :; }; unset -f git; git> >(cat) commit -m x"),
+    ("unset git with a glued command target", "git() { :; }; unset -f git; git >$(echo f) commit -m x"),
+    ("unset git with a target suffix", "git() { :; }; unset -f git; git >$(echo f).txt commit -m x"),
+    ("unset git with a nested target", "git() { :; }; unset -f git; git > $(echo $(echo f)) commit -m x"),
+    ("unset git with a target pipeline", "git() { :; }; unset -f git; git > >(cat | cat) commit -m x"),
+    ("unset git with a target separator", "git() { :; }; unset -f git; git > >(cat; cat) commit -m x"),
+    ("unset git with an alias after the target", "git() { :; }; unset -f git; git > >(cat) -c alias.ci=commit ci -m x"),
+    ("unset git with alias config before the target", "git() { :; }; unset -f git; git -c alias.ci=commit > $(echo f) ci -m x"),
+    ("unset git with -C before the target", "git() { :; }; unset -f git; git -C . > >(cat) commit -m x"),
+    ("unset git with a target before -C", "git() { :; }; unset -f git; git > $(echo f) -C . commit -m x"),
+    ("unset git with a target where -C takes its value", "git() { :; }; unset -f git; git -C > >(cat) . commit -m x"),
+    ("unset git with a redirection after commit", "git() { :; }; unset -f git; git commit > $(echo f) -m x"),
+    ("unset git with a glued program", "git() { :; }; unset -f git; git>$(echo f) commit -m x"),
+    ("unset exec with git before a process target", "exec() { :; }; unset -f exec; exec git > >(cat) commit -m x"),
+    ("unset exec with git before a command target", "exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x"),
+    ("unset exec with git after a process target", "exec() { :; }; unset -f exec; exec > >(cat) git commit -m x"),
+    ("unset exec with git after a command target", "exec() { :; }; unset -f exec; exec > $(echo f) git commit -m x"),
+    ("unset exec with an option cluster", "exec() { :; }; unset -f exec; exec -clc git > >(cat) commit -m x"),
+    ("unset exec with a separate argv0", "exec() { :; }; unset -f exec; exec -a foo git > $(echo f) commit -m x"),
+    ("unset exec with an attached argv0", "exec() { :; }; unset -f exec; exec -afoo git> >(cat) commit -m x"),
+    ("unset exec with a target before argv0", "exec() { :; }; unset -f exec; exec > $(echo f) -a foo git commit -m x"),
+    ("unset exec with an alias commit", "exec() { :; }; unset -f exec; exec git > >(cat | cat) -c alias.ci=commit ci -m x"),
+    ("unset exec with a git-commit argv0", "exec() { :; }; unset -f exec; exec -a git-commit git > $(echo f) -m x"),
+    ("git unset through an expanded name", 'git() { :; }; n=git; unset -f "$n"; git > >(cat) commit -m x'),
+    ("git defined in an untaken branch", "if false; then git() { :; }; fi; git > $(echo f) commit -m x"),
+)
+for label, command in uncertain_substitution_commands:
+    syntax = subprocess.run(["/bin/bash", "-n", "-c", command], capture_output=True, text=True)
+    check(f"{label} has valid shell syntax", syntax.returncode == 0, syntax.stderr)
+    for state, directory in (("staged credential", continued_commit_repo), ("clean index", plain)):
+        rc, err = check_hook(command, directory)
+        check(f"refuses {label} with a {state}", rc == 2 and "Blocked:" in err,
+              f"exit={rc} stderr={err.strip()[:160]}")
+
+# Read-only prefixes are identified by the regular git/exec parser, not by a
+# search for a safe word that might instead be an option value or an argument.
+for label, command in (
+    ("certain git no-op", "git() { :; }; git > >(cat) commit -m x"),
+    ("certain exec no-op", "exec() { :; }; exec git > $(echo f) commit -m x"),
+    ("unset git log before a command target", "git() { :; }; unset -f git; git log -1 > $(echo f)"),
+    ("unset git status before a process target", "git() { :; }; unset -f git; git status > >(cat)"),
+    ("unset git log after ordinary redirection", "git() { :; }; unset -f git; git >/dev/null log -1 > $(echo f)"),
+    ("unset git log after -C", 'git() { :; }; unset -f git; git -C "$d" log > >(cat)'),
+    ("unset git log after --no-pager", "git() { :; }; unset -f git; git --no-pager log --grep commit > $(echo f)"),
+    ("unset exec running echo", "exec() { :; }; unset -f exec; exec echo safe > $(echo f)"),
+    ("unset exec redirecting before echo", "exec() { :; }; unset -f exec; exec > >(cat) echo safe"),
+    ("unset exec running git log", "exec() { :; }; unset -f exec; exec git log -1 > $(echo f)"),
+    ("unset exec with options running git log", "exec() { :; }; unset -f exec; exec -cl -a foo git log -1 > >(cat)"),
+    ("read-only call followed by another command", "git() { :; }; unset -f git; git log > $(echo f); echo commit"),
+):
+    rc, err = check_hook(command, continued_commit_repo)
+    check(f"preserves {label} with substitution redirection", rc == 0,
+          f"exit={rc} stderr={err.strip()[:160]}")
+
+# Words spelling read-only verbs do not clear unresolved subcommands.
+for command in (
+    "git() { :; }; unset -f git; git -C log > >(cat) commit -m x",
+    "git() { :; }; unset -f git; git -c alias.log=commit log > $(echo f) -m x",
+    'git() { :; }; unset -f git; verb=commit; git "$verb" > >(cat) -m x',
+    "exec() { :; }; unset -f exec; exec -a git-commit git log > $(echo f)",
+):
+    rc, err = check_hook(command, plain)
+    check("read-only words do not hide an unresolved committing fallback", rc == 2 and "Blocked:" in err,
+          f"command={command} exit={rc} stderr={err.strip()[:160]}")
+
+# A commit inside the target is read once, even if the outer git call is
+# already recognized as read-only. Replaying the complete tail would count it
+# twice and falsely reject its clean candidate.
+rc, err = check_hook("git() { :; }; unset -f git; git log > $(git commit -m x; echo f)", plain)
+check("a clean commit inside a read-only fallback target is counted once", rc == 0,
+      f"exit={rc} stderr={err.strip()[:160]}")
+
 # Seventy calls to a sixty-word body add more tokens than inlining may, so the
 # calls after them are past the budget.
 BUDGET_SPENT = "h() { : " + " ".join(f"w{i}" for i in range(60)) + "; }; " + "h; " * 70
+
+# Exhausting the existing inlining budget must not skip the same unresolved
+# external/builtin fallback. The function bodies themselves contain no git.
+for label, command in (
+    ("git process target", "git() { :; }; unset -f git; git > >(cat) commit -m x"),
+    ("git command target", "git() { :; }; unset -f git; git > $(echo f) commit -m x"),
+    ("exec process target", "exec() { :; }; unset -f exec; exec git > >(cat) commit -m x"),
+    ("exec command target", "exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x"),
+):
+    for state, directory in (("staged credential", continued_commit_repo), ("clean index", plain)):
+        rc, err = check_hook(BUDGET_SPENT + command, directory)
+        check(f"refuses uncertain {label} past the inlining budget with a {state}",
+              rc == 2 and "Blocked:" in err, f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    "git() { :; }; unset -f git; git log -1 > $(echo f)",
+    "exec() { :; }; unset -f exec; exec git log -1 > >(cat)",
+    "git() { :; }; git > >(cat) commit -m x",
+    "exec() { :; }; unset -f exec; exec echo safe > $(echo f)",
+):
+    rc, err = check_hook(BUDGET_SPENT + command, continued_commit_repo)
+    check("preserves safe substitution calls past the inlining budget", rc == 0,
+          f"command={command} exit={rc} stderr={err.strip()[:160]}")
 
 # The wrapper gets the verdict its body would get written out, so what is
 # refused inline is refused through the call too.
