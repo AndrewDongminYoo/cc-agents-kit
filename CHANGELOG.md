@@ -8,7 +8,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 ### Fixed
 
 - `repo-gate` 0.2.4 `cspell-triage` names the zero-file trap: with `useGitignore: true`, a linked worktree inside another repository's working tree can report `Files checked: 0, Issues found: 0`, which reads as a pass.
-  A throwaway-repository probe with cspell 9 isolates the enclosing repository as the trigger, and the skill now says to pass `--no-gitignore` and read the `Files checked` count before quoting a result.
+  A throwaway-repository probe with cspell 9 isolates the enclosing repository as the trigger, and the skill now says to add `--gitignore-root .` to the gate command, which stops the `.gitignore` lookup at the worktree and keeps the gate's own scan surface, and to read the `Files checked` count before quoting a result.
   Its description also fires before a result from a git worktree, or one reporting no checked files, is trusted, since that run reports no unknown word to trigger the skill on its own.
 
 ## [0.6.0] — 2026-10-01
