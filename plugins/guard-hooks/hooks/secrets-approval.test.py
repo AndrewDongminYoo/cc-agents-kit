@@ -45,7 +45,8 @@ class ApprovalTests(unittest.TestCase):
 
     def test_shell_expansion_is_not_literal_data(self):
         for command in ["/usr/bin/printf '%s' .env*", "/usr/bin/printf '%s' ~user/.env",
-                        "/usr/bin/printf '%s' .env{,.local}"]:
+                        "/usr/bin/printf '%s' .env{,.local}",
+                        "/usr/bin/printf %s =cat .env"]:
             self.assertEqual(invoke(command).returncode, 2)
 
     def test_inspector_requests_approval_never_allow(self):
@@ -82,6 +83,10 @@ class ApprovalTests(unittest.TestCase):
                 self.assertEqual(invoke(command, **args).returncode, 2)
             self.assertEqual(invoke(command + " --debug", cwd=str(cwd), policy=policy).returncode, 2)
             self.assertEqual(invoke(command, cwd=str(cwd), policy=policy, policy_digest="0" * 64).returncode, 2)
+            entry["argv"].append("=cat")
+            policy.write_text(json.dumps({"version": 1, "consumers": [entry]}))
+            self.assertEqual(invoke(shlex.join(entry["argv"]), cwd=str(cwd), policy=policy).returncode, 2)
+            entry["argv"].pop()
             linked = cwd / "linked"
             linked.symlink_to(cwd, target_is_directory=True)
             entry["argv"][0] = str(linked / code.name)

@@ -103,7 +103,8 @@ def main():
         return
     # One canonical quoting form prevents glob, tilde and brace expansion from
     # changing the argv that was inspected. Uncertain syntax stays with denial.
-    if command != shlex.join(argv):
+    # shlex leaves '=name' bare, but zsh expands it through command lookup.
+    if command != shlex.join(argv) or any(arg.startswith("=") for arg in argv):
         return
     if (data.get("permission_mode") == "auto" and argv[0] == "/usr/bin/printf"
             and len(argv) >= 3 and argv[1] in ("%s", "%s\\n")):

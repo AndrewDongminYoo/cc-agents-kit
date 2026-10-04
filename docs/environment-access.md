@@ -61,6 +61,8 @@ this plugin. Missing/mismatched digest leaves the original denial in place.
 Use only a few stable jobs. Record the canonical command from Python's
 `shlex.join(argv)` when registering one; the recognizer requires that exact
 quoting form. It rejects shell operators, expansion, substitution and wrappers.
+Arguments starting with `=` are rejected because zsh can expand them as command
+paths even when Python's shell quoting leaves them bare.
 The executable must be an absolute script path with a shebang, with no symlinks
 in its path or the policy path. The hook compares
 the canonical working directory, full argv and entry-script hash, then returns
