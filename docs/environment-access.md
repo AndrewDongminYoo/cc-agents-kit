@@ -11,6 +11,8 @@ Maintain a tracked `.env.example` with required key names, empty assignments and
 comments explaining each key. Do not place real defaults or credentials there.
 After reviewing the plugin installation, request its **absolute** `bin/env-status`
 executable with exactly `--schema .env.example --file .env`, from the project root.
+Single-quote every shell word, including the executable and option names, as
+shown in the canonical command form below.
 The secrets hook returns `ask`, not `allow`, for this call. Do not pre-allow a
 general interpreter or a wildcard command to run it. Other deny rules still win.
 
@@ -58,9 +60,21 @@ this plugin. Missing/mismatched digest leaves the original denial in place.
 }
 ```
 
-Use only a few stable jobs. Record the canonical command from Python's
-`shlex.join(argv)` when registering one; the recognizer requires that exact
-quoting form. It rejects shell operators, expansion, substitution and wrappers.
+Use only a few stable jobs. Every shell word must use the following single-quoted
+form, including the executable, flags and ordinary file names. Bare words remain
+eligible for zsh global aliases even when `shlex.join()` leaves them unchanged.
+For example: `'/path/to/project/scripts/check-development' '--config' '.env'`.
+The policy still records the ordinary argv array. To format its shell command:
+
+```python
+def quote_word(word):
+    return "'" + word.replace("'", "'\"'\"'") + "'"
+
+command = " ".join(quote_word(word) for word in argv)
+```
+
+The recognizer requires this exact form and rejects shell operators, expansion,
+substitution and wrappers.
 Arguments starting with `=` are rejected because zsh can expand them as command
 paths even when Python's shell quoting leaves them bare.
 The executable must be an absolute script path with a shebang, with no symlinks

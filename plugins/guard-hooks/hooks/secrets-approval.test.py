@@ -15,6 +15,10 @@ HOOK = ROOT / "hooks/secrets-path-guard.sh"
 INSPECTOR = ROOT / "bin/env-status"
 
 
+def literal_command(argv):
+    return " ".join("'" + word.replace("'", "'\"'\"'") + "'" for word in argv)
+
+
 def invoke(command, mode="auto", cwd="/proj", policy=None, tool="Bash", policy_digest=None, runtime_env=None):
     env = dict(os.environ)
     env.pop("CC_GUARD_DISABLE_SECRETS_PATH", None)
@@ -31,6 +35,10 @@ def invoke(command, mode="auto", cwd="/proj", policy=None, tool="Bash", policy_d
 
 
 class ApprovalTests(unittest.TestCase):
+    def test_bare_global_alias_words_cannot_abstain(self):
+        p = invoke("/usr/bin/printf %s .env")
+        self.assertEqual((p.returncode, p.stdout), (2, ""))
+
     def test_caller_python_shims_and_startup_cannot_authorize(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -58,7 +66,7 @@ class ApprovalTests(unittest.TestCase):
                 self.assertEqual((p.returncode, p.stdout, p.stderr), (expected, "", ""))
 
     def test_literal_data_abstains_only_in_auto(self):
-        command = "/usr/bin/printf '%s\\n' 'source .env'"
+        command = literal_command(["/usr/bin/printf", "%s\\n", "source .env"])
         p = invoke(command)
         self.assertEqual((p.returncode, p.stdout, p.stderr), (0, "", ""))
         for mode in ["default", "dontAsk", "bypassPermissions", "", "unknown"]:
@@ -78,7 +86,7 @@ class ApprovalTests(unittest.TestCase):
             self.assertEqual(invoke(command).returncode, 2)
 
     def test_inspector_requests_approval_never_allow(self):
-        command = shlex.join([str(INSPECTOR), "--schema", ".env.example", "--file", ".env"])
+        command = literal_command([str(INSPECTOR), "--schema", ".env.example", "--file", ".env"])
         for mode in ["auto", "default", "dontAsk", "unknown"]:
             p = invoke(command, mode)
             self.assertEqual(p.returncode, 0)
@@ -103,23 +111,24 @@ class ApprovalTests(unittest.TestCase):
                      "keys": ["SYNTHETIC_KEY"], "destinations": []}
             policy.write_text(json.dumps({"version": 1, "consumers": [entry]}))
             policy.chmod(0o600)
-            command = shlex.join(argv)
+            command = literal_command(argv)
             p = invoke(command, cwd=str(cwd), policy=policy)
             self.assertEqual(p.returncode, 0)
             self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
+            self.assertEqual(invoke(shlex.join(argv), cwd=str(cwd), policy=policy).returncode, 2)
             for args in [{}, {"cwd": str(cwd)}, {"cwd": str(base), "policy": policy}]:
                 self.assertEqual(invoke(command, **args).returncode, 2)
             self.assertEqual(invoke(command + " --debug", cwd=str(cwd), policy=policy).returncode, 2)
             self.assertEqual(invoke(command, cwd=str(cwd), policy=policy, policy_digest="0" * 64).returncode, 2)
             entry["argv"].append("=cat")
             policy.write_text(json.dumps({"version": 1, "consumers": [entry]}))
-            self.assertEqual(invoke(shlex.join(entry["argv"]), cwd=str(cwd), policy=policy).returncode, 2)
+            self.assertEqual(invoke(literal_command(entry["argv"]), cwd=str(cwd), policy=policy).returncode, 2)
             entry["argv"].pop()
             linked = cwd / "linked"
             linked.symlink_to(cwd, target_is_directory=True)
             entry["argv"][0] = str(linked / code.name)
             policy.write_text(json.dumps({"version": 1, "consumers": [entry]}))
-            self.assertEqual(invoke(shlex.join(entry["argv"]), cwd=str(cwd), policy=policy).returncode, 2)
+            self.assertEqual(invoke(literal_command(entry["argv"]), cwd=str(cwd), policy=policy).returncode, 2)
             entry["argv"][0] = str(code)
             policy.write_text(json.dumps({"version": 1, "consumers": [entry]}))
             code.write_text("#!/bin/sh\necho changed\n")
