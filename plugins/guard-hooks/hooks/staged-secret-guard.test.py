@@ -368,6 +368,9 @@ for prefix in (
               rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
 for prefix in (
     "sudo", "sudo -u nobody --", "sudo -D /tmp", "sudo --chdir=/tmp",
+    "sudo -n FOO=x -u root", "sudo FOO=x -n BAR=y -u root",
+    "sudo FOO= -u root --", "sudo FOO=git -u root",
+    "sudo odd.name=x -u root",
     "echo fixture | xargs", "xargs -0 -r -n 1", "xargs --max-args=1 --",
     "xargs -I{}", "xargs -a input.txt", "xargs --arg-file=input.txt",
 ):
@@ -381,6 +384,10 @@ for label, command in (
     ("sudo option value", "sudo -u git echo commit"),
     ("xargs option value", "xargs -a git echo commit"),
     ("sudo read-only command", "sudo -u nobody git log --grep commit"),
+    ("sudo assignment before options and read-only command", "sudo FOO=x -u root git status"),
+    ("sudo assignment before options and prose", "sudo FOO=x -u root echo git commit"),
+    ("sudo option value looking like an assignment", "sudo -u FOO=x echo git commit"),
+    ("sudo program path containing equals", "sudo /tmp/program=x git commit"),
     ("xargs read-only command", "xargs -n 1 git log --grep commit"),
     ("runner function shadow", "nohup() { :; }; nohup git commit -m fixture"),
     ("defined git behind runner", "git() { git commit -m fixture; }; nohup git status"),
@@ -498,6 +505,8 @@ for label, command in case_substitution_commits:
 prefixed_case_commits = (
     ('time option terminator', 'echo "$(time -- case x in x) git commit -m fixture;; esac)"'),
     ('time format and terminator', 'echo "$(time -p -- case x in x) git commit -m fixture;; esac)"'),
+    ('repeated time terminators', 'echo "$(time -- -- case x in x) git commit -m fixture;; esac)"'),
+    ('repeated time format terminators', 'echo "$(time -p -- -- case x in x) git commit -m fixture;; esac)"'),
     ('function keyword case body', 'echo "$(function f case x in x) git commit -m fixture;; esac; f)"'),
     ('anonymous coproc case', 'echo "$(coproc case x in x) git commit -m fixture;; esac; wait)"'),
     ('named coproc case', 'echo "$(coproc worker case x in x) git commit -m fixture;; esac; wait)"'),
@@ -555,6 +564,8 @@ for label, command in (
     ('case as loop variable', 'echo "$(set -- x; for case do :; done)" git commit -m fixture'),
     ('time option with command arguments', 'echo "$(time -- echo case)" git commit -m fixture'),
     ('option-looking command after time', 'echo "$(time -- -p case x in x) git commit -m fixture;; esac)"'),
+    ('option-looking command after repeated time terminators', 'echo "$(time -- -- -p case x in x) git commit -m fixture;; esac)"'),
+    ('third time terminator is a command', 'echo "$(time -- -- -- case x in x) git commit -m fixture;; esac)"'),
     ('function keyword used as a name', 'function case { git commit -m fixture; }; :'),
     ('arguments after parameter pattern', 'echo "$(v=x; : ${v%)})" git commit -m fixture'),
     ('quoted parameter brace prose', 'echo "$(unset v; : ${v:-"}")})" git commit -m fixture'),

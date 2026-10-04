@@ -146,7 +146,11 @@ parse_runner() {
         runner_next=-1
         return
         ;;
-      *) break ;;
+      *)
+        # sudo permits environment assignments between options. An absolute
+        # executable path containing '=' is still a command operand.
+        [[ "$kind" == sudo && "$word" == *=* && "$word" != [=/]* ]] || break
+        ;;
     esac
     value_index=$((runner_next + take))
     if ((take)) && [[ -n "${TOKEN_EXPANSION[value_index]-}" || "${TOKENS[value_index]-}" == "$BOUNDARY_PREFIX"* ]]; then
@@ -336,7 +340,13 @@ note_case_word() {
         ;;
       time) timed=start ;;
       -p) [[ "$timed" == start ]] || { start=""; break; }; timed=format ;;
-      --) [[ "$timed" == start || "$timed" == format ]] || { start=""; break; }; timed=end ;;
+      --)
+        case "$timed" in
+          start | format) timed=end ;;
+          end) timed=ended ;;
+          *) start=""; break ;;
+        esac
+        ;;
       coproc) compound_name=optional ;;
       function) compound_name=required ;;
       *) start=""; break ;;
