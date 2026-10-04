@@ -418,6 +418,44 @@ for label, command in substitution_commits:
         rc, err = check_hook(command, directory)
         check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
               rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+
+# A case pattern's ')' ends the pattern, not its enclosing substitution.
+# These commands are parsed only; both fixture repositories are disposable.
+case_substitution_commits = (
+    ('quoted case arm', 'echo "$(case x in x) git commit -m fixture;; esac)"'),
+    ('case assignment', 'out="$(case x in x) git commit -m fixture;; esac)"'),
+    ('quoted case pattern', 'echo "$(case x in "x") git commit -m fixture;; esac)"'),
+    ('parenthesized case pattern', 'echo "$(case x in (x) git commit -m fixture;; esac)"'),
+    ('second case arm', 'echo "$(case x in y) :;; x) git commit -m fixture;; esac)"'),
+    ('nested case arms', 'echo "$(case x in x) case y in y) git commit -m fixture;; esac;; esac)"'),
+    ('case subject substitution', 'echo "$(case "$(printf x)" in x) git commit -m fixture;; esac)"'),
+    ('case pattern substitution', 'echo "$(case x in "$(printf x)") git commit -m fixture;; esac)"'),
+    ('conditional case', 'echo "$(if true; then case x in x) git commit -m fixture;; esac; fi)"'),
+    ('timed case', 'echo "$(time -p case x in x) git commit -m fixture;; esac)"'),
+    ('subshell in case arm', 'echo "$(case x in x) (git commit -m fixture);; esac)"'),
+    ('function in case arm', 'echo "$(case x in x) g() { git commit -m fixture; }; g;; esac)"'),
+    ('unquoted case substitution', 'out=$(case x in x) git commit -m fixture;; esac)'),
+    ('backtick case substitution', 'out=`case x in x) git commit -m fixture;; esac`'),
+)
+for label, command in case_substitution_commits:
+    syntax = subprocess.run(['/bin/bash', '-n'], input=command, text=True, capture_output=True)
+    check(f"{label} is valid Bash", syntax.returncode == 0, syntax.stderr)
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
+              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+for label, command in (
+    ('case arm prose', 'echo "$(case x in x) printf "%s" "git commit -m fixture";; esac)"'),
+    ('arguments after case substitution', 'echo "$(case x in x) printf x;; esac)" git commit -m fixture'),
+    ('case words as arguments', 'echo "$(echo case; echo esac)" git commit -m fixture'),
+    ('case after keyword argument', 'echo "$(echo then case x in x)" git commit -m fixture'),
+    ('case keyword as pattern', 'echo "$(case case in x) :;; case) printf x;; esac)" git commit -m fixture'),
+    ('quoted esac pattern', 'echo "$(case esac in "esac") printf x;; esac)" git commit -m fixture'),
+    ('empty case', 'echo "$(case x in esac)" git commit -m fixture'),
+):
+    rc, err = check_hook(command, runner_repo)
+    check(f"preserves {label}", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
 for label, command in (
     ('single-quoted substitution', "echo '$(git commit -m fixture)'"),
     ('single-quoted backticks', "echo '`git commit -m fixture`'"),

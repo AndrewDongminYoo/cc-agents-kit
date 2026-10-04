@@ -230,8 +230,64 @@ TOKEN_QUOTED=()
 # the line. Read as words, `git commit -m x # note` passed # and note as
 # pathspecs, scanned a candidate git never commits, and let the commit through.
 NEWLINE=$'\n'
+# Case patterns use unmatched ')' at the same nesting level as their case.
+# Keep that level until esac, so a pattern cannot restore an outer quote or
+# pop a substitution. Keywords are recognized only in their shell positions;
+# quoted words and arguments such as `echo case` do not open a case clause.
+LEX_CASE_LEVEL=()
+LEX_CASE_STATE=()
+lex_case_count=0
+note_case_word() {
+  local index=$((lex_case_count - 1)) previous="" start=1 begin=${#TOKENS[@]} cursor timed=""
+  if ((index >= 0)) && [[ "${LEX_CASE_LEVEL[index]}" == "$subst_stack" ]]; then
+    case "${LEX_CASE_STATE[index]}" in
+      word) LEX_CASE_STATE[index]=in; return 0 ;;
+      in)
+        [[ "$token" != in || -n "$token_quoted$token_expansion" ]] || LEX_CASE_STATE[index]=pattern
+        return 0
+        ;;
+      pattern | pattern-word)
+        if [[ "${LEX_CASE_STATE[index]}" == pattern && "$token" == 'esac' && -z "$token_quoted$token_expansion" ]]; then
+          lex_case_count=$index
+        else
+          LEX_CASE_STATE[index]=pattern-word
+        fi
+        return 0
+        ;;
+    esac
+  fi
+  [[ -z "$token_quoted$token_expansion" ]] || return 0
+  case "$token" in case | 'esac') ;; *) return 0 ;; esac
+  # Walk just this command prefix when a keyword is possible. Looking only at
+  # the last word would misread `echo then case` as a nested case clause.
+  while ((begin > 0)); do
+    previous=${TOKENS[begin - 1]}
+    [[ "$previous" != "$BOUNDARY_PREFIX"* ]] || break
+    begin=$((begin - 1))
+  done
+  case "$previous" in "$BOUNDARY_PREFIX\$)"*) return 0 ;; esac
+  for ((cursor = begin; cursor < ${#TOKENS[@]}; cursor++)); do
+    [[ -z "${TOKEN_QUOTED[cursor]-}${TOKEN_EXPANSION[cursor]-}" ]] || { start=""; break; }
+    case "${TOKENS[cursor]}" in
+      if | then | elif | else | do | while | until | '!' | '{') ;;
+      time) timed=1 ;;
+      -p) [[ -n "$timed" ]] || { start=""; break; } ;;
+      *) start=""; break ;;
+    esac
+  done
+  [[ -n "$start" ]] || return 0
+  if [[ "$token" == case ]]; then
+    LEX_CASE_LEVEL[lex_case_count]=$subst_stack
+    LEX_CASE_STATE[lex_case_count]=word
+    lex_case_count=$((lex_case_count + 1))
+  elif ((index >= 0)) && [[ "${LEX_CASE_LEVEL[index]}" == "$subst_stack" ]]; then
+    lex_case_count=$index
+  fi
+  return 0
+}
 flush_token() {
   if [[ -n "$token_started" ]]; then
+    if ((lex_case_count > 0)) || [[ "$token" == case ]]; then note_case_word; fi
     if [[ -n "$token_quoted" ]] && [[ "$token" == "{" || "$token" == "}" ]]; then
       token_expansion="literal"
     fi
@@ -678,6 +734,10 @@ while ((command_pos < command_len)); do
           token_started=1
         else
           flush_token
+          if ((lex_case_count > 0)) && [[ "${LEX_CASE_LEVEL[lex_case_count - 1]}" == "$subst_stack" ]] \
+            && [[ "$char" == ';' && "${COMMAND:command_pos+1:1}" == [\;\&] ]]; then
+            LEX_CASE_STATE[lex_case_count - 1]=pattern
+          fi
           TOKENS+=("$BOUNDARY_PREFIX$char")
           TOKEN_EXPANSION+=("")
         fi
@@ -694,12 +754,22 @@ while ((command_pos < command_len)); do
         TOKEN_EXPANSION+=("")
         ;;
       ")")
+        flush_token
         closing="${subst_stack#"${subst_stack%?}"}"
-        if [[ "$closing" == s || "$closing" == q ]]; then
+        if ((lex_case_count > 0)) && [[ "${LEX_CASE_LEVEL[lex_case_count - 1]}" == "$subst_stack" ]]; then
+          # There is no matching '(' at this case's level. This is a pattern
+          # delimiter, not a substitution closer; use a non-pairing boundary.
+          LEX_CASE_STATE[lex_case_count - 1]=body
+          TOKENS+=("$BOUNDARY_PREFIX;")
+          TOKEN_EXPANSION+=("")
+        elif [[ "$closing" == s || "$closing" == q ]]; then
           close_substitution "$closing"
         else
-          flush_token
           subst_stack="${subst_stack%?}"
+          if ((lex_case_count > 0)) && [[ "${LEX_CASE_LEVEL[lex_case_count - 1]}" == "$subst_stack" ]] \
+            && [[ "${LEX_CASE_STATE[lex_case_count - 1]}" == pattern* ]]; then
+            LEX_CASE_STATE[lex_case_count - 1]=body
+          fi
           TOKENS+=("$BOUNDARY_PREFIX)")
           TOKEN_EXPANSION+=("")
         fi
