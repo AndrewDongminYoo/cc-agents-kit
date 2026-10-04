@@ -732,7 +732,34 @@ FUNC_NAMES=()
 FUNC_BODY_START=()
 FUNC_BODY_END=()
 FUNC_CERTAIN=()
-FUNC_NAME_SET=" "
+# Bash 3.2 has no associative arrays. Its variable table supplies the name
+# index instead: validated identifiers get a literal key; other names get a
+# disjoint, byte-encoded key. Only printf -v and indirect expansion access it,
+# never eval. A same-name chain preserves uncertain/redefined bodies.
+FUNC_PREVIOUS=()
+lookup_function() {
+  local name=$1 byte offset LC_ALL=C
+  if [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    func_key="_cc_func_l_$name"
+  else
+    func_key="_cc_func_x_"
+    for ((offset = 0; offset < ${#name}; offset++)); do
+      printf -v byte '%02x' "'${name:offset:1}"
+      func_key="$func_key$byte"
+    done
+  fi
+  func_head=${!func_key-}
+  # Ignore imported variables, including arithmetic-looking text. A stored
+  # index must name an existing definition of this exact function. Every new
+  # definition overwrites its key before a subsequent lookup can use it.
+  if [[ "$func_head" =~ ^[0-9]{1,9}$ ]]; then
+    func_head=$((10#$func_head))
+    if ((func_head < ${#FUNC_NAMES[@]})) && [[ "${FUNC_NAMES[func_head]}" == "$name" ]]; then
+      return
+    fi
+  fi
+  func_head=-1
+}
 # Open if/while/until/for/case/select constructs, and open brace groups, so that
 # a definition inside one is known not to be certain to run: a group can itself
 # be conditional (`false && { ...; }`), backgrounded or piped. And whether a
@@ -865,6 +892,7 @@ while :; do
       --) command_prefix=""; token_index=$((token_index + 1)); continue ;;
     esac
   fi
+  if ((at_command_start)) && [[ "$current" == exec ]]; then lookup_function exec; fi
   # `exec` runs its words as a program, in place of the shell, as `command` does:
   # never a shell function. Its own options are -c and -l, which take nothing,
   # and -a, which takes the name to give the program. A function may itself be
@@ -872,7 +900,7 @@ while :; do
   # unless `command` or `builtin` came first, which skip functions.
   if ((at_command_start)) && [[ "$current" == "exec" && -z "${TOKEN_EXPANSION[token_index]-}" ]] \
     && [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX(" ]] \
-    && [[ -z "$function_lookup" || "$FUNC_NAME_SET" != *" exec "* ]]; then
+    && { [[ -z "$function_lookup" ]] || ((func_head < 0)); }; then
     exec_prefix=1
     function_lookup=""
     token_index=$((token_index + 1))
@@ -1042,11 +1070,13 @@ while :; do
           "" | "$BOUNDARY_PREFIX;") ;;
           *) def_certain="" ;;
         esac
+        lookup_function "$def_name"
+        FUNC_PREVIOUS+=("$func_head")
+        printf -v "$func_key" '%s' "${#FUNC_NAMES[@]}"
         FUNC_NAMES+=("$def_name")
         FUNC_BODY_START+=("$((def_open + 1))")
         FUNC_BODY_END+=("$def_close")
         FUNC_CERTAIN+=("$def_certain")
-        FUNC_NAME_SET="$FUNC_NAME_SET$def_name "
         at_command_start=0
         token_index=$((def_close + 1))
         continue
@@ -1073,10 +1103,16 @@ while :; do
           # A name that is an expansion may be any function's: `x=git; unset
           # -f "$x"` removes git.
           unset_expansion=${TOKEN_EXPANSION[unset_index]-}
-          for ((lookup_index = 0; lookup_index < ${#FUNC_NAMES[@]}; lookup_index++)); do
-            [[ "$unset_expansion" != quoted && "$unset_expansion" != split* \
-              && "${FUNC_NAMES[lookup_index]}" != "$unset_word" ]] || FUNC_CERTAIN[lookup_index]=""
-          done
+          if [[ "$unset_expansion" == quoted || "$unset_expansion" == split* ]]; then
+            for ((lookup_index = 0; lookup_index < ${#FUNC_NAMES[@]}; lookup_index++)); do
+              FUNC_CERTAIN[lookup_index]=""
+            done
+          else
+            lookup_function "$unset_word"
+            for ((lookup_index = func_head; lookup_index >= 0; lookup_index = FUNC_PREVIOUS[lookup_index])); do
+              FUNC_CERTAIN[lookup_index]=""
+            done
+          fi
           ;;
       esac
     done
@@ -1090,10 +1126,9 @@ while :; do
   call_certain=""
   call_unplaced=""
   CALL_DEFS=()
-  if ((at_command_start)) && [[ -n "$function_lookup" && -z "$env_prefix" && -z "${TOKEN_EXPANSION[token_index]-}" \
-    && "$FUNC_NAME_SET" == *" $current "* ]]; then
-    for ((lookup_index = ${#FUNC_NAMES[@]} - 1; lookup_index >= 0; lookup_index--)); do
-      [[ "${FUNC_NAMES[lookup_index]}" == "$current" ]] || continue
+  if ((at_command_start)) && [[ -n "$function_lookup" && -z "$env_prefix" && -z "${TOKEN_EXPANSION[token_index]-}" ]]; then
+    lookup_function "$current"
+    for ((lookup_index = func_head; lookup_index >= 0; lookup_index = FUNC_PREVIOUS[lookup_index])); do
       ((func_index >= 0)) || func_index=$lookup_index
       CALL_DEFS+=("$lookup_index")
       if [[ -n "${FUNC_CERTAIN[lookup_index]}" ]]; then
@@ -1327,9 +1362,9 @@ while :; do
           case "$body_token" in
             git | */git | *commit*) block_indirect_commit ;;
           esac
-          [[ "$FUNC_NAME_SET" == *" $body_token "* ]] || continue
-          for ((lookup_index = 0; lookup_index < ${#FUNC_NAMES[@]}; lookup_index++)); do
-            if [[ "${FUNC_NAMES[lookup_index]}" == "$body_token" && "$closure_seen" != *" $lookup_index "* ]]; then
+          lookup_function "$body_token"
+          for ((lookup_index = func_head; lookup_index >= 0; lookup_index = FUNC_PREVIOUS[lookup_index])); do
+            if [[ "$closure_seen" != *" $lookup_index "* ]]; then
               CLOSURE+=("$lookup_index")
               closure_seen="$closure_seen$lookup_index "
             fi

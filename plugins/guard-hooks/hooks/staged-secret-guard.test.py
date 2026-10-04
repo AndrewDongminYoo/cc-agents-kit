@@ -887,6 +887,44 @@ try:
 except subprocess.TimeoutExpired:
     check("many calls in a long command finish within the hook timeout", False, "timed out")
 
+# Calls to the oldest name used to scan every later definition. Exercise
+# lookup repeatedly with a bounded definition/token count: thousands of distinct
+# definitions also measure Bash 3.2's indexed-array traversal, a separate cost.
+# Check the real scan after all calls plus a clean control, so an early refusal
+# cannot masquerade as an improvement. On Linux main takes 10.90 s; indexed
+# lookup takes 3.12 s for the same 500 definitions and 3,000 calls.
+distinct_functions = "".join(f"f{i}() {{ :; }};\n" for i in range(500))
+lookup_workload = distinct_functions + "f0;\n" * 3000
+for label, directory, expected in (("clean", plain, 0), ("credential", continued_commit_repo, 2)):
+    try:
+        rc, err = check_hook(lookup_workload + "git commit -m fixture", directory, timeout=10)
+        check(f"3,000 calls among 500 definitions reach the {label} scan within 10 s",
+              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc}")
+    except subprocess.TimeoutExpired:
+        check(f"3,000 calls among 500 definitions reach the {label} scan within 10 s", False, "timed out")
+
+# Indexing must retain exact names and all possibly active definitions. Unusual
+# but valid Bash function names must not alias identifier/encoded names.
+for label, command, expected in (
+    ("punctuated name", "a-b() { git commit -m fixture; }; a-b", 2),
+    ("distinct punctuation", "a-b() { git commit -m fixture; }; a_b() { :; }; a-b", 2),
+    ("punctuated redefinition", "a-b() { git commit -m fixture; }; a-b() { :; }; a-b", 0),
+    ("uncertain punctuated redefinition", "a-b() { git commit -m fixture; }; ( a-b() { :; } ); a-b", 2),
+    ("unset git after many definitions", distinct_functions + "git() { :; }; unset -f git; git commit -m fixture", 2),
+):
+    rc, err = check_hook(command, continued_commit_repo)
+    check(f"function index preserves {label}", rc == expected, f"exit={rc} stderr={err.strip()[:160]}")
+
+# Imported variables must not seed the private name index or be interpreted as
+# arithmetic. The marker is synthetic and the payload is never executed.
+with tempfile.TemporaryDirectory() as tmp:
+    marker = Path(tmp, "lookup-marker")
+    for value in ("0", "000000008", "99999999999999999999999999999", f"a[$(touch {marker})]"):
+        env = dict(os.environ, _cc_func_l_git=value, _cc_func_l_f=value)
+        rc, err = check_hook("f() { :; }; git commit -m fixture", continued_commit_repo, env=env)
+        check("imported function index cannot hide a commit", rc == 2 and "GitHub token" in err, f"exit={rc}")
+    check("function lookup never evaluates imported index text", not marker.exists())
+
 # The tokenizer reads bytes whatever the caller's locale, because under a
 # multibyte one each character read walks the command from its start: this
 # 22 KB command took 6 s under en_US.UTF-8 and 1 s under C.
