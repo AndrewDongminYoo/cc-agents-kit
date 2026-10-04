@@ -41,10 +41,11 @@ def parse(text, schema=False):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        match = re.fullmatch(r"(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)", line)
+        match = re.fullmatch(r"(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)", line)
         if not match or match[1] in states:
             raise ValueError
-        key, value = match.groups()
+        key, raw_value = match.groups()
+        value = raw_value.lstrip()
         if any(c in value for c in ("$", "`", "\\", "\x00")):
             raise ValueError
         if value.startswith(("'", '"')):
@@ -54,7 +55,9 @@ def parse(text, schema=False):
                 raise ValueError
             value = quoted[1]
         else:
-            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+            # Keep whitespace after '=' until comment detection: 'KEY= # note'
+            # is empty, while 'KEY=#literal' contains a literal value.
+            value = re.split(r"\s+#", raw_value, maxsplit=1)[0].strip()
             if any(c.isspace() for c in value) or any(c in value for c in "'\""):
                 raise ValueError
         if schema and value:

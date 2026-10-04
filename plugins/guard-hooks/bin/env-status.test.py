@@ -54,6 +54,14 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(p.returncode, 0)
         self.assertEqual([k["empty"] for k in json.loads(p.stdout)["keys"]], [False, True, None])
 
+    def test_empty_assignments_with_inline_comments(self):
+        for whitespace in [" ", "\t", "  "]:
+            with self.subTest(whitespace=repr(whitespace)):
+                p = self.run_status("PRESENT=#literal\nEMPTY=" + whitespace + "# note\n",
+                                    schema="PRESENT=\nEMPTY= # required\n")
+                self.assertEqual(p.returncode, 0)
+                self.assertEqual([k["empty"] for k in json.loads(p.stdout)["keys"]], [False, True])
+
 
 if __name__ == "__main__":
     unittest.main()
