@@ -446,9 +446,12 @@ for label, command in case_substitution_commits:
         check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
               rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
 
-# The hook runs under Bash 3.2 even when the payload uses a newer shell's
-# coproc syntax. Do not require the hook's host shell to execute that payload.
-coproc_case_commits = (
+# The hook runs under Bash 3.2 even when the payload uses another shell's
+# compound-command syntax. Do not require the host to execute that payload.
+prefixed_case_commits = (
+    ('time option terminator', 'echo "$(time -- case x in x) git commit -m fixture;; esac)"'),
+    ('time format and terminator', 'echo "$(time -p -- case x in x) git commit -m fixture;; esac)"'),
+    ('function keyword case body', 'echo "$(function f case x in x) git commit -m fixture;; esac; f)"'),
     ('anonymous coproc case', 'echo "$(coproc case x in x) git commit -m fixture;; esac; wait)"'),
     ('named coproc case', 'echo "$(coproc worker case x in x) git commit -m fixture;; esac; wait)"'),
     ('quoted coproc name', 'echo "$(coproc "worker" case x in x) git commit -m fixture;; esac; wait)"'),
@@ -456,7 +459,7 @@ coproc_case_commits = (
     ('backtick coproc name', 'echo "$(coproc `printf worker` case x in x) git commit -m fixture;; esac; wait)"'),
     ('timed coproc case', 'echo "$(time -p coproc worker case x in x) git commit -m fixture;; esac; wait)"'),
 )
-for label, command in coproc_case_commits:
+for label, command in prefixed_case_commits:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
         check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
@@ -469,12 +472,24 @@ for label, command in (
     ('case after keyword argument', 'echo "$(echo then case x in x)" git commit -m fixture'),
     ('coproc words as arguments', 'echo "$(echo coproc worker case)" git commit -m fixture'),
     ('coproc command arguments', 'echo "$(coproc printf "%s" case; wait)" git commit -m fixture'),
+    ('time option with command arguments', 'echo "$(time -- echo case)" git commit -m fixture'),
+    ('option-looking command after time', 'echo "$(time -- -p case x in x) git commit -m fixture;; esac)"'),
+    ('function keyword used as a name', 'function case { git commit -m fixture; }; :'),
     ('case keyword as pattern', 'echo "$(case case in x) :;; case) printf x;; esac)" git commit -m fixture'),
     ('quoted esac pattern', 'echo "$(case esac in "esac") printf x;; esac)" git commit -m fixture'),
     ('empty case', 'echo "$(case x in esac)" git commit -m fixture'),
 ):
     rc, err = check_hook(command, runner_repo)
     check(f"preserves {label}", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
+# The function inliner supports brace bodies. Other compound bodies are read
+# conservatively, just as the existing `f() case ...` spelling is, so neither
+# spelling may hide a potential commit by restoring the surrounding quote.
+for prefix in ('f()', 'function f'):
+    command = 'echo "$(' + prefix + ' case x in x) git commit -m fixture;; esac)"'
+    rc, err = check_hook(command, runner_repo)
+    check("non-brace case function bodies remain conservatively scanned",
+          rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
 
 for label, command in (
     ('single-quoted substitution', "echo '$(git commit -m fixture)'"),

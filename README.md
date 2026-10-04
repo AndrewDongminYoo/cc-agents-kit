@@ -122,7 +122,8 @@ Tools that already error out without a path (`black`, `dart format`) are deliber
 Before a `git commit` runs, scans the *added* lines of the effective commit candidate for credential shapes: npm auth tokens, GitHub / Slack / Google / PyPI tokens, OpenAI- and Anthropic-style keys, AWS access key ids, and private key blocks.
 Deleting a secret is never blocked, only adding one.
 Staged commits, `git commit -a`, pathspec commits, and quoted `git -C <path>` repositories are distinguished without executing the command string; a commit form that cannot be parsed safely is blocked instead of scanning the wrong candidate.
-A shell function defined in the same command is followed: a call is read as its body with the call's arguments in place of `"$@"` and `$1`–`$9`, and a brace group as the commands inside it.
+A shell function with a brace body defined in the same command is followed: a call is read as its body with the call's arguments in place of `"$@"` and `$1`–`$9`, and a brace group as the commands inside it.
+Other compound function bodies, such as `case` bodies, are scanned conservatively and may refuse a visible commit even without a call.
 A redirection among the arguments is removed first, as bash removes it (`g >/dev/null commit -m x` runs g with `commit -m x`).
 Unquoted, `$1`, `$@` or `$*` splits each argument into words as the default `IFS` would; in a command that names `IFS` at all, however quoted or escaped, the split is unknown, so the parameter is left unresolved and a literal argument holding `commit` is refused.
 A definition that may not have taken effect (inside a subshell, a brace group, a branch or a loop; joined by `&&`, `||`, `|` or `&`; after a heredoc has opened; or since removed by `unset`, where an expanded name may be any function's) does not hide the one before it: the call is read as both.

@@ -238,7 +238,7 @@ LEX_CASE_LEVEL=()
 LEX_CASE_STATE=()
 lex_case_count=0
 note_case_word() {
-  local index=$((lex_case_count - 1)) previous="" start=1 begin=${#TOKENS[@]} cursor timed="" coproc="" depth=0
+  local index=$((lex_case_count - 1)) previous="" start=1 begin=${#TOKENS[@]} cursor timed="" compound_name="" depth=0
   if ((index >= 0)) && [[ "${LEX_CASE_LEVEL[index]}" == "$subst_stack" ]]; then
     case "${LEX_CASE_STATE[index]}" in
       word) LEX_CASE_STATE[index]=in; return 0 ;;
@@ -271,10 +271,10 @@ note_case_word() {
     begin=$((begin - 1))
   done
   for ((cursor = begin; cursor < ${#TOKENS[@]}; cursor++)); do
-    # coproc may name its compound command with one word, including a quoted
-    # name or a substitution. Skip its nested command tokens and glued suffix
-    # as one word, but never consume additional arguments to a simple command.
-    if [[ -n "$coproc" ]]; then
+    # coproc has an optional name; function requires one before its body.
+    # Skip nested substitutions and glued suffixes in the name as one word,
+    # but never consume additional arguments to a simple command.
+    if [[ -n "$compound_name" ]]; then
       while [[ "${TOKENS[cursor + 1]-}" == "$BOUNDARY_PREFIX\$(" ]]; do
         cursor=$((cursor + 2))
         depth=1
@@ -287,18 +287,21 @@ note_case_word() {
         done
         [[ "${TOKENS[cursor]-}" != "$BOUNDARY_PREFIX\$)+" ]] || cursor=$((cursor + 1))
       done
-      if ((cursor == ${#TOKENS[@]} - 1)); then continue; fi
+      if ((cursor == ${#TOKENS[@]} - 1)); then compound_name=seen; continue; fi
       start=""; break
     fi
     [[ -z "${TOKEN_QUOTED[cursor]-}${TOKEN_EXPANSION[cursor]-}" ]] || { start=""; break; }
     case "${TOKENS[cursor]}" in
       if | then | elif | else | do | while | until | '!' | '{') ;;
-      time) timed=1 ;;
-      -p) [[ -n "$timed" ]] || { start=""; break; } ;;
-      coproc) coproc=1 ;;
+      time) timed=start ;;
+      -p) [[ "$timed" == start ]] || { start=""; break; }; timed=format ;;
+      --) [[ "$timed" == start || "$timed" == format ]] || { start=""; break; }; timed=end ;;
+      coproc) compound_name=optional ;;
+      function) compound_name=required ;;
       *) start=""; break ;;
     esac
   done
+  [[ "$compound_name" != required ]] || start=""
   [[ -n "$start" ]] || return 0
   if [[ "$token" == case ]]; then
     LEX_CASE_LEVEL[lex_case_count]=$subst_stack
