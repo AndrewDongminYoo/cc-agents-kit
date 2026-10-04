@@ -434,7 +434,8 @@ case_substitution_commits = (
     ('timed case', 'echo "$(time -p case x in x) git commit -m fixture;; esac)"'),
     ('subshell in case arm', 'echo "$(case x in x) (git commit -m fixture);; esac)"'),
     ('function in case arm', 'echo "$(case x in x) g() { git commit -m fixture; }; g;; esac)"'),
-    ('unquoted case substitution', 'out=$(case x in x) git commit -m fixture;; esac)'),
+    # Bash 3.2 needs the pattern's optional '(' in this unquoted substitution.
+    ('unquoted case substitution', 'out=$(case x in (x) git commit -m fixture;; esac)'),
     ('backtick case substitution', 'out=`case x in x) git commit -m fixture;; esac`'),
 )
 for label, command in case_substitution_commits:
