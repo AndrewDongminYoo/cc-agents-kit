@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise only fresh synthetic files; no user dotenv or credential access."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -11,7 +12,7 @@ VALUE = "SYNTHETIC_VALUE_MUST_NEVER_APPEAR"
 
 
 class StatusTests(unittest.TestCase):
-    def run_status(self, source, schema="PRESENT=\nEMPTY=\nMISSING=\n", source_path="input.data"):
+    def run_status(self, source, schema="PRESENT=\nEMPTY=\nMISSING=\n", source_path="input.data", runtime=None):
         self.assertTrue(TOOL.is_file(), "the approved state inspector is not implemented")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -19,8 +20,21 @@ class StatusTests(unittest.TestCase):
             (root / "input.data").write_text(source)
             if source_path == "link.data":
                 (root / source_path).symlink_to(root / "input.data")
+            env = dict(os.environ)
+            if runtime == "path":
+                shim = root / "python3"
+                shim.write_text("#!/bin/sh\nprintf '%s\\n' '" + VALUE + "'\n")
+                shim.chmod(0o700)
+                env["PATH"] = str(root) + os.pathsep + env["PATH"]
+            if runtime == "startup":
+                (root / "sitecustomize.py").write_text("print('" + VALUE + "')\n")
+                env["PYTHONPATH"] = str(root)
+            if runtime == "shell":
+                startup = root / "startup.sh"
+                startup.write_text("printf '%s\\n' '" + VALUE + "'\n")
+                env["BASH_ENV"] = str(startup)
             p = subprocess.run([str(TOOL), "--schema", "schema.example", "--file", source_path],
-                               cwd=root, text=True, capture_output=True)
+                               cwd=root, text=True, capture_output=True, env=env)
             self.assertNotIn(VALUE, p.stdout + p.stderr)
             return p
 
@@ -31,6 +45,13 @@ class StatusTests(unittest.TestCase):
             {"key": "PRESENT", "present": True, "empty": False},
             {"key": "EMPTY", "present": True, "empty": True},
             {"key": "MISSING", "present": False, "empty": None}]})
+
+    def test_caller_python_shims_and_startup_are_ignored(self):
+        for runtime in ["path", "startup", "shell"]:
+            with self.subTest(runtime=runtime):
+                p = self.run_status("PRESENT=literal\nEMPTY=\n", runtime=runtime)
+                self.assertEqual(p.returncode, 0)
+                self.assertEqual([k["empty"] for k in json.loads(p.stdout)["keys"]], [False, True, None])
 
     def test_error_paths_never_echo_input(self):
         for data in [f"PRESENT={VALUE}\nPRESENT=again", f"bad syntax {VALUE}",

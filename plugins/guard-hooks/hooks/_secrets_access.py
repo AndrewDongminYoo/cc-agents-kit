@@ -47,6 +47,28 @@ def relative_file(value):
             and ".." not in Path(value).parts and not value.startswith("-"))
 
 
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate response field")
+        result[key] = value
+    return result
+
+
+def validate_response():
+    data = json.load(sys.stdin, object_pairs_hook=unique_object)
+    if not isinstance(data, dict) or set(data) != {"hookSpecificOutput"}:
+        return False
+    output = data["hookSpecificOutput"]
+    return (isinstance(output, dict)
+            and set(output) == {"hookEventName", "permissionDecision", "permissionDecisionReason"}
+            and output["hookEventName"] == "PreToolUse"
+            and output["permissionDecision"] == "ask"
+            and isinstance(output["permissionDecisionReason"], str)
+            and bool(output["permissionDecisionReason"]))
+
+
 def registered_consumer(argv, cwd):
     setting = os.environ.get("CC_GUARD_ENV_POLICY")
     digest = os.environ.get("CC_GUARD_ENV_POLICY_SHA256", "")
@@ -124,6 +146,11 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--validate-response"]:
+        try:
+            sys.exit(0 if validate_response() else 1)
+        except (OSError, ValueError, TypeError, KeyError):
+            sys.exit(1)
     try:
         main()
     except (OSError, ValueError, TypeError, KeyError, AttributeError):

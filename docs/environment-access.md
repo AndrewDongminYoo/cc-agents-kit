@@ -95,8 +95,20 @@ no decision; normal harness permissions still apply. This is not `allow` and doe
 not assert that every action reaches a classifier. Other modes and ambiguous
 syntax retain the old denial. The Keychain-derived protected file remains denied.
 
-Python 3.9+ enables these paths. If the recognizer is unavailable or fails, the
-existing shell guard still decides. Auto mode is not a replacement for secret
+These paths require the protected system `/usr/bin/python3` at version 3.9+ on
+macOS or Linux. Both the recognizer and inspector run with `-I -S`, ignoring
+caller Python environment settings and site customization. They never select a
+project virtualenv or another interpreter from `PATH`. The inspector uses an
+absolute Bash wrapper; the hook and wrapper use Bash's privileged mode to ignore
+inherited shell startup code and functions. Keep the installed plugin files and
+hook configuration outside agent-writable roots. The system runtime and plugin
+installation remain trusted inputs; this is not protection against their owners.
+
+The hook accepts only the recognizer's exact abstention token or a validated
+`PreToolUse` / `ask` JSON response, with no extra or duplicate fields. A failing
+recognizer or malformed output leaves the existing shell guard in control. If
+system Python is missing, the new approval paths are unavailable; never replace
+it with an unreviewed `PATH` fallback. Auto mode is not a replacement for secret
 protection: some ordinary reads need no classifier review. Output masking is a
 fallback with known gaps, not a license to print secrets.
 

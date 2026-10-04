@@ -38,5 +38,7 @@ existing secret and destructive-command cases; reject shell syntax around the
 inspector; and prove that data and errors never include fixture values. Inspector
 tests cover missing/empty/present keys, duplicate keys, invalid syntax, oversized
 files, path escape and symlinks. Review the whole diff for trust-boundary changes.
+The recognizer and inspector must ignore project Python shims and startup code;
+only a protected isolated system runtime and validated approval output are trusted.
 Run the repository CI checks and observe the Draft PR's exact-head checks and
 required hosted review signals. Visual approval is not applicable.

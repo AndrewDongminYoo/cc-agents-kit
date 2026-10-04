@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -14,7 +15,7 @@ HOOK = ROOT / "hooks/secrets-path-guard.sh"
 INSPECTOR = ROOT / "bin/env-status"
 
 
-def invoke(command, mode="auto", cwd="/proj", policy=None, tool="Bash", policy_digest=None):
+def invoke(command, mode="auto", cwd="/proj", policy=None, tool="Bash", policy_digest=None, runtime_env=None):
     env = dict(os.environ)
     env.pop("CC_GUARD_DISABLE_SECRETS_PATH", None)
     env.pop("CC_GUARD_ENV_POLICY", None)
@@ -22,6 +23,7 @@ def invoke(command, mode="auto", cwd="/proj", policy=None, tool="Bash", policy_d
     if policy:
         env["CC_GUARD_ENV_POLICY"] = str(policy)
         env["CC_GUARD_ENV_POLICY_SHA256"] = policy_digest or hashlib.sha256(policy.read_bytes()).hexdigest()
+    env.update(runtime_env or {})
     return subprocess.run(["/bin/bash", str(HOOK)], input=json.dumps({
         "tool_name": tool, "permission_mode": mode, "cwd": cwd,
         "tool_input": {"command": command},
@@ -29,6 +31,32 @@ def invoke(command, mode="auto", cwd="/proj", policy=None, tool="Bash", policy_d
 
 
 class ApprovalTests(unittest.TestCase):
+    def test_caller_python_shims_and_startup_cannot_authorize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shim = root / "python3"
+            for output in ["ABSTAIN", "startup banner"]:
+                shim.write_text("#!/bin/sh\nprintf '%s\\n' " + shlex.quote(output) + "\n")
+                shim.chmod(0o700)
+                with self.subTest(output=output):
+                    p = invoke("cat .env", runtime_env={"PATH": str(root) + os.pathsep + os.environ["PATH"]})
+                    self.assertEqual((p.returncode, p.stdout), (2, ""))
+            (root / "sitecustomize.py").write_text("print('ABSTAIN')\n")
+            p = invoke("cat .env", runtime_env={"PYTHONPATH": str(root)})
+            self.assertEqual((p.returncode, p.stdout), (2, ""))
+
+    def test_only_exact_ask_response_is_validated(self):
+        helper = ROOT / "hooks/_secrets_access.py"
+        valid = {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                 "permissionDecision": "ask", "permissionDecisionReason": "Synthetic inspection"}}
+        for payload, expected in [(json.dumps(valid), 0), ("startup banner", 1),
+                                  (json.dumps(valid).replace('"ask"', '"allow"'), 1),
+                                  (json.dumps({**valid, "extra": True}), 1), ("{}", 1)]:
+            with self.subTest(payload=payload):
+                p = subprocess.run([sys.executable, "-I", "-S", str(helper), "--validate-response"],
+                                   input=payload, text=True, capture_output=True)
+                self.assertEqual((p.returncode, p.stdout, p.stderr), (expected, "", ""))
+
     def test_literal_data_abstains_only_in_auto(self):
         command = "/usr/bin/printf '%s\\n' 'source .env'"
         p = invoke(command)

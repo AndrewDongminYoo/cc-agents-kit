@@ -212,7 +212,7 @@ To turn the whole bundle off, use `/plugin` and disable `guard-hooks`.
 - **`git`** — only `staged-secret-guard.sh` uses it, to read the effective commit candidate; outside a repository the hook exits `0`.
 - **`shellcheck`** — optional; only `shellcheck-on-edit.sh` uses it, and that hook no-ops without it.
 - **`gitleaks`** (8.x) — optional; only `output-secret-mask.sh` uses it (`brew install gitleaks`), and that hook no-ops without it.
-- **`python3` (3.9+)** — tests, the optional secrets approval recognizer, and `env-status`. Without it, the existing secret-path denial remains; approval paths are unavailable.
+- **`python3` (3.9+)** — tests. The optional secrets approval recognizer and `env-status` require the protected system `/usr/bin/python3` and run in isolated mode; they never fall back to a project runtime from `PATH`. Without it, the existing secret-path denial remains and approval paths are unavailable.
 
 The guards target *zsh* command strings because that is the shell Claude Code runs commands under on macOS.
 Nothing in the hooks themselves is zsh-specific to execute.

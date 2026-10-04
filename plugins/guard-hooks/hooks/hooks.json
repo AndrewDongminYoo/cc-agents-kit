@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/secrets-path-guard.sh\"",
+            "command": "/bin/bash -p \"${CLAUDE_PLUGIN_ROOT}/hooks/secrets-path-guard.sh\"",
             "timeout": 5
           }
         ]
