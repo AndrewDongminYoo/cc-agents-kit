@@ -24,8 +24,21 @@ SEARCH_PATH=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.path // empty' 2>/d
 # APFS is case-insensitive by default; match case-insensitively too.
 shopt -s nocasematch
 if [[ "$FILE_PATH" == *".zprofile.secrets"* || "$COMMAND" == *".zprofile.secrets"* || "$SEARCH_PATH" == *".zprofile.secrets"* ]]; then
-  echo "The file ~/.zprofile.secrets holds Keychain-derived secrets and must never be read, edited, or echoed. To confirm a secret exists without opening the file, query the keychain directly: security find-generic-password -a \"\$USER\" -s \"<service>\" -w" >&2
+  echo "The file ~/.zprofile.secrets holds Keychain-derived secrets and must not be read, edited, or echoed. Ask the operator to verify its configuration without copying secret values into chat or another file." >&2
   exit 2
+fi
+
+# Optional recognizer: abstain on inert data or ask for a bounded approved path.
+# Failure or missing python preserves the legacy secret-path denial below.
+if command -v python3 >/dev/null 2>&1; then
+  SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+  ACCESS=$(printf '%s' "$HOOK_INPUT" | python3 "$SCRIPT_DIR/_secrets_access.py" 2>/dev/null || true)
+  if [[ "$ACCESS" == "ABSTAIN" ]]; then
+    exit 0
+  elif [[ -n "$ACCESS" ]]; then
+    printf '%s\n' "$ACCESS"
+    exit 0
+  fi
 fi
 
 # .env files hold live secrets; exact template variants (.env.example etc.) do not.
@@ -44,7 +57,7 @@ for s in "$FILE_PATH" "$COMMAND" "$SEARCH_PATH"; do
         continue
         ;;
     esac
-    echo ".env files hold live secrets and must not be read, edited, or echoed by Claude. Read the template variant (.env.example / .env.sample) instead, or ask the user for the specific value you need." >&2
+    echo "Blocked: live dotenv access. Consult the template schema, request the plugin env-status inspection, or use an operator-registered environment consumer approval. Do not request secret values in chat or move them to another file. See docs/environment-access.md." >&2
     exit 2
   done
 done

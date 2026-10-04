@@ -68,7 +68,7 @@ Before cutting anything, compare `git tag` against `gh release list` and finish 
 
 The same hooks are typically installed in the developing session's own `~/.claude/settings.json`, so they inspect the tool calls used to edit them.
 Writing documentation or fixtures that *mention* a blocked shape — a download-and-execute pipeline, `rm -rf` on the home directory, a secrets filename — gets blocked when the text passes through `Bash`.
-Use the `Write` tool for that content, or split the literal in a script (`".e" + "nv"`). This is documented as a known limit in the README, not a bug to fix.
+Submit synthetic test/documentation content through a file editor when appropriate, but never disguise a denied access or switch tools to defeat it. The bounded state-inspection and consumer approval paths are documented in `docs/environment-access.md`; they do not authorize reading live secrets during tests.
 
 ## Provenance
 

@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Print schema key states, never dotenv values. No shell or expansion support."""
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+
+LIMIT = 1048576
+
+
+def read_local(name):
+    path = Path(name)
+    if path.is_absolute() or not path.parts or ".." in path.parts:
+        raise ValueError
+    # Open each component relative to a held directory descriptor. Reject links
+    # and non-regular files rather than following a path that can be swapped.
+    parent = os.open(".", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        fd = os.open(path.parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > LIMIT:
+                raise ValueError
+            data = stream.read(LIMIT + 1)
+            if len(data) > LIMIT:
+                raise ValueError
+            return data.decode("utf-8")
+    finally:
+        os.close(parent)
+
+
+def parse(text, schema=False):
+    states = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = re.fullmatch(r"(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)", line)
+        if not match or match[1] in states:
+            raise ValueError
+        key, value = match.groups()
+        if any(c in value for c in ("$", "`", "\\", "\x00")):
+            raise ValueError
+        if value.startswith(("'", '"')):
+            quote = value[0]
+            quoted = re.fullmatch(re.escape(quote) + r"([^" + re.escape(quote) + r"]*)" + re.escape(quote) + r"\s*(?:#.*)?", value)
+            if not quoted:
+                raise ValueError
+            value = quoted[1]
+        else:
+            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+            if any(c.isspace() for c in value) or any(c in value for c in "'\""):
+                raise ValueError
+        if schema and value:
+            raise ValueError
+        states[key] = value == ""
+    if schema and not states:
+        raise ValueError
+    return states
+
+
+def main():
+    if len(sys.argv) != 5 or sys.argv[1] != "--schema" or sys.argv[3] != "--file":
+        raise ValueError
+    schema = parse(read_local(sys.argv[2]), schema=True)
+    values = parse(read_local(sys.argv[4]))
+    print(json.dumps({"keys": [
+        {"key": key, "present": key in values, "empty": values.get(key)}
+        for key in schema
+    ]}))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, UnicodeError):
+        print("env-status: inspection failed; check relative paths and the documented literal dotenv schema. No values were returned.", file=sys.stderr)
+        sys.exit(1)

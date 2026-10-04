@@ -136,7 +136,14 @@ It is not a replacement for entropy-based scanning; run trufflehog or gitleaks i
 #### `secrets-path-guard.sh`
 
 Blocks any tool call whose `file_path`, `command`, or `path` names a live secrets file — dotenv files and their variants, plus `~/.zprofile.secrets`.
-Template variants stay readable, so the agent can consult the example and then ask you for the real value.
+Template variants stay readable for key names and documentation. Never copy real values into chat or another file to get around a refusal.
+
+The absolute plugin `bin/env-status --schema .env.example --file .env` provides a
+value-free key-state inspection behind an explicit hook approval request. An
+operator-installed exact-command policy can also request approval for a reviewed
+development consumer. Neither path returns blanket `allow`. Auto mode additionally
+abstains on a canonical literal `/usr/bin/printf` diagnostic; direct reads and
+sourcing remain denied. See [the approval contract and trust boundaries](docs/environment-access.md).
 
 ```bash
 cat .env           # blocked
@@ -205,7 +212,7 @@ To turn the whole bundle off, use `/plugin` and disable `guard-hooks`.
 - **`git`** — only `staged-secret-guard.sh` uses it, to read the effective commit candidate; outside a repository the hook exits `0`.
 - **`shellcheck`** — optional; only `shellcheck-on-edit.sh` uses it, and that hook no-ops without it.
 - **`gitleaks`** (8.x) — optional; only `output-secret-mask.sh` uses it (`brew install gitleaks`), and that hook no-ops without it.
-- **`python3`** — tests only, not runtime.
+- **`python3` (3.9+)** — tests, the optional secrets approval recognizer, and `env-status`. Without it, the existing secret-path denial remains; approval paths are unavailable.
 
 The guards target *zsh* command strings because that is the shell Claude Code runs commands under on macOS.
 Nothing in the hooks themselves is zsh-specific to execute.
@@ -215,7 +222,7 @@ Nothing in the hooks themselves is zsh-specific to execute.
 These are guardrails against an accidental slip, not a sandbox.
 They match patterns in the tool input, so deliberate multi-step obfuscation (symlinks, variable indirection, base64) bypasses them, and the harness's own permission layer remains the enforcement boundary.
 
-- **Prose is matched too.** A command that merely *mentions* a blocked shape is blocked — writing a file whose text contains a download-and-execute pipeline trips `dangerous-command-guard`, and naming a secrets file in a message trips `secrets-path-guard`. Split the literal, or write the file with a tool other than `Bash`.
+- **Prose can still match.** Apart from the narrow auto-mode literal-data case documented above, mentioning a protected shape in Bash can be denied. Report the false positive and use the documented approval process; do not disguise a path, split a forbidden access across calls, or switch tools to defeat a refusal.
 - **`staged-secret-guard` matches shapes, not entropy.** A credential with no recognisable prefix - a bare password, a random hex string, a private API host - is not detected. Treat it as a floor, not a scanner.
 - **`staged-secret-guard` only sees a commit the command spells out.** A function or alias from your shell profile, an alias in a git config file (`git ci`), a script, `sh -c` or `eval` strings, a runner such as `nohup`, `sudo` or `xargs`, anything inside backticks, a command substitution inside double quotes (`out="$(git commit …)"`), and an `IFS` assigned under a name the command never spells out (`printf -v "${v}FS" :`) all reach `git commit` without being recognised. A git `pre-commit` hook sees every one of these, because they all end in the same place.
 - **`staged-secret-guard` skips only a heredoc body that nothing can run.** A body is skipped as data only when every heredoc on its line is opened at the start of a word with a quoted delimiter that parses completely and a terminator line that exists, by a literal `cat` or `tee` (`cat > r.sh <<'X'`) on a line with no pipe, parenthesis, backtick or descriptor duplication. Everything before it in the command has to be plain words and separators too: each command there is, after any `NAME=value` whose name does not end in `PATH`, one of `cat`, `tee`, `mkdir`, `touch`, `rm`, `ls`, `git`, `echo`, `pwd` or `true`, programs that cannot change how the shell finds `cat` (so `cd`, `hash`, `alias`, `autoload`, `read`, `!`, `{` and every other word keep the body read); no word holds a parenthesis, substitution, backtick, `${` or newline, or names `PATH`; no body before it was read as commands, and no `<<` glued inside a word (`cat<<B`) came before it; and no substitution inside double quotes or `$'…'` string came before it, since either can leave the hook's idea of the quoting different from the shell's. Every other body is parsed as though it ran, because `bash <<X`, `cat <<X | sh`, `{ cat <<'X' … } | bash`, `eval $(cat <<X` and the `$(…)` in an unquoted `cat <<X` body do run; so a script written with `bash`, or through an assignment prefix (`LC_ALL=C cat <<X`), is still refused when a line in it names git through a variable (`$GIT commit`). The skip trusts that the `cat` and `tee` the shell finds on `PATH` are the real ones: an executable planted under either name that runs its input would run a skipped body, even with nothing before it, and no reading of the command can see that, which is the trust every command in the session already places in `PATH`. The skip has two costs: a script written through `cat` or `tee` is not scanned when it later runs (`bash r.sh`), and a heredoc inside a double-quoted substitution (`gh issue comment --body "$(cat <<'EOF' …)"`) is still read as commands, where a double quote in its text can flip the quoting.
