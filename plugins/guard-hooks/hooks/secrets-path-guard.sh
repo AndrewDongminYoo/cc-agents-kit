@@ -28,17 +28,13 @@ if [[ "$FILE_PATH" == *".zprofile.secrets"* || "$COMMAND" == *".zprofile.secrets
   exit 2
 fi
 
-# Optional recognizer: abstain on inert data or ask for a bounded approved path.
-# Failure or missing system Python preserves the legacy denial below. The
-# absolute interpreter and isolated flags must not inherit a project runtime.
+# Optional development-path policy: leave registered paths in auto mode to the
+# normal permissions/harness decision. This is never an allow or ask override.
+# Failure or missing system Python preserves the legacy denial below.
 SCRIPT_PATH=${BASH_SOURCE[0]}
 if [[ "$SCRIPT_PATH" == /* && -x /usr/bin/python3 ]] &&
-  ACCESS=$(printf '%s' "$HOOK_INPUT" | /usr/bin/python3 -I -S "${SCRIPT_PATH%/*}/_secrets_access.py" 2>/dev/null); then
+  ACCESS=$(printf '%s' "$HOOK_INPUT" | /usr/bin/python3 -I -S "${SCRIPT_PATH%/*}/_dev_env_paths.py" 2>/dev/null); then
   if [[ "$ACCESS" == "ABSTAIN" ]]; then
-    exit 0
-  elif [[ -n "$ACCESS" ]] && printf '%s' "$ACCESS" |
-    /usr/bin/python3 -I -S "${SCRIPT_PATH%/*}/_secrets_access.py" --validate-response 2>/dev/null; then
-    printf '%s\n' "$ACCESS"
     exit 0
   fi
 fi
@@ -59,7 +55,7 @@ for s in "$FILE_PATH" "$COMMAND" "$SEARCH_PATH"; do
         continue
         ;;
     esac
-    echo "Blocked: live dotenv access. Consult the template schema, request the plugin env-status inspection, or use an operator-registered environment consumer approval. Do not request secret values in chat or move them to another file. See docs/environment-access.md." >&2
+    echo "Blocked: dotenv path is not designated for development access in auto mode. Consult the template schema or ask the operator to review this exact path. Do not request secret values in chat or copy them to another file. See docs/environment-access.md." >&2
     exit 2
   done
 done

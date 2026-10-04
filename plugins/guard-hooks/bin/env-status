@@ -1,9 +1,0 @@
-#!/bin/bash -p
-# Use the reviewed system runtime, ignoring caller PATH and Python startup code.
-set -euo pipefail
-SCRIPT_PATH=${BASH_SOURCE[0]}
-if [[ "$SCRIPT_PATH" != /* ]]; then
-  printf '%s\n' 'env-status: invoke the reviewed absolute executable path.' >&2
-  exit 1
-fi
-exec /usr/bin/python3 -I -S "${SCRIPT_PATH%/*}/../hooks/_env_status.py" "$@"

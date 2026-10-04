@@ -1,44 +1,41 @@
-# Guard approval paths
+# Explicit development environment paths
 
-The dotenv guard currently treats literal documentation, state inspection and
-secret disclosure alike. Hard denial has no approval path, and its diagnostic
-asks users for secret values. Keep real secret access blocked while providing a
-small, explicitly approved way to inspect configuration state.
+The operator accepts that the agent can read values from explicitly designated development dotenv files.
+For those paths in auto mode, this hook leaves the decision to existing harness permissions and auto evaluation.
+It must not emit `allow`, claim value-free execution, or require repeated manual pasting of a whole script.
 
 ## Approved scope
 
-- In auto mode only, recognize a single literal `printf` invocation as data and
-  abstain. No shell expansion, redirection, pipeline, substitution or execution
-  wrapper is eligible. Other guards and the harness still decide whether to run.
-- Recognize only the installed plugin's absolute `bin/env-status` executable with
-  exactly `--schema PATH --file PATH`. Return `ask`, never `allow`, in every mode.
-- The inspector reads a bounded, strict dotenv subset beneath its working root,
-  without symlink traversal or shell evaluation. Emit schema keys and boolean
-  `present` / nullable boolean `empty` only. Never emit values, lengths or hashes.
-- Keep direct secret reads, sourcing, writes, root/home deletion and ambiguous
-  commands blocked. Missing parser support must preserve existing denial.
-- Add a default-off operator policy for a few recurring purpose scripts. Bind
-  recognition to exact cwd, argv and entry-script hash and request `ask`. The
-  policy's keys/destinations are declarations, not runtime isolation, and the
-  hash does not cover transitive dependencies. Never install a live policy here.
-- Explain schema maintenance, purpose-specific environment consumption and
-  task-owned temporary storage without supplying a generic secret command runner.
+- Default off: operator-controlled `CC_GUARD_DEV_ENV_PATHS` is a JSON array of exact absolute development dotenv paths.
+- Only `permission_mode: auto` can abstain for registered paths.
+- Direct file tools accept absolute paths or relative paths against the supplied absolute cwd.
+- Bash must spell the registered absolute path literally, including in ordinary `source`/`.` commands chained with a development job.
+  Relative Bash paths, globs and ambiguous expressions retain the existing decision.
+- Every live dotenv reference recognized by the existing guard must be registered before abstaining.
+  A registered path cannot exempt a second unregistered reference.
+- The operator classifies development and production files; names never classify them automatically.
+- Preserve Keychain protection, unregistered dotenv denial, other hooks, explicit deny rules and sandbox restrictions.
+  The setting is not an exemption for auth or credential files.
+- Remove the exact-command/script-hash consumer model and inspector-specific approval path.
+  Do not authenticate or claim to know what a mutable shell executes.
+- Keep template-schema, no-secret-copying and task-owned temporary-file guidance.
 
 ## Non-goals and authority
 
-No live settings, installed hooks, credentials or real dotenv files are changed
-or read. No arbitrary shell wrapper, global allow, deletion, Trash operation,
-plugin update, merge or deployment. Local settings and review-mode proposals are
-separate inactive artifacts, excluded from the public plugin.
+This is a literal-input guardrail, not runtime access control.
+Aliases, functions, variable indirection and later script reads cannot be inferred from the input string.
+The agent can read and use designated development values; auto mode can still ask or refuse.
+Production/auth protection against indirect access belongs in permissions and the OS sandbox.
+
+No live settings, installed hooks, credentials or real dotenv files are changed or read.
+No actual development paths are selected here.
+Installation, permission changes, deletion, merge and deployment remain separate decisions.
+Do not touch staged-secret-parser code being developed in another branch.
 
 ## Acceptance
 
-Synthetic regressions must distinguish abstention, ask and denial; preserve the
-existing secret and destructive-command cases; reject shell syntax around the
-inspector; and prove that data and errors never include fixture values. Inspector
-tests cover missing/empty/present keys, duplicate keys, invalid syntax, oversized
-files, path escape and symlinks. Review the whole diff for trust-boundary changes.
-The recognizer and inspector must ignore project Python shims and startup code;
-only a protected isolated system runtime and validated approval output are trusted.
-Run the repository CI checks and observe the Draft PR's exact-head checks and
-required hosted review signals. Visual approval is not applicable.
+Synthetic hook inputs cover default-off, modes, exact/relative direct paths, absolute Bash sourcing, mixed references, templates, invalid settings, neighbors, traversal, symlinks and Keychain protection.
+No test executes a secret-consuming payload or reads a real dotenv file.
+Caller Python shims must not manufacture abstention.
+Run all repository checks and exact-head CI/reviews within the seven-round budget; five rounds are completed.
+Visual approval is not applicable.
