@@ -81,7 +81,9 @@ def should_abstain(data):
             return False
         # Tokenization locates literal paths, not executable identity or effects.
         # Absolute Bash paths avoid guessing cwd after cd/subshells/functions.
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>")
+        # Keep glob punctuation on the word: zsh's path(:modifier) and path<1-2>
+        # can select other files. Splitting them validates only the safe prefix.
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
         lexer.whitespace_split = True
         lexer.commenters = ""
         found = 0

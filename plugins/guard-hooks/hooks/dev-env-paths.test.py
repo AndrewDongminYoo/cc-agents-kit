@@ -88,6 +88,12 @@ class DevelopmentPathsTests(unittest.TestCase):
                        {"command": "cat " + shlex.quote(str(self.dev)) + " ~/.zprofile.secrets"}):
             self.expect(self.invoke(inputs, paths=[str(self.dev)]), 2)
 
+    def test_zsh_modifiers_cannot_retarget_a_designated_word(self):
+        for suffix in ("(:s/dev/production/)", "(:h)", "(N)", "<1-2>", "<->"):
+            command = "cat " + shlex.quote(str(self.dev)) + suffix
+            with self.subTest(suffix=suffix):
+                self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 2)
+
     def test_invalid_settings_and_non_dotenv_entries_do_not_exempt(self):
         for paths in ("not json", "{}", '[null]', [".env.dev"], [str(self.dev) + "*"],
                       [str(self.project / ".." / ".env.dev")], [str(self.root / "auth.json")],
