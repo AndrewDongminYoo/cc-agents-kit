@@ -37,5 +37,5 @@ Do not touch staged-secret-parser code being developed in another branch.
 Synthetic hook inputs cover default-off, modes, exact/relative direct paths, absolute Bash sourcing, mixed references, templates, invalid settings, neighbors, traversal, symlinks and Keychain protection.
 No test executes a secret-consuming payload or reads a real dotenv file.
 Caller Python shims must not manufacture abstention.
-Run all repository checks and exact-head CI/reviews within the seven-round budget; five rounds are completed.
+Run all repository checks and current-head CI/reviews within the operator-approved review boundary.
 Visual approval is not applicable.

@@ -11,7 +11,7 @@ import sys
 ENV = re.compile(r'''(^|[/\s"'=])(\.env(?:\.[A-Za-z0-9-]+)*)(?=[^A-Za-z0-9_.-]|$)''', re.I)
 NAME = re.compile(r"\.env(?:\.[A-Za-z0-9-]+)*", re.I)
 TEMPLATES = {".env.example", ".env.sample", ".env.template", ".env.dist", ".env.default", ".env.defaults"}
-UNSAFE = re.compile(r'''[\x00-\x1f\x7f*?\[\]{}$`\\;|&<>()='"]''')
+UNSAFE = re.compile(r'''[\x00-\x1f\x7f*?\[\]{}$`\\;|&<>()='"^#~]''')
 TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "Grep", "Glob"}
 
 
@@ -25,14 +25,15 @@ def literal_path(value):
             and NAME.fullmatch(Path(value).name) and Path(value).name.lower() not in TEMPLATES)
 
 
-def no_symlinks(value):
+def no_symlinks(value, directory=False):
     path = Path(value)
     for part in list(reversed(path.parents)) + [path]:
         try:
             mode = part.lstat().st_mode
         except FileNotFoundError:
-            return part == path
-        if stat.S_ISLNK(mode) or (part == path and not stat.S_ISREG(mode)):
+            return not directory and part == path
+        expected_kind = stat.S_ISDIR if directory else stat.S_ISREG
+        if stat.S_ISLNK(mode) or (part == path and not expected_kind(mode)):
             return False
     return True
 
@@ -67,7 +68,8 @@ def should_abstain(data):
             return False
         if not value.startswith("/"):
             cwd = data.get("cwd", "")
-            if not isinstance(cwd, str) or not cwd.startswith("/"):
+            if (not isinstance(cwd, str) or not cwd.startswith("/") or cwd.startswith("//")
+                    or os.path.normpath(cwd) != cwd or not no_symlinks(cwd, directory=True)):
                 return False
             value = os.path.normpath(os.path.join(cwd, value))
         if value not in allowed:
@@ -93,7 +95,11 @@ def should_abstain(data):
                 continue
             found += len(matches)
             # Support --env-file=/absolute/path and NAME=/absolute/path.
-            candidate = word.split("=", 1)[-1] if "=" in word else word
+            # A prefix containing another live reference must never be discarded.
+            prefix, separator, value = word.partition("=")
+            if separator and references(prefix):
+                return False
+            candidate = value if separator else word
             if candidate not in allowed:
                 return False
         # Do not drop a legacy match while decoding quotes, such as .env'other'.

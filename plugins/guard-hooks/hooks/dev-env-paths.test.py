@@ -55,7 +55,8 @@ class DevelopmentPathsTests(unittest.TestCase):
         for command in ("source " + absolute, ". " + absolute,
                         "source " + absolute + ' && npm test -- --token "$DEV_TOKEN"',
                         "set -a; . " + absolute + "; set +a; npm run dev",
-                        "python3 task.py --env-file=" + absolute, "cat " + absolute):
+                        "python3 task.py --env-file=" + absolute,
+                        "ENV_FILE=" + absolute + " python3 task.py", "cat " + absolute):
             with self.subTest(command=command):
                 self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 0)
 
@@ -72,6 +73,14 @@ class DevelopmentPathsTests(unittest.TestCase):
         self.expect(self.invoke({"file_path": str(self.dev), "path": str(self.production)}, tool="Read", paths=[str(self.dev)]), 2)
         # Names do not classify purpose: an explicitly selected synthetic path works.
         self.expect(self.invoke({"file_path": str(self.production)}, tool="Read", paths=[str(self.production)]), 0)
+
+    def test_equals_prefix_cannot_hide_an_unregistered_reference(self):
+        for prefix in (str(self.production), "cat " + shlex.quote(str(self.production)) + ";x",
+                       "cat " + shlex.quote(str(self.production)) + "; ENV_FILE"):
+            # These are hook payload strings, never executed by a shell.
+            command = "eval " + shlex.quote(prefix + "=" + str(self.dev))
+            with self.subTest(prefix=prefix):
+                self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 2)
 
     def test_relative_bash_and_ambiguous_paths_keep_denial(self):
         for command in ("source .env.dev", "cd elsewhere && source .env.dev",
@@ -93,6 +102,35 @@ class DevelopmentPathsTests(unittest.TestCase):
             command = "cat " + shlex.quote(str(self.dev)) + suffix
             with self.subTest(suffix=suffix):
                 self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 2)
+
+    def test_extended_zsh_operators_cannot_be_designated(self):
+        for component in ("^safe", "safe#", "safe~other"):
+            parent = self.root / component
+            parent.mkdir()
+            candidate = str(parent / ".env.dev")
+            for word in (candidate, shlex.quote(candidate)):
+                with self.subTest(component=component, word=word):
+                    self.expect(self.invoke({"command": "cat " + word}, paths=[candidate]), 2)
+
+    def test_relative_direct_paths_require_canonical_symlink_free_cwd(self):
+        safe = self.root / "safe"
+        safe.mkdir()
+        evil = self.root / "evil"
+        (evil / "sub").mkdir(parents=True)
+        (evil / "safe").mkdir()
+        link = self.root / "link"
+        link.symlink_to(evil / "sub", target_is_directory=True)
+        cwd = str(link) + "/.."
+        designated = str(safe / ".env.dev")
+        relative = "safe/.env.dev"
+        self.assertEqual(os.path.normpath(cwd + "/" + relative), designated)
+        self.assertEqual((Path(cwd) / relative).resolve(), evil / relative)
+        for value in (cwd, str(self.root) + "/.", str(self.root) + "/evil/..", "/" + str(self.root)):
+            with self.subTest(cwd=value):
+                self.expect(self.invoke({"file_path": relative}, tool="Read", cwd=value, paths=[designated]), 2)
+        # Canonical relative access and absolute paths keep the ordinary workflow.
+        self.expect(self.invoke({"file_path": relative}, tool="Read", cwd=self.root, paths=[designated]), 0)
+        self.expect(self.invoke({"file_path": designated}, tool="Read", cwd=cwd, paths=[designated]), 0)
 
     def test_invalid_settings_and_non_dotenv_entries_do_not_exempt(self):
         for paths in ("not json", "{}", '[null]', [".env.dev"], [str(self.dev) + "*"],

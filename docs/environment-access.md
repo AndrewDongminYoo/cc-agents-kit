@@ -28,6 +28,7 @@ File names do not decide purpose: `.env.local` is not automatically safe, and an
 Do not register production secrets or authentication stores.
 
 Each entry must be an absolute, normalized dotenv file path, with no glob, traversal, shell metacharacters or symlink components.
+This excludes zsh extended-glob operators `^`, `#` and `~` anywhere in a designated path, even when the command quotes it.
 Spaces are supported; matching is exact and case-sensitive even on case-insensitive filesystems.
 A missing leaf is permitted for initial setup, but existing leaves must be regular files.
 The setting accepts at most 64 paths and 64 KiB of JSON.
@@ -44,7 +45,7 @@ Existing auto evaluation, explicit permissions, other hooks and the sandbox stil
 Auto mode can ask or refuse; abstention does not promise a classifier call or automatic success.
 Every other mode retains the existing dotenv denial.
 
-Direct file tools can use an exact absolute path or a relative path resolved against the tool event's absolute `cwd`.
+Direct file tools can use an exact absolute path or a relative path resolved against the tool event's normalized, absolute, existing and symlink-free `cwd`.
 Bash commands must spell the designated absolute path literally, quoted when needed.
 This avoids guessing the working directory after `cd`, subshells or functions.
 For example, after the operator designates their actual development file:
@@ -57,6 +58,7 @@ python3 development-job.py --env-file='/absolute/project/.env.development'
 
 These commands go through the normal tool/permission workflow without a special runner or repeated whole-script pasting through `!`.
 Relative Bash dotenv references, globs, ambiguous expressions and an additional unregistered dotenv reference keep the original guard decision.
+An option or assignment prefix before `=` cannot hide another live dotenv reference.
 Exact template variants such as `.env.example` retain their existing treatment.
 The Keychain-derived `.zprofile.secrets` check runs before this policy and cannot be exempted.
 
