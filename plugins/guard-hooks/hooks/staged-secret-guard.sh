@@ -97,6 +97,77 @@ refuse_git_ahead() {
   done
 }
 
+# Read only the option grammars whose arity is known. Unknown syntax never
+# clears a visible git command. These runners execute external programs, so
+# their command operand must bypass same-named shell functions.
+parse_runner() {
+  local kind=$1 word take duration="" value_index
+  runner_next=$((token_index + 1))
+  [[ "$kind" != timeout ]] || duration=1
+  while ((runner_next < token_count)); do
+    word=${TOKENS[runner_next]}
+    [[ "$word" != "$BOUNDARY_PREFIX"* ]] || break
+    if [[ -n "${TOKEN_EXPANSION[runner_next]-}" || "$word" == *[\<\>]* ]]; then
+      refuse_git_ahead "$runner_next"
+      runner_next=-1
+      return
+    fi
+    take=0
+    case "$kind:$word" in
+      *:--)
+        runner_next=$((runner_next + 1))
+        break
+        ;;
+      nohup:--help | nohup:--version | nice:--help | nice:--version \
+        | timeout:--help | timeout:--version | xargs:--help | xargs:--version \
+        | sudo:--help | sudo:--version | sudo:-V)
+        runner_next=-1
+        return
+        ;;
+      nice:-n | nice:--adjustment | timeout:-s | timeout:--signal | timeout:-k | timeout:--kill-after \
+        | sudo:-u | sudo:--user | sudo:-g | sudo:--group | sudo:-h | sudo:--host \
+        | sudo:-p | sudo:--prompt | sudo:-C | sudo:--close-from | sudo:-T | sudo:--command-timeout \
+        | sudo:-R | sudo:--chroot | sudo:-D | sudo:--chdir | sudo:-r | sudo:--role | sudo:-t | sudo:--type \
+        | xargs:-a | xargs:--arg-file | xargs:-d | xargs:--delimiter | xargs:-E | xargs:-I \
+        | xargs:-L | xargs:--max-lines | xargs:-n | xargs:--max-args | xargs:-P | xargs:--max-procs \
+        | xargs:-s | xargs:--max-chars | xargs:--process-slot-var)
+        take=1
+        ;;
+      nice:--adjustment=* | nice:-n?* | nice:-[0-9]* | nice:--[0-9]* \
+        | timeout:--signal=* | timeout:--kill-after=* | timeout:-s?* | timeout:-k?* \
+        | timeout:--foreground | timeout:--preserve-status | timeout:--verbose | timeout:-v \
+        | sudo:--*=* | sudo:-[ughpCTRDrt]?* | sudo:-[AbEHnPS] | sudo:--non-interactive \
+        | sudo:--preserve-env | sudo:--set-home | sudo:--stdin | sudo:--background \
+        | xargs:--*=* | xargs:-[adEILnPs]?* | xargs:-[0prtx] | xargs:--null \
+        | xargs:--no-run-if-empty | xargs:--interactive | xargs:--verbose | xargs:--exit \
+        | xargs:-i* | xargs:-l* | xargs:-e*) ;;
+      *:-*)
+        refuse_git_ahead "$runner_next"
+        runner_next=-1
+        return
+        ;;
+      *) break ;;
+    esac
+    value_index=$((runner_next + take))
+    if ((take)) && [[ -n "${TOKEN_EXPANSION[value_index]-}" || "${TOKENS[value_index]-}" == "$BOUNDARY_PREFIX"* ]]; then
+      refuse_git_ahead "$runner_next"
+      runner_next=-1
+      return
+    fi
+    runner_next=$((value_index + 1))
+  done
+  # timeout's first operand is a duration, even after --. A quoted expansion
+  # still cannot be trusted here because the tokenizer may split a substitution.
+  if [[ -n "$duration" ]]; then
+    if [[ -n "${TOKEN_EXPANSION[runner_next]-}" || "${TOKENS[runner_next]-}" == "$BOUNDARY_PREFIX"* ]]; then
+      refuse_git_ahead "$runner_next"
+      runner_next=-1
+      return
+    fi
+    runner_next=$((runner_next + 1))
+  fi
+}
+
 unsafe_value() {
   [[ "$1" == *'$'* || "$1" == *'`'* || "$1" == *'<'* || "$1" == *'>'* ]]
 }
@@ -129,9 +200,16 @@ FD_VARNAME='^[{][A-Za-z_][A-Za-z0-9_]*[}]$'
 # where `(git status) commit` is not valid shell at all. So `$(` and its closing
 # `)` get their own boundary spellings, `$)` and `$)+`, the second when a word
 # follows with no space and so continues the substitution's word
-# (`$(npm bin)/eslint`). One character per open parenthesis, s or p, pairs them.
+# (`$(npm bin)/eslint`). A stack pairs these with ordinary parentheses and
+# records the quote context to restore for quoted and backtick substitutions.
 subst_stack=""
 last_unquoted_dollar=""
+# q restores double quotes after $(...), b/d close unquoted/quoted backticks;
+# e/f track their nested escaped backticks.
+# The data-heredoc exception below is deliberately limited to a final quoted
+# word of a literal data consumer; executable output is always still parsed.
+data_subst_token=-1
+DATA_SUBST_END='^[[:space:]]*\)"[[:space:]]*$'
 # Whether any part of the token being built was quoted or escaped. The quotes
 # themselves are dropped, so a lone `"{"` or `\}` would read as a reserved word;
 # it is marked "literal" instead, and only an unmarked brace opens or closes a
@@ -175,6 +253,53 @@ flush_token() {
     token_quoted=""
     token_redirect=""
   fi
+}
+
+open_substitution() {
+  local kind=$1 index safe=""
+  if [[ "$kind" == q && -z "$subst_stack" && "$token" == '$' && -n "$heredoc_skip_ok" ]]; then
+    case "${TOKENS[0]-}:${TOKENS[1]-}:${TOKENS[2]-}" in
+      echo:*) safe=1 ;;
+      git:commit:*)
+        case "${TOKENS[${#TOKENS[@]} - 1]-}" in -m | --message) safe=1 ;; esac
+        ;;
+      gh:pr:create | gh:pr:edit | gh:pr:comment | gh:issue:create | gh:issue:edit | gh:issue:comment)
+        [[ "${TOKENS[${#TOKENS[@]} - 1]-}" != --body ]] || safe=1
+        ;;
+    esac
+    for ((index = 0; index < ${#TOKENS[@]}; index++)); do
+      if [[ -n "${TOKEN_EXPANSION[index]-}" || "${TOKENS[index]}" == "$BOUNDARY_PREFIX"* \
+        || "${TOKENS[index]}" == *[\<\>]* ]]; then safe=""; break; fi
+    done
+  fi
+  flush_token
+  if [[ -n "$safe" ]]; then
+    data_subst_token=${#TOKENS[@]}
+  elif [[ "$kind" != s ]]; then
+    heredoc_skip_ok=""
+  fi
+  subst_stack="$subst_stack$kind"
+  TOKENS+=("$BOUNDARY_PREFIX\$(")
+  TOKEN_EXPANSION+=("")
+  quote=""
+}
+
+close_substitution() {
+  local kind=$1
+  flush_token
+  subst_stack="${subst_stack%?}"
+  if [[ "$kind" == q || "$kind" == d || "$kind" == f ]]; then
+    TOKENS+=("$BOUNDARY_PREFIX\$)+")
+    quote='"'
+    token_started=1
+    token_quoted=1
+  else
+    case "${COMMAND:command_pos+1:1}" in
+      "" | " " | $'\t' | $'\n' | ";" | "|" | "&" | "(" | ")") TOKENS+=("$BOUNDARY_PREFIX\$)") ;;
+      *) TOKENS+=("$BOUNDARY_PREFIX\$)+") ;;
+    esac
+  fi
+  TOKEN_EXPANSION+=("")
 }
 
 # A heredoc body is data, not commands, but only where nothing can run it.
@@ -261,9 +386,14 @@ note_heredoc() {
     fi
     pos=$((pos + 1))
   done
-  if [[ -n "$q" || -z "$delim" || -z "$quoted" || -n "$subst_stack" ]]; then
+  if [[ -n "$q" || -z "$delim" || -z "$quoted" ]] \
+    || { [[ -n "$subst_stack" ]] && ! [[ "$subst_stack" == q && "$data_subst_token" -ge 0 ]]; }; then
     heredoc_doubt=1
     return
+  fi
+  if [[ "$subst_stack" == q ]] && ((prefix_index <= data_subst_token)); then
+    prefix_index=$((data_subst_token + 1))
+    prefix_at_start=1
   fi
   # Only a quoted string holds a newline, and one that spans lines is where a
   # drifted quote state would show. A doubt found here is about the prefix,
@@ -336,7 +466,7 @@ note_heredoc() {
 # skip, command_pos moves to the newline that ends the last terminator line, so
 # the loop's own increment starts the next command after it.
 skip_heredoc_bodies() {
-  local index=0 offset=0 line raw count=${#HEREDOC_DELIMS[@]} token skipped="" total line_index
+  local index=0 offset=0 line raw count=${#HEREDOC_DELIMS[@]} token skipped="" total line_index suffix
   if [[ -n "$heredoc_skip_ok" && -z "$heredoc_doubt" ]]; then
     for ((index = heredoc_start; index < ${#TOKENS[@]}; index++)); do
       token=${TOKENS[index]}
@@ -369,6 +499,10 @@ skip_heredoc_bodies() {
         if [[ "$line" == "${HEREDOC_DELIMS[index]}" ]]; then
           index=$((index + 1))
           if ((index == count)); then
+            if [[ -n "$subst_stack" ]]; then
+              suffix=${COMMAND:HEREDOC_LINE_STARTS[line_index]+${#HEREDOC_LINES[line_index]}}
+              [[ "$suffix" =~ $DATA_SUBST_END ]] || break
+            fi
             skipped=1
             command_pos=$((HEREDOC_LINE_STARTS[line_index] + ${#HEREDOC_LINES[line_index]}))
             line_cursor=$((line_index + 1))
@@ -404,7 +538,7 @@ command_pos=0
 # iteration: even under C a 60 KB quoted word passed the hook's 10 s timeout.
 # Ordinary bytes cannot change the tokenizer state, so append their whole run
 # from a small window. Syntax still goes through the same single-byte branches
-# below. Exclude `(` in double quotes too: after `$` it disables heredoc skips.
+# below. Exclude `(` in double quotes too: after `$` it opens a substitution.
 word_special=$' \t\n\'"\\$`<>;|&()#'
 double_special=$'"\\$`('
 chunk_start=0
@@ -436,7 +570,42 @@ while ((command_pos < command_len)); do
       continue
     fi
   fi
-  if [[ -n "$escaped" ]]; then
+  if [[ -n "$escaped" && "$char" == '`' && "$subst_stack" == *[bd]* && "$quote" != "'" ]]; then
+    # In legacy backticks one escape layer is removed before the inner shell
+    # reads the body. Thus \` inside it opens/closes a nested substitution.
+    case "$subst_stack" in
+      *e) close_substitution e ;;
+      *f) close_substitution f ;;
+      *)
+        token="$token"'$'
+        token_started=1
+        if [[ "$quote" == '"' ]]; then
+          [[ "$token_expansion" == split* ]] || token_expansion=quoted
+          open_substitution f
+        else
+          token_expansion="split"
+          open_substitution e
+        fi
+        ;;
+    esac
+    escaped=""
+  elif [[ -z "$escaped" && "$char" == '`' && "$quote" != "'" ]]; then
+    case "$subst_stack" in
+      *b) close_substitution b ;;
+      *d) close_substitution d ;;
+      *)
+        token="$token"'$'
+        token_started=1
+        if [[ "$quote" == '"' ]]; then
+          [[ "$token_expansion" == split* ]] || token_expansion=quoted
+          open_substitution d
+        else
+          token_expansion="split"
+          open_substitution b
+        fi
+        ;;
+    esac
+  elif [[ -n "$escaped" ]]; then
     if [[ "$char" != $'\n' ]]; then
       token="$token$char"
       token_started=1
@@ -449,17 +618,14 @@ while ((command_pos < command_len)); do
       quote=""
     elif [[ "$char" == "\\" ]]; then
       escaped=1
+    elif [[ "$char" == '(' && -n "$prev_dollar" ]]; then
+      open_substitution q
     else
       token="$token$char"
       if [[ "$char" == '$' || "$char" == '`' ]] && [[ -z "$token_expansion" ]]; then
         token_expansion="quoted"
       fi
-      # A substitution inside double quotes is not parsed here, so a quote or a
-      # comment inside it can leave this quote state wrong for the rest of the
-      # command, and a heredoc that looks top-level may be inside it.
-      if [[ "$char" == '`' ]] || [[ "$char" == '(' && "${COMMAND:command_pos-1:1}" == '$' ]]; then
-        heredoc_skip_ok=""
-      fi
+      [[ "$char" != '$' ]] || last_unquoted_dollar=1
     fi
   else
     case "$char" in
@@ -534,18 +700,15 @@ while ((command_pos < command_len)); do
         TOKEN_EXPANSION+=("")
         ;;
       ")")
-        flush_token
         closing="${subst_stack#"${subst_stack%?}"}"
-        subst_stack="${subst_stack%?}"
-        if [[ "$closing" == s ]]; then
-          case "${COMMAND:command_pos+1:1}" in
-            "" | " " | $'\t' | $'\n' | ";" | "|" | "&" | "(" | ")") TOKENS+=("$BOUNDARY_PREFIX\$)") ;;
-            *) TOKENS+=("$BOUNDARY_PREFIX\$)+") ;;
-          esac
+        if [[ "$closing" == s || "$closing" == q ]]; then
+          close_substitution "$closing"
         else
+          flush_token
+          subst_stack="${subst_stack%?}"
           TOKENS+=("$BOUNDARY_PREFIX)")
+          TOKEN_EXPANSION+=("")
         fi
-        TOKEN_EXPANSION+=("")
         ;;
       *)
         token="$token$char"
@@ -700,6 +863,29 @@ inline_unquoted() {
   done
 }
 
+# The output continues its parent word. Git's option/candidate scans skip that
+# output, but the main loop still reads every command inside the substitution.
+# A split expansion in the glued suffix can add options and is never skipped.
+advance_substitution() {
+  local depth=1 end=$(($1 + 1)) closing=""
+  while ((end < token_count)); do
+    case "${TOKENS[end]}" in
+      "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(") depth=$((depth + 1)) ;;
+      "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+")
+        depth=$((depth - 1))
+        if ((depth == 0)); then closing=${TOKENS[end]}; break; fi
+        ;;
+    esac
+    end=$((end + 1))
+  done
+  ((depth == 0)) || block_unparsed
+  subst_next=$((end + 1))
+  if [[ "$closing" == "$BOUNDARY_PREFIX\$)+" ]]; then
+    [[ "${TOKEN_EXPANSION[subst_next]-}" != split* ]] || block_unparsed
+    subst_next=$((subst_next + 1))
+  fi
+}
+
 REPO_ARGS=()
 commit_index=-1
 commit_count=0
@@ -710,6 +896,8 @@ at_command_start=1
 command_prefix=""
 env_prefix=""
 exec_prefix=""
+runner_risk=""
+runner_appends=""
 # `command` runs a builtin or a program, never a shell function, so a name behind
 # it is not looked up among the functions defined below.
 function_lookup=1
@@ -830,6 +1018,8 @@ while :; do
     command_prefix=""
     env_prefix=""
     exec_prefix=""
+    runner_risk=""
+    runner_appends=""
     function_lookup=1
     if ((scan_start < 0)); then
       token_index=$((token_index + 1))
@@ -1302,9 +1492,9 @@ while :; do
       INLINE_TOKENS+=("$BOUNDARY_PREFIX;")
       INLINE_EXPANSION+=("")
     done
-    if [[ -z "$call_certain" ]] && [[ "$current" == "git" || "$current" == "exec" ]]; then
-      # No definition of git (or exec) is sure to be in effect, so git itself
-      # (or the exec builtin) may run.
+    if [[ -z "$call_certain" ]] && [[ "${current##*/}" == git || "$current" == exec || "${current##*/}" == nohup || "${current##*/}" == nice || "${current##*/}" == timeout || "${current##*/}" == sudo || "${current##*/}" == xargs ]]; then
+      # An uncertain definition can leave git, exec or a runner in effect.
+      # Read that external/builtin fallback with the original arguments too.
       if [[ -n "$call_unplaced" ]]; then
         # The substitution target cut off the call's words. After reading its
         # possible bodies, return to the original call behind `command`, which
@@ -1373,10 +1563,10 @@ while :; do
         closure_index=$((closure_index + 1))
       done
     fi
-    # Even if no room remains for the bodies, an uncertain external git or
+    # Even if no room remains for bodies, an uncertain external program or
     # builtin exec still needs its original arguments checked. Re-enter once
     # without function lookup; the inlining bounds themselves stay unchanged.
-    if [[ -z "$call_certain" && -n "$call_unplaced" ]] && [[ "$current" == git || "$current" == exec ]]; then
+    if [[ -z "$call_certain" && -n "$call_unplaced" ]] && [[ "${current##*/}" == git || "$current" == exec || "${current##*/}" == nohup || "${current##*/}" == nice || "${current##*/}" == timeout || "${current##*/}" == sudo || "${current##*/}" == xargs ]]; then
       function_lookup=""
       continue
     fi
@@ -1384,17 +1574,34 @@ while :; do
     token_index=$((token_index + 1))
     continue
   fi
+  if ((at_command_start && scan_start < 0)) && [[ -z "${TOKEN_EXPANSION[token_index]-}" ]]; then
+    runner_kind=${current##*/}
+    case "$runner_kind" in
+      nohup | nice | timeout | sudo | xargs)
+        # sudo can select another cwd/config/user; xargs can append -a or
+        # pathspecs. Neither can be cleared by scanning this process's index.
+        [[ "$runner_kind" != sudo && "$runner_kind" != xargs ]] || runner_risk=1
+        [[ "$runner_kind" != xargs ]] || runner_appends=1
+        parse_runner "$runner_kind"
+        function_lookup=""
+        if ((runner_next >= 0)); then
+          token_index=$runner_next
+          continue
+        fi
+        at_command_start=0
+        ;;
+    esac
+  fi
   # What runs is git itself, or a program name this hook cannot read: an
   # expansion (`$g`, "${GIT:-git}") or a command substitution. The second kind
   # is judged only on whether `commit` turns up where git would read its
   # subcommand; anything else is left alone, since `$PYTHON -c ...` and
-  # `"$EDITOR" "$f"` are ordinary work. A word with a backtick is not judged at
-  # all: a heredoc's prose is parsed as commands here, and markdown puts
-  # backticks at the start of a line far more often than any command does.
+  # `"$EDITOR" "$f"` are ordinary work. Backticks use the same substitution
+  # boundaries, while literal backticks carry no expansion marker.
   if ((at_command_start && scan_start < 0)); then
     if [[ "$current" == "git" || "$current" == */git ]]; then
       scan_start=$((token_index + 1))
-    elif [[ -n "${TOKEN_EXPANSION[token_index]-}" && "$current" != *'`'* ]]; then
+    elif [[ -n "${TOKEN_EXPANSION[token_index]-}" ]]; then
       if [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX\$(" ]]; then
         # `$(echo git) commit`: the program name is still being built. Its
         # arguments start where the substitution closes.
@@ -1425,6 +1632,11 @@ while :; do
     scanned_past_commit=1
     while ((scan_index < token_count)); do
       current="${TOKENS[scan_index]}"
+      if [[ "$current" == "$BOUNDARY_PREFIX\$(" ]]; then
+        advance_substitution "$scan_index"
+        scan_index=$subst_next
+        continue
+      fi
       [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
       # One splittable token anywhere ahead of the subcommand is enough: the
       # words it expands to are git's arguments and never reach this parser, so
@@ -1572,7 +1784,7 @@ while :; do
           ;;
         commit)
           [[ -z "$indirect" ]] || block_indirect_commit
-          [[ -z "$pending_block" ]] || block_unparsed
+          [[ -z "$pending_block$runner_risk" ]] || block_unparsed
           scanned_past_commit=""
           ((commit_count += 1))
           if ((commit_count == 1)); then
@@ -1624,6 +1836,9 @@ while :; do
     # saw, so neither may end the scan quietly. Behind an unreadable program
     # name they may: `$PYTHON -c ...` sets no git config.
     if [[ -n "$scanned_past_commit" && -z "$indirect" ]]; then
+      if [[ -n "$runner_appends" ]] && { ((scan_index >= token_count)) || [[ "${TOKENS[scan_index]}" == "$BOUNDARY_PREFIX"* ]]; }; then
+        block_unparsed
+      fi
       [[ -z "$config_override" ]] || block_config_override
       [[ -z "$split_risk" ]] || block_unquoted_expansion
       [[ -z "$opaque_option" ]] || block_unparsed
@@ -1642,6 +1857,11 @@ after_separator=""
 token_index=$((commit_index + 1))
 while ((token_index < token_count)); do
   current="${TOKENS[token_index]}"
+  if [[ "$current" == "$BOUNDARY_PREFIX\$(" ]]; then
+    advance_substitution "$token_index"
+    token_index=$subst_next
+    continue
+  fi
   [[ "$current" == "$BOUNDARY_PREFIX"* ]] && break
   # A token that can add words is as dangerous here as before the subcommand:
   # it can introduce -a, which commits tracked files the index scan never saw.

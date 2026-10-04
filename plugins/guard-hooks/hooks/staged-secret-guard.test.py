@@ -352,6 +352,127 @@ for label, command in (
     check(f"{label} is parsed, not refused", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
     check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
 
+# Runners execute a program, not a same-named shell function. sudo may change
+# repository/config context and xargs appends unknown input; their commits must
+# be refused rather than cleared using the current index alone.
+runner_repo = repo({"fixture.txt": f"{GITHUB}\n"})
+runner_clean = repo({"fixture.txt": "clean\n"})
+for prefix in (
+    "nohup", "/usr/bin/nohup --", "nice", "nice -n 4", "nice --adjustment=4",
+    "nice -10", "timeout 5", "timeout -s TERM -k 1 5", "timeout --foreground 5",
+    "nohup nice -n 4 timeout 5", "exec nohup",
+):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(prefix + " git commit -m fixture", directory)
+        check(f"{prefix} scans the {'credential' if expected else 'clean'} candidate",
+              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+for prefix in (
+    "sudo", "sudo -u nobody --", "sudo -D /tmp", "sudo --chdir=/tmp",
+    "echo fixture | xargs", "xargs -0 -r -n 1", "xargs --max-args=1 --",
+    "xargs -I{}", "xargs -a input.txt", "xargs --arg-file=input.txt",
+):
+    rc, err = check_hook(prefix + " git commit -m fixture", runner_clean)
+    check(f"{prefix} refuses an unknown commit context", rc == 2 and "could not safely parse" in err,
+          f"exit={rc} stderr={err.strip()[:160]}")
+for label, command in (
+    ("runner prose", "echo nohup git commit -m fixture"),
+    ("runner data argument", "nohup echo git commit -m fixture"),
+    ("runner read-only command", "nice -n 4 git status"),
+    ("sudo option value", "sudo -u git echo commit"),
+    ("xargs option value", "xargs -a git echo commit"),
+    ("sudo read-only command", "sudo -u nobody git log --grep commit"),
+    ("xargs read-only command", "xargs -n 1 git log --grep commit"),
+    ("runner function shadow", "nohup() { :; }; nohup git commit -m fixture"),
+    ("defined git behind runner", "git() { git commit -m fixture; }; nohup git status"),
+):
+    rc, err = check_hook(command, runner_repo)
+    check(f"preserves {label}", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    "git() { :; }; nohup git commit -m fixture",
+    "nohup() { :; }; unset -f nohup; nohup git commit -m fixture",
+    "if false; then nice() { :; }; fi; nice git commit -m fixture",
+    "function /usr/bin/nohup { :; }; unset -f /usr/bin/nohup; /usr/bin/nohup git commit -m fixture",
+    "echo commit | xargs git",
+):
+    rc, err = check_hook(command, runner_repo)
+    check("runner function uncertainty retains external fallback", rc == 2,
+          f"exit={rc} stderr={err.strip()[:160]}")
+
+# A substitution executes even when its output is a quoted argument or an
+# assignment. Its quoting must be independent of the surrounding word.
+substitution_commits = (
+    ('quoted assignment', 'out="$(git commit -m fixture)"'),
+    ('quoted argument', 'echo "prefix $(git commit -m fixture) suffix"'),
+    ('inner quotes', 'out="$(git commit -m "inner message")"'),
+    ('nested quotes', 'out="$(echo "$(git commit -m fixture)")"'),
+    ('quoted function call', 'g() { git commit -m fixture; }; out="$(g)"'),
+    ('after quoted assignment', 'out="$(date)" git commit -m fixture'),
+    ('backtick assignment', 'out=`git commit -m fixture`'),
+    ('quoted backticks', 'echo "before `git commit -m fixture` after"'),
+    ('backtick function call', 'g() { git commit -m fixture; }; out=`g`'),
+    ('dollar substitution in backticks', 'out=`echo $(git commit -m fixture)`'),
+    ('nested escaped backticks', r'out=`echo \`git commit -m fixture\``'),
+)
+for label, command in substitution_commits:
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
+              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+for label, command in (
+    ('single-quoted substitution', "echo '$(git commit -m fixture)'"),
+    ('single-quoted backticks', "echo '`git commit -m fixture`'"),
+    ('escaped dollar', r'echo "\$(git commit -m fixture)"'),
+    ('escaped backticks', r'echo "\`git commit -m fixture\`"'),
+    ('arguments after quoted substitution', 'echo "$(date)" git commit -m fixture'),
+    ('arguments after backticks', 'echo `date` git commit -m fixture'),
+    ('inner quoted prose', 'echo "$(printf "%s" "git commit -m fixture")"'),
+    ('backtick quoted prose', 'echo `printf "%s" "git commit -m fixture"`'),
+    ('uninvoked quoted function', 'g() { out="$(git commit -m fixture)"; }'),
+):
+    rc, err = check_hook(command, runner_repo)
+    check(f"preserves {label}", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+for command in ('"$(command -v git)" commit -m fixture', '`which git` commit -m fixture'):
+    rc, err = check_hook(command, runner_clean)
+    check("refuses a program name produced by a substitution", rc == 2 and "program name this hook cannot read" in err,
+          f"exit={rc} stderr={err.strip()[:160]}")
+
+# The common last-word cat heredoc supplies data to its surrounding command.
+# Apostrophes, quotes and backticks in that body must not corrupt shell state.
+message_body = "A user's \"quoted\" note with `git` commit prose\n$GIT commit is documentation\n"
+for prefix in ('git commit -m ', 'echo ', 'gh pr create --body '):
+    command = prefix + '"$(cat <<\'EOF\'\n' + message_body + 'EOF\n)"'
+    for directory, expected in ((runner_repo, 2 if prefix.startswith('git') else 0), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"quoted heredoc data for {prefix.strip()} preserves its candidate", rc == expected,
+              f"exit={rc} stderr={err.strip()[:160]}")
+for prefix in ('eval ', 'bash -c ', 'sh -c ', 'source '):
+    command = prefix + '"$(cat <<\'EOF\'\n$GIT commit -m fixture\nEOF\n)"'
+    rc, err = check_hook(command, runner_clean)
+    check(f"{prefix.strip()} still reads executable heredoc output", rc == 2,
+          f"exit={rc} stderr={err.strip()[:160]}")
+
+# A quoted substitution in a global option cannot end the subcommand scan.
+for command, expected in (
+    ('git -C "$(pwd)" commit -m fixture', 2),
+    ('git --git-dir="$(echo .git)" commit -m fixture', 2),
+    ('git -C "$(pwd)" status', 0),
+    ('git -C "$(pwd)""$(printf /child)" commit -m fixture', 2),
+    ('echo "$(cat <<\'EOF\'\n$GIT commit -m x\nEOF\n)" | bash', 2),
+    ('echo "$(cat <<\'EOF\' | sh\n$GIT commit -m x\nEOF\n)"', 2),
+):
+    rc, err = check_hook(command, runner_repo)
+    check("substitution context preserves repository and execution boundaries", rc == expected,
+          f"exit={rc} stderr={err.strip()[:160]}")
+
+# Quoted message substitutions cannot hide later candidate-changing flags.
+subst_auto_repo = repo({"tracked.txt": "clean\n"})
+commit_seed(subst_auto_repo)
+Path(subst_auto_repo, 'tracked.txt').write_text(f"{GITHUB}\n")
+for tail, expected in (('', 0), (' -a', 2), (' tracked.txt', 2)):
+    rc, err = check_hook('git commit -m "$(printf message)"' + tail, subst_auto_repo)
+    check(f"message substitution preserves trailing candidate args {tail!r}", rc == expected,
+          f"exit={rc} stderr={err.strip()[:160]}")
+
 # --- a commit reached through a group, a function, or a substitution --------
 # A brace group runs where it stands, and a call runs its function's body with
 # the call's words in place of "$@" and $1..$9. Each of these names the
