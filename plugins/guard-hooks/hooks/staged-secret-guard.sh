@@ -302,6 +302,31 @@ close_substitution() {
   TOKEN_EXPANSION+=("")
 }
 
+# One escape layer is removed from a legacy backtick body before its inner
+# shell reads it. Dispatch only when the lexer actually sees a backtick, so
+# ordinary syntax does not pay for these checks on every byte (Bash 3.2).
+read_backtick() {
+  local nested=$1 kind
+  case "$nested:$subst_stack" in
+    1:*e) close_substitution e ;;
+    1:*f) close_substitution f ;;
+    0:*b) close_substitution b ;;
+    0:*d) close_substitution d ;;
+    *)
+      token="$token"'$'
+      token_started=1
+      if [[ "$quote" == '"' ]]; then
+        [[ "$token_expansion" == split* ]] || token_expansion=quoted
+        if ((nested)); then kind=f; else kind=d; fi
+      else
+        token_expansion="split"
+        if ((nested)); then kind=e; else kind=b; fi
+      fi
+      open_substitution "$kind"
+      ;;
+  esac
+}
+
 # A heredoc body is data, not commands, but only where nothing can run it.
 # Parsing `cat > r.sh <<'X'` / `$GIT commit` / `X` as commands refused a file
 # that is only being written. Skipping every body would be the opposite error:
@@ -570,43 +595,10 @@ while ((command_pos < command_len)); do
       continue
     fi
   fi
-  if [[ -n "$escaped" && "$char" == '`' && "$subst_stack" == *[bd]* && "$quote" != "'" ]]; then
-    # In legacy backticks one escape layer is removed before the inner shell
-    # reads the body. Thus \` inside it opens/closes a nested substitution.
-    case "$subst_stack" in
-      *e) close_substitution e ;;
-      *f) close_substitution f ;;
-      *)
-        token="$token"'$'
-        token_started=1
-        if [[ "$quote" == '"' ]]; then
-          [[ "$token_expansion" == split* ]] || token_expansion=quoted
-          open_substitution f
-        else
-          token_expansion="split"
-          open_substitution e
-        fi
-        ;;
-    esac
-    escaped=""
-  elif [[ -z "$escaped" && "$char" == '`' && "$quote" != "'" ]]; then
-    case "$subst_stack" in
-      *b) close_substitution b ;;
-      *d) close_substitution d ;;
-      *)
-        token="$token"'$'
-        token_started=1
-        if [[ "$quote" == '"' ]]; then
-          [[ "$token_expansion" == split* ]] || token_expansion=quoted
-          open_substitution d
-        else
-          token_expansion="split"
-          open_substitution b
-        fi
-        ;;
-    esac
-  elif [[ -n "$escaped" ]]; then
-    if [[ "$char" != $'\n' ]]; then
+  if [[ -n "$escaped" ]]; then
+    if [[ "$char" == '`' && "$subst_stack" == *[bd]* ]]; then
+      read_backtick 1
+    elif [[ "$char" != $'\n' ]]; then
       token="$token$char"
       token_started=1
     fi
@@ -618,6 +610,8 @@ while ((command_pos < command_len)); do
       quote=""
     elif [[ "$char" == "\\" ]]; then
       escaped=1
+    elif [[ "$char" == '`' ]]; then
+      read_backtick 0
     elif [[ "$char" == '(' && -n "$prev_dollar" ]]; then
       open_substitution q
     else
@@ -710,6 +704,7 @@ while ((command_pos < command_len)); do
           TOKEN_EXPANSION+=("")
         fi
         ;;
+      '`') read_backtick 0 ;;
       *)
         token="$token$char"
         token_started=1
@@ -1370,11 +1365,13 @@ while :; do
       CALL_KINDS+=("$arg_kind")
     done
     call_count=${#CALL_WORDS[@]}
-    # A target that is a process or command substitution (`g > >(cat) commit`,
-    # `g > $(echo f) commit`, tokenized with the parenthesis apart) ends the
-    # words here, so those after it are not known.
+    # A substitution ends this collection, even in a quoted message argument:
+    # `g -m "$(printf message)" -a` still passes -a to g. Its trailing words
+    # cannot be dropped or substituted as missing positional parameters. Keep
+    # body expansions unresolved, just as for an unplaced redirection target.
     case "${TOKENS[call_end]-}" in
-      "$BOUNDARY_PREFIX("* | "$BOUNDARY_PREFIX\$("*)
+      "$BOUNDARY_PREFIX\$("*) call_unplaced=1 ;;
+      "$BOUNDARY_PREFIX("*)
         [[ -z "$redirect_target" && "$redirect_last" != $((call_end - 1)) ]] || call_unplaced=1
         ;;
     esac

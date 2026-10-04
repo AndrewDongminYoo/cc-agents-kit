@@ -473,6 +473,27 @@ for tail, expected in (('', 0), (' -a', 2), (' tracked.txt', 2)):
     check(f"message substitution preserves trailing candidate args {tail!r}", rc == expected,
           f"exit={rc} stderr={err.strip()[:160]}")
 
+# Function argument collection stops at substitution boundaries. The words
+# after a message substitution still belong to that call: losing -a or a
+# pathspec would scan the empty index instead of tracked worktree changes.
+for wrapper, invocation in (
+    ('g() { git commit "$@"; }; ', 'g -m '),
+    ('g() { git commit -m "$1" "$2"; }; ', 'g '),
+):
+    for message in ('"$(printf message)"', '"`printf message`"', '`printf message`'):
+        for tail in (' -a', ' tracked.txt'):
+            command = wrapper + invocation + message + tail
+            rc, err = check_hook(command, subst_auto_repo)
+            check("function substitutions retain candidate-changing trailing arguments",
+                  rc == 2 and "Blocked:" in err, f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    'g() { echo "$@"; }; g "$(printf message)" -a',
+    'g() { git -C "$1" status; }; g "$(pwd)"',
+):
+    rc, err = check_hook(command, runner_repo)
+    check("unplaced substitution arguments preserve non-committing function bodies",
+          rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
 # --- a commit reached through a group, a function, or a substitution --------
 # A brace group runs where it stands, and a call runs its function's body with
 # the call's words in place of "$@" and $1..$9. Each of these names the
