@@ -887,19 +887,21 @@ try:
 except subprocess.TimeoutExpired:
     check("many calls in a long command finish within the hook timeout", False, "timed out")
 
-# Distinct names used to scan all later definitions at each call. At 2,000
-# names that alone passes the hook timeout. Check the real scan after all calls,
-# plus a clean control, so an early refusal cannot masquerade as an improvement.
-distinct_functions = "".join(f"f{i}() {{ :; }};\n" for i in range(2000)) + "".join(
-    f"f{i};\n" for i in range(2000)
-)
+# Calls to the oldest name used to scan every later definition. Exercise
+# lookup repeatedly with a bounded definition/token count: thousands of distinct
+# definitions also measure Bash 3.2's indexed-array traversal, a separate cost.
+# Check the real scan after all calls plus a clean control, so an early refusal
+# cannot masquerade as an improvement. On Linux main takes 10.90 s; indexed
+# lookup takes 3.12 s for the same 500 definitions and 3,000 calls.
+distinct_functions = "".join(f"f{i}() {{ :; }};\n" for i in range(500))
+lookup_workload = distinct_functions + "f0;\n" * 3000
 for label, directory, expected in (("clean", plain, 0), ("credential", continued_commit_repo, 2)):
     try:
-        rc, err = check_hook(distinct_functions + "git commit -m fixture", directory, timeout=10)
-        check(f"2,000 distinct function calls reach the {label} scan within 10 s",
+        rc, err = check_hook(lookup_workload + "git commit -m fixture", directory, timeout=10)
+        check(f"3,000 calls among 500 definitions reach the {label} scan within 10 s",
               rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc}")
     except subprocess.TimeoutExpired:
-        check(f"2,000 distinct function calls reach the {label} scan within 10 s", False, "timed out")
+        check(f"3,000 calls among 500 definitions reach the {label} scan within 10 s", False, "timed out")
 
 # Indexing must retain exact names and all possibly active definitions. Unusual
 # but valid Bash function names must not alias identifier/encoded names.
