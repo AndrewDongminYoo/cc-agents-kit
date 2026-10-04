@@ -137,7 +137,13 @@ It is not a replacement for entropy-based scanning; run trufflehog or gitleaks i
 #### `secrets-path-guard.sh`
 
 Blocks any tool call whose `file_path`, `command`, or `path` names a live secrets file — dotenv files and their variants, plus `~/.zprofile.secrets`.
-Template variants stay readable, so the agent can consult the example and then ask you for the real value.
+Template variants stay readable for key names and documentation. Never copy real values into chat or another file to get around a refusal.
+
+An operator can designate exact development dotenv paths with the default-off `CC_GUARD_DEV_ENV_PATHS` JSON array.
+Only in auto mode, recognized references to those paths leave the decision to normal permissions and auto evaluation; the hook never emits `allow` or `ask`.
+The agent can read the selected values and use ordinary absolute-path `source` commands.
+Unregistered dotenv paths and Keychain protection remain unchanged, and other deny rules still apply.
+See [the development-access contract and tradeoffs](docs/environment-access.md).
 
 ```bash
 cat .env           # blocked
@@ -206,7 +212,7 @@ To turn the whole bundle off, use `/plugin` and disable `guard-hooks`.
 - **`git`** — only `staged-secret-guard.sh` uses it, to read the effective commit candidate; outside a repository the hook exits `0`.
 - **`shellcheck`** — optional; only `shellcheck-on-edit.sh` uses it, and that hook no-ops without it.
 - **`gitleaks`** (8.x) — optional; only `output-secret-mask.sh` uses it (`brew install gitleaks`), and that hook no-ops without it.
-- **`python3`** — tests only, not runtime.
+- **`python3` (3.9+)** — tests. The optional development-path matcher requires protected `/usr/bin/python3` in isolated mode; it never falls back to a project runtime from `PATH`. Without it, the existing secret-path denial remains.
 
 The guards target *zsh* command strings because that is the shell Claude Code runs commands under on macOS.
 Nothing in the hooks themselves is zsh-specific to execute.
@@ -216,7 +222,7 @@ Nothing in the hooks themselves is zsh-specific to execute.
 These are guardrails against an accidental slip, not a sandbox.
 They match patterns in the tool input, so deliberate multi-step obfuscation (symlinks, variable indirection, base64) bypasses them, and the harness's own permission layer remains the enforcement boundary.
 
-- **Prose is matched too.** A command that merely *mentions* a blocked shape is blocked — writing a file whose text contains a download-and-execute pipeline trips `dangerous-command-guard`, and naming a secrets file in a message trips `secrets-path-guard`. Split the literal, or write the file with a tool other than `Bash`.
+- **Prose can still match.** Mentioning an unregistered protected path in Bash can be denied. Report the false positive and ask the operator to review the exact development path; do not disguise a path, split forbidden access across calls, or switch tools to defeat a refusal.
 - **`staged-secret-guard` matches shapes, not entropy.** A credential with no recognisable prefix - a bare password, a random hex string, a private API host - is not detected. Treat it as a floor, not a scanner.
 - **`staged-secret-guard` only sees a commit the command spells out.** A function or alias from your shell profile, an alias in a git config file (`git ci`), a script, `sh -c` or `eval` strings, an unrecognised runner, and an `IFS` assigned under a name the command never spells out (`printf -v "${v}FS" :`) all reach `git commit` without being recognised. A git `pre-commit` hook sees every one of these, because they all end in the same place.
 - **`staged-secret-guard` follows literal runner commands and substitutions.** `nohup`, `nice` and `timeout` use known option arities and then scan the visible git candidate; a visible commit through `sudo` or `xargs` is refused because the selected user/cwd or appended input can change that candidate. Unrecognised runner options before visible git are refused. Commands inside `$(...)`, including double-quoted forms, and backticks are parsed without running them; quoted message substitutions retain flags and pathspecs after the closing quote. Dynamically constructed runner commands and arbitrary shell evaluation remain outside this recogniser.
