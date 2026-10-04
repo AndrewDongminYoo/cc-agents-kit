@@ -238,7 +238,7 @@ LEX_CASE_LEVEL=()
 LEX_CASE_STATE=()
 lex_case_count=0
 note_case_word() {
-  local index=$((lex_case_count - 1)) previous="" start=1 begin=${#TOKENS[@]} cursor timed=""
+  local index=$((lex_case_count - 1)) previous="" start=1 begin=${#TOKENS[@]} cursor timed="" coproc="" depth=0
   if ((index >= 0)) && [[ "${LEX_CASE_LEVEL[index]}" == "$subst_stack" ]]; then
     case "${LEX_CASE_STATE[index]}" in
       word) LEX_CASE_STATE[index]=in; return 0 ;;
@@ -262,16 +262,40 @@ note_case_word() {
   # the last word would misread `echo then case` as a nested case clause.
   while ((begin > 0)); do
     previous=${TOKENS[begin - 1]}
-    [[ "$previous" != "$BOUNDARY_PREFIX"* ]] || break
+    case "$previous" in
+      "$BOUNDARY_PREFIX\$)"*) depth=$((depth + 1)) ;;
+      "$BOUNDARY_PREFIX)") ((depth > 0)) || break; depth=$((depth + 1)) ;;
+      "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(") ((depth > 0)) || break; depth=$((depth - 1)) ;;
+      "$BOUNDARY_PREFIX"*) ((depth > 0)) || break ;;
+    esac
     begin=$((begin - 1))
   done
-  case "$previous" in "$BOUNDARY_PREFIX\$)"*) return 0 ;; esac
   for ((cursor = begin; cursor < ${#TOKENS[@]}; cursor++)); do
+    # coproc may name its compound command with one word, including a quoted
+    # name or a substitution. Skip its nested command tokens and glued suffix
+    # as one word, but never consume additional arguments to a simple command.
+    if [[ -n "$coproc" ]]; then
+      while [[ "${TOKENS[cursor + 1]-}" == "$BOUNDARY_PREFIX\$(" ]]; do
+        cursor=$((cursor + 2))
+        depth=1
+        while ((cursor < ${#TOKENS[@]} && depth > 0)); do
+          case "${TOKENS[cursor]}" in
+            "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(") depth=$((depth + 1)) ;;
+            "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)"*) depth=$((depth - 1)) ;;
+          esac
+          ((depth == 0)) || cursor=$((cursor + 1))
+        done
+        [[ "${TOKENS[cursor]-}" != "$BOUNDARY_PREFIX\$)+" ]] || cursor=$((cursor + 1))
+      done
+      if ((cursor == ${#TOKENS[@]} - 1)); then continue; fi
+      start=""; break
+    fi
     [[ -z "${TOKEN_QUOTED[cursor]-}${TOKEN_EXPANSION[cursor]-}" ]] || { start=""; break; }
     case "${TOKENS[cursor]}" in
       if | then | elif | else | do | while | until | '!' | '{') ;;
       time) timed=1 ;;
       -p) [[ -n "$timed" ]] || { start=""; break; } ;;
+      coproc) coproc=1 ;;
       *) start=""; break ;;
     esac
   done

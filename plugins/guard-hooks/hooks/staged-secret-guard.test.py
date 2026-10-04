@@ -445,11 +445,30 @@ for label, command in case_substitution_commits:
         rc, err = check_hook(command, directory)
         check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
               rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+
+# The hook runs under Bash 3.2 even when the payload uses a newer shell's
+# coproc syntax. Do not require the hook's host shell to execute that payload.
+coproc_case_commits = (
+    ('anonymous coproc case', 'echo "$(coproc case x in x) git commit -m fixture;; esac; wait)"'),
+    ('named coproc case', 'echo "$(coproc worker case x in x) git commit -m fixture;; esac; wait)"'),
+    ('quoted coproc name', 'echo "$(coproc "worker" case x in x) git commit -m fixture;; esac; wait)"'),
+    ('substituted coproc name', 'echo "$(coproc "$(printf worker)" case x in x) git commit -m fixture;; esac; wait)"'),
+    ('backtick coproc name', 'echo "$(coproc `printf worker` case x in x) git commit -m fixture;; esac; wait)"'),
+    ('timed coproc case', 'echo "$(time -p coproc worker case x in x) git commit -m fixture;; esac; wait)"'),
+)
+for label, command in coproc_case_commits:
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
+              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+
 for label, command in (
     ('case arm prose', 'echo "$(case x in x) printf "%s" "git commit -m fixture";; esac)"'),
     ('arguments after case substitution', 'echo "$(case x in x) printf x;; esac)" git commit -m fixture'),
     ('case words as arguments', 'echo "$(echo case; echo esac)" git commit -m fixture'),
     ('case after keyword argument', 'echo "$(echo then case x in x)" git commit -m fixture'),
+    ('coproc words as arguments', 'echo "$(echo coproc worker case)" git commit -m fixture'),
+    ('coproc command arguments', 'echo "$(coproc printf "%s" case; wait)" git commit -m fixture'),
     ('case keyword as pattern', 'echo "$(case case in x) :;; case) printf x;; esac)" git commit -m fixture'),
     ('quoted esac pattern', 'echo "$(case esac in "esac") printf x;; esac)" git commit -m fixture'),
     ('empty case', 'echo "$(case x in esac)" git commit -m fixture'),
