@@ -224,6 +224,7 @@ note_parameter_brace() {
 last_unquoted_dollar=""
 # q restores double quotes after $(...), b/d close unquoted/quoted backticks;
 # e/f track their nested escaped backticks.
+backtick_depth=0
 # The data-heredoc exception below is deliberately limited to a final quoted
 # word of a literal data consumer; executable output is always still parsed.
 data_subst_token=-1
@@ -429,25 +430,49 @@ close_substitution() {
 # shell reads it. Dispatch only when the lexer actually sees a backtick, so
 # ordinary syntax does not pay for these checks on every byte (Bash 3.2).
 read_backtick() {
-  local nested=$1 kind
-  case "$nested:$subst_stack" in
-    1:*e) close_substitution e ;;
-    1:*f) close_substitution f ;;
-    0:*b) close_substitution b ;;
-    0:*d) close_substitution d ;;
-    *)
-      token="$token"'$'
-      token_started=1
-      if [[ "$quote" == '"' ]]; then
-        [[ "$token_expansion" == split* ]] || token_expansion=quoted
-        if ((nested)); then kind=f; else kind=d; fi
-      else
-        token_expansion="split"
-        if ((nested)); then kind=e; else kind=b; fi
-      fi
-      open_substitution "$kind"
-      ;;
-  esac
+  local pos=$((command_pos - 1)) slashes=0 period kind closing="" retained remove
+  while ((pos >= 0)) && [[ "${COMMAND:pos:1}" == "\\" ]]; do
+    slashes=$((slashes + 1))
+    pos=$((pos - 1))
+  done
+  # Each surrounding backtick parser removes one escape layer. At depth n,
+  # a closer has 2^(n-1)-1 slashes modulo 2^n; an inner opener needs one more
+  # layer. Other runs leave a literal backtick in the current command.
+  period=$((1 << backtick_depth))
+  if ((backtick_depth > 0 && slashes % period == period / 2 - 1)) \
+    && [[ "$subst_stack" == *[bdef] ]]; then
+    closing=${subst_stack#"${subst_stack%?}"}
+  else
+    period=$((period * 2))
+  fi
+  # The byte lexer already retained one slash per raw pair. Remove only the
+  # extra layers, keeping literal slash pairs before an opener or closer.
+  retained=$((slashes / period))
+  # A closer also ends the extracted body. Its final slash pairs are parsed
+  # once more; an odd last slash at end of input remains a literal byte.
+  if [[ -n "$closing" ]]; then retained=$(((retained + 1) / 2)); fi
+  remove=$((slashes / 2 - retained))
+  if ((remove > 0)); then token=${token:0:${#token}-remove}; fi
+  if [[ -n "$closing" ]]; then
+    close_substitution "$closing"
+    backtick_depth=$((backtick_depth - 1))
+  elif ((slashes % period == period / 2 - 1)); then
+    token="$token"'$'
+    token_started=1
+    if [[ "$quote" == '"' ]]; then
+      [[ "$token_expansion" == split* ]] || token_expansion=quoted
+      if ((backtick_depth)); then kind=f; else kind=d; fi
+    else
+      token_expansion="split"
+      if ((backtick_depth)); then kind=e; else kind=b; fi
+    fi
+    open_substitution "$kind"
+    backtick_depth=$((backtick_depth + 1))
+  else
+    token="$token"'`'
+    token_started=1
+    token_quoted=1
+  fi
 }
 
 # A heredoc body is data, not commands, but only where nothing can run it.
@@ -720,7 +745,7 @@ while ((command_pos < command_len)); do
   fi
   if [[ -n "$escaped" ]]; then
     if [[ "$char" == '`' && "$subst_stack" == *[bd]* ]]; then
-      read_backtick 1
+      read_backtick
     elif [[ "$char" != $'\n' ]]; then
       token="$token$char"
       token_started=1
@@ -734,7 +759,7 @@ while ((command_pos < command_len)); do
     elif [[ "$char" == "\\" ]]; then
       escaped=1
     elif [[ "$char" == '`' ]]; then
-      read_backtick 0
+      read_backtick
     elif [[ "$char" == '(' && -n "$prev_dollar" ]]; then
       open_substitution q
     elif [[ "$char" == '{' || "$char" == '}' ]]; then
@@ -857,7 +882,7 @@ while ((command_pos < command_len)); do
           TOKEN_EXPANSION+=("")
         fi
         ;;
-      '`') read_backtick 0 ;;
+      '`') read_backtick ;;
       '{' | '}')
         if ((parameter_count > 0)) || [[ -n "$prev_dollar" ]]; then note_parameter_brace; fi
         token="$token$char"

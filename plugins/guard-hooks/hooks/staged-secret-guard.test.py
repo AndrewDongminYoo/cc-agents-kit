@@ -419,6 +419,53 @@ for label, command in substitution_commits:
         check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
               rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
 
+# Each surrounding legacy substitution removes one backslash escape layer.
+def legacy_substitution(command):
+    return '`' + command.replace('\\', '\\\\').replace('`', '\\`') + '`'
+
+
+nested_backtick_commits = []
+nested_backtick_prose = []
+for depth in (3, 4, 5):
+    executable = 'git commit -m fixture'
+    prose = 'printf "%s" "\\`git commit -m fixture\\`"'
+    for _ in range(depth):
+        executable = 'echo ' + legacy_substitution(executable)
+        prose = 'echo ' + legacy_substitution(prose)
+    nested_backtick_commits.extend((
+        (f'{depth}-level backticks', 'out=' + executable[5:]),
+        (f'{depth}-level quoted backticks', 'out="' + executable[5:] + '"'),
+        (f'commit after {depth + 1}-level backticks', 'out=' + legacy_substitution(prose) + '; git commit -m fixture'),
+    ))
+    nested_backtick_prose.extend((
+        (f'{depth}-level escaped backtick prose', 'out=' + prose[5:]),
+        (f'{depth}-level quoted backtick prose', 'out="' + prose[5:] + '"'),
+    ))
+for label, command in nested_backtick_commits:
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
+              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+for label, command in nested_backtick_prose:
+    rc, err = check_hook(command, runner_repo)
+    check(f"preserves {label}", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
+# The extracted backtick body is parsed again: trailing slash pairs collapse,
+# while a final unpaired slash at end of that body stays literal.
+for slash_count in (5, 7):
+    actual_path = 'fixture' + '\\' * ((slash_count + 1) // 2)
+    raw_path = 'fixture' + '\\' * slash_count
+    slash_repo = repo({actual_path: GITHUB + '\n', raw_path: 'clean\n'})
+    slash_clean = repo({actual_path: 'clean\n', raw_path: 'clean\n'})
+    for depth in (1, 2, 3, 4):
+        command = 'git commit -m fixture ' + raw_path
+        for _ in range(depth):
+            command = 'echo ' + legacy_substitution(command)
+        for directory, expected in ((slash_repo, 2), (slash_clean, 0)):
+            rc, err = check_hook(command, directory)
+            check(f"{depth}-level backticks retain {slash_count}-slash path candidate ({expected})",
+                  rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+
 # A case pattern's ')' ends the pattern, not its enclosing substitution.
 # These commands are parsed only; both fixture repositories are disposable.
 case_substitution_commits = (
