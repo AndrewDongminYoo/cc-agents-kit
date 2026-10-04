@@ -290,6 +290,11 @@ note_case_word() {
   done
   for ((cursor = begin; cursor < ${#TOKENS[@]}; cursor++)); do
     # coproc has an optional name; function requires one before its body.
+    # An anonymous coproc can start its compound body at this word. `time`
+    # remains a possible name: `coproc time -p case ...` is a simple command.
+    if [[ "$compound_name" == optional && -z "${TOKEN_QUOTED[cursor]-}${TOKEN_EXPANSION[cursor]-}" ]]; then
+      case "${TOKENS[cursor]}" in '{' | if | while | until | for | select) compound_name="" ;; esac
+    fi
     # Skip nested substitutions and glued suffixes in the name as one word,
     # but never consume additional arguments to a simple command.
     if [[ -n "$compound_name" ]]; then
@@ -305,12 +310,29 @@ note_case_word() {
         done
         [[ "${TOKENS[cursor]-}" != "$BOUNDARY_PREFIX\$)+" ]] || cursor=$((cursor + 1))
       done
-      if ((cursor == ${#TOKENS[@]} - 1)); then compound_name=seen; continue; fi
-      start=""; break
+      compound_name=""
+      if ((cursor == ${#TOKENS[@]} - 1)); then continue; fi
+      # After a name, only a compound body can introduce another keyword;
+      # ordinary command arguments must not turn `case` into shell syntax.
+      [[ -z "${TOKEN_QUOTED[cursor + 1]-}${TOKEN_EXPANSION[cursor + 1]-}" ]] || { start=""; break; }
+      case "${TOKENS[cursor + 1]}" in
+        '{' | if | while | until | for | select) continue ;;
+        *) start=""; break ;;
+      esac
     fi
     [[ -z "${TOKEN_QUOTED[cursor]-}${TOKEN_EXPANSION[cursor]-}" ]] || { start=""; break; }
     case "${TOKENS[cursor]}" in
       if | then | elif | else | do | while | until | '!' | '{') ;;
+      for | select)
+        # Positional loops allow `for name do` without a separator. Explicit
+        # `in` lists require one, so their values cannot introduce a keyword.
+        if [[ ! "${TOKENS[cursor + 1]-}" =~ ^[a-zA-Z_][a-zA-Z_0-9]*$ \
+          || "${TOKENS[cursor + 2]-}" != 'do' \
+          || -n "${TOKEN_QUOTED[cursor + 1]-}${TOKEN_EXPANSION[cursor + 1]-}${TOKEN_QUOTED[cursor + 2]-}${TOKEN_EXPANSION[cursor + 2]-}" ]]; then
+          start=""; break
+        fi
+        cursor=$((cursor + 2))
+        ;;
       time) timed=start ;;
       -p) [[ "$timed" == start ]] || { start=""; break; }; timed=format ;;
       --) [[ "$timed" == start || "$timed" == format ]] || { start=""; break; }; timed=end ;;

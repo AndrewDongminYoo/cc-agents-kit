@@ -458,6 +458,17 @@ prefixed_case_commits = (
     ('substituted coproc name', 'echo "$(coproc "$(printf worker)" case x in x) git commit -m fixture;; esac; wait)"'),
     ('backtick coproc name', 'echo "$(coproc `printf worker` case x in x) git commit -m fixture;; esac; wait)"'),
     ('timed coproc case', 'echo "$(time -p coproc worker case x in x) git commit -m fixture;; esac; wait)"'),
+    ('anonymous coproc brace group', 'echo "$(coproc { case x in x) git commit -m fixture;; esac; }; wait)"'),
+    ('anonymous coproc negated case', 'echo "$(coproc { ! case x in x) git commit -m fixture;; esac; }; wait)"'),
+    ('named coproc brace group', 'echo "$(coproc worker { case x in x) git commit -m fixture;; esac; }; wait)"'),
+    ('coproc case as condition', 'echo "$(coproc if ! case x in x) git commit -m fixture;; esac; then :; fi; wait)"'),
+    ('function brace case body', 'echo "$(function f { case x in x) git commit -m fixture;; esac; }; f)"'),
+    ('function conditional case body', 'echo "$(function f if ! case x in x) git commit -m fixture;; esac; then :; fi; f)"'),
+    ('positional loop case body', 'echo "$(set -- x; for item do case x in x) git commit -m fixture;; esac; done)"'),
+    ('positional select case body', 'echo "$(set -- x; select item do case x in x) git commit -m fixture;; esac; break; done <<<\'1\')"'),
+    ('anonymous coproc loop case', 'echo "$(set -- x; coproc for item do case x in x) git commit -m fixture;; esac; done; wait)"'),
+    ('named coproc loop case', 'echo "$(set -- x; coproc worker for item do case x in x) git commit -m fixture;; esac; done; wait)"'),
+    ('function loop case body', 'echo "$(function f for item do case x in x) git commit -m fixture;; esac; done; f x)"'),
 )
 for label, command in prefixed_case_commits:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
@@ -491,6 +502,10 @@ for label, command in (
     ('case after keyword argument', 'echo "$(echo then case x in x)" git commit -m fixture'),
     ('coproc words as arguments', 'echo "$(echo coproc worker case)" git commit -m fixture'),
     ('coproc command arguments', 'echo "$(coproc printf "%s" case; wait)" git commit -m fixture'),
+    ('coproc external time arguments', 'echo "$(coproc time -p case x in x) git commit -m fixture;; esac; wait)"'),
+    ('uninvoked function brace case', 'echo "$(function f { case x in x) git commit -m fixture;; esac; })"'),
+    ('case in loop values', 'echo "$(for item in case; do :; done)" git commit -m fixture'),
+    ('case as loop variable', 'echo "$(set -- x; for case do :; done)" git commit -m fixture'),
     ('time option with command arguments', 'echo "$(time -- echo case)" git commit -m fixture'),
     ('option-looking command after time', 'echo "$(time -- -p case x in x) git commit -m fixture;; esac)"'),
     ('function keyword used as a name', 'function case { git commit -m fixture; }; :'),
