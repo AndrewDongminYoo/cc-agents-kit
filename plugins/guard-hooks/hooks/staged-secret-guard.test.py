@@ -465,6 +465,25 @@ for label, command in prefixed_case_commits:
         check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
               rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
 
+# Parentheses in a parameter expansion's pattern/default are data; nested
+# command and process substitutions there still execute and must be scanned.
+parameter_substitution_commits = (
+    ('parameter removal pattern', 'echo "$(v=x; : ${v%)}; git commit -m fixture)"'),
+    ('parameter prefix pattern', 'echo "$(v=x; : ${v#(}; git commit -m fixture)"'),
+    ('parameter default word', 'echo "$(unset v; : ${v:-)}; git commit -m fixture)"'),
+    ('nested parameter default', 'echo "$(unset v w; : ${v:-${w:-)}}; git commit -m fixture)"'),
+    ('quoted brace in default', 'echo "$(unset v; : ${v:-"}")}; git commit -m fixture)"'),
+    ('escaped brace in default', r'echo "$(unset v; : ${v:-\})}; git commit -m fixture)"'),
+    ('substitution in parameter default', 'echo "$(unset v; : ${v:-$(git commit -m fixture)})"'),
+    ('process substitution in default', 'echo "$(unset v; : ${v:-<(git commit -m fixture)}; wait)"'),
+    ('backticks in parameter default', 'echo "$(unset v; : ${v:-`git commit -m fixture`})"'),
+)
+for label, command in parameter_substitution_commits:
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
+              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+
 for label, command in (
     ('case arm prose', 'echo "$(case x in x) printf "%s" "git commit -m fixture";; esac)"'),
     ('arguments after case substitution', 'echo "$(case x in x) printf x;; esac)" git commit -m fixture'),
@@ -475,6 +494,8 @@ for label, command in (
     ('time option with command arguments', 'echo "$(time -- echo case)" git commit -m fixture'),
     ('option-looking command after time', 'echo "$(time -- -p case x in x) git commit -m fixture;; esac)"'),
     ('function keyword used as a name', 'function case { git commit -m fixture; }; :'),
+    ('arguments after parameter pattern', 'echo "$(v=x; : ${v%)})" git commit -m fixture'),
+    ('quoted parameter brace prose', 'echo "$(unset v; : ${v:-"}")})" git commit -m fixture'),
     ('case keyword as pattern', 'echo "$(case case in x) :;; case) printf x;; esac)" git commit -m fixture'),
     ('quoted esac pattern', 'echo "$(case esac in "esac") printf x;; esac)" git commit -m fixture'),
     ('empty case', 'echo "$(case x in esac)" git commit -m fixture'),

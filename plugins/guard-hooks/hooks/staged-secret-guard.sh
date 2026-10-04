@@ -203,6 +203,24 @@ FD_VARNAME='^[{][A-Za-z_][A-Za-z0-9_]*[}]$'
 # (`$(npm bin)/eslint`). A stack pairs these with ordinary parentheses and
 # records the quote context to restore for quoted and backtick substitutions.
 subst_stack=""
+PARAMETER_LEVEL=()
+PARAMETER_QUOTE=()
+parameter_count=0
+# ${...} may contain literal parentheses in its pattern/default word. Match
+# its own braces at the same substitution and quote level; a quoted/escaped
+# '}' or a brace inside a nested command must not close the outer expansion.
+note_parameter_brace() {
+  if [[ "$char" == '{' && -n "$prev_dollar" ]]; then
+    PARAMETER_LEVEL[parameter_count]=$subst_stack
+    PARAMETER_QUOTE[parameter_count]=$quote
+    parameter_count=$((parameter_count + 1))
+  elif [[ "$char" == '}' ]] && ((parameter_count > 0)) \
+    && [[ "${PARAMETER_LEVEL[parameter_count - 1]}" == "$subst_stack" \
+      && "${PARAMETER_QUOTE[parameter_count - 1]}" == "$quote" ]]; then
+    parameter_count=$((parameter_count - 1))
+  fi
+  return 0
+}
 last_unquoted_dollar=""
 # q restores double quotes after $(...), b/d close unquoted/quoted backticks;
 # e/f track their nested escaped backticks.
@@ -647,8 +665,8 @@ command_pos=0
 # Ordinary bytes cannot change the tokenizer state, so append their whole run
 # from a small window. Syntax still goes through the same single-byte branches
 # below. Exclude `(` in double quotes too: after `$` it opens a substitution.
-word_special=$' \t\n\'"\\$`<>;|&()#'
-double_special=$'"\\$`('
+word_special=$' \t\n\'"\\$`<>;|&()#{}'
+double_special=$'"\\$`({}'
 chunk_start=0
 chunk_end=0
 while ((command_pos < command_len)); do
@@ -697,6 +715,9 @@ while ((command_pos < command_len)); do
       read_backtick 0
     elif [[ "$char" == '(' && -n "$prev_dollar" ]]; then
       open_substitution q
+    elif [[ "$char" == '{' || "$char" == '}' ]]; then
+      if ((parameter_count > 0)) || [[ -n "$prev_dollar" ]]; then note_parameter_brace; fi
+      token="$token$char"
     else
       token="$token$char"
       if [[ "$char" == '$' || "$char" == '`' ]] && [[ -z "$token_expansion" ]]; then
@@ -770,6 +791,13 @@ while ((command_pos < command_len)); do
         fi
         ;;
       "(")
+        if ((parameter_count > 0)) && [[ "${PARAMETER_LEVEL[parameter_count - 1]}" == "$subst_stack" \
+          && -z "$prev_dollar$prev_redirect" ]]; then
+          token="$token$char"
+          token_started=1
+          command_pos=$((command_pos + 1))
+          continue
+        fi
         flush_token
         if [[ -n "$prev_dollar" ]]; then
           subst_stack="${subst_stack}s"
@@ -781,6 +809,12 @@ while ((command_pos < command_len)); do
         TOKEN_EXPANSION+=("")
         ;;
       ")")
+        if ((parameter_count > 0)) && [[ "${PARAMETER_LEVEL[parameter_count - 1]}" == "$subst_stack" ]]; then
+          token="$token$char"
+          token_started=1
+          command_pos=$((command_pos + 1))
+          continue
+        fi
         flush_token
         closing="${subst_stack#"${subst_stack%?}"}"
         if ((lex_case_count > 0)) && [[ "${LEX_CASE_LEVEL[lex_case_count - 1]}" == "$subst_stack" ]]; then
@@ -802,6 +836,11 @@ while ((command_pos < command_len)); do
         fi
         ;;
       '`') read_backtick 0 ;;
+      '{' | '}')
+        if ((parameter_count > 0)) || [[ -n "$prev_dollar" ]]; then note_parameter_brace; fi
+        token="$token$char"
+        token_started=1
+        ;;
       *)
         token="$token$char"
         token_started=1
