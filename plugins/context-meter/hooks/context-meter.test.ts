@@ -107,9 +107,43 @@ async function runStep($: Engine, input: TurnStepInput) {
   return stream.result;
 }
 
-test("reads an advisor request as one message iteration, not their sum", async ($, on) => {
-  // One request whose usage sums two message iterations of 102k each. The
-  // harness reads the sum (102%); the real fill is one iteration (51%).
+test("reads an advisor request as its last iteration, not the sum", async ($, on) => {
+  // A 100k request, then one whose usage sums two iterations of about 102k.
+  // The harness reads the sum (102%); the last iteration is at most the sum
+  // less the previous reading for the other iteration: 104k, 52%.
+  bottom(on, {
+    steps: [{ tokens: 100_000 }, { tokens: 204_000, serverTools: 1 }],
+    harnessPercent: 102,
+  });
+  await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
+
+  const answer = await $.session.compact({
+    trigger: "auto",
+    messages: ONE_MESSAGE,
+  });
+  expect(answer.skip).toContain("52%");
+  expect(answer.skip).toContain("102%");
+});
+
+test("lets an auto-compact through when an advisor iteration grew the prompt", async ($, on) => {
+  // Iterations of 100k and 160k after a 95k request: an average (130k, 65%)
+  // would veto, but the last iteration may be up to 165k, 83% of the window.
+  bottom(on, {
+    steps: [{ tokens: 95_000 }, { tokens: 260_000, serverTools: 1 }],
+    harnessPercent: 130,
+  });
+  await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
+
+  const answer = await $.session.compact({
+    trigger: "auto",
+    messages: ONE_MESSAGE,
+  });
+  expect(answer.skip).toBeUndefined();
+});
+
+test("does not veto from an advisor request with no earlier reading", async ($, on) => {
   bottom(on, {
     steps: [{ tokens: 204_000, serverTools: 1 }],
     harnessPercent: 102,
@@ -120,16 +154,16 @@ test("reads an advisor request as one message iteration, not their sum", async (
     trigger: "auto",
     messages: ONE_MESSAGE,
   });
-  expect(answer.skip).toContain("51%");
-  expect(answer.skip).toContain("102%");
+  expect(answer.skip).toBeUndefined();
 });
 
 test("vetoes an auto-compact the double count asked for", async ($, on) => {
   bottom(on, {
-    steps: [{ tokens: 204_000, serverTools: 1 }],
+    steps: [{ tokens: 100_000 }, { tokens: 204_000, serverTools: 1 }],
     harnessPercent: 102,
   });
   await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
 
   const answer = await $.session.compact({
     trigger: "auto",
@@ -139,13 +173,14 @@ test("vetoes an auto-compact the double count asked for", async ($, on) => {
 });
 
 test("lets an auto-compact through when a large result arrived after the advisor request", async ($, on) => {
-  // The advisor request measured 51%, but a 180,000-character tool result came
+  // The advisor request measured 52%, but a 180,000-character tool result came
   // back after it: about 60k more tokens, so the window is now past 70%.
   bottom(on, {
-    steps: [{ tokens: 204_000, serverTools: 1 }],
+    steps: [{ tokens: 100_000 }, { tokens: 204_000, serverTools: 1 }],
     harnessPercent: 102,
   });
   await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
 
   const messages: SessionMessage[] = [
     { role: "assistant", text: "Reading the log.", toolUses: [] },
@@ -199,10 +234,11 @@ test("lets an auto-compact proceed before any request was measured", async ($, o
 
 test("lets a manual compact proceed whatever the readings say", async ($, on) => {
   bottom(on, {
-    steps: [{ tokens: 204_000, serverTools: 1 }],
+    steps: [{ tokens: 100_000 }, { tokens: 204_000, serverTools: 1 }],
     harnessPercent: 102,
   });
   await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
 
   const answer = await $.session.compact({
     trigger: "manual",

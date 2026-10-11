@@ -12,10 +12,13 @@ import type { ContextReading } from "../types";
 // for it, so it cannot be blocked. It runs inside one API request, so that
 // request's usage is itself the sum of the message iterations around it
 // (2026-10-07: 593,788 = 294,371 + 299,417). turn.step does not carry the
-// iterations, so a request with server tools is read as an estimate: its
-// input divided by the message iterations it summed (server tools + 1). The
-// estimate runs a little low (296,894 against a last iteration of 299,417);
-// it is good enough to veto a false compaction and is never used to nudge.
+// iterations, so a request with server tools is read as an estimate. An
+// average would run low when an iteration grows the prompt, so the estimate
+// is an upper bound on the last iteration instead: the window only grows, so
+// the previous request's reading is no larger than any iteration here, and
+// the last one is at most the sum less that reading for every other
+// iteration. With no previous reading the sum stands, and nothing is vetoed.
+// An estimate is never used to nudge.
 
 const PLUGIN = "context-meter";
 
@@ -68,8 +71,9 @@ const isHidden = atom(
 
 const NUDGE_TEXT =
   "Context usage has crossed 80% of the window (handoff-first policy, measured per request by the context-meter mod). " +
-  "Before working on the user's request: invoke the handoff skill (context-handoff plugin) in FILE mode, write the handoff (including its NEXT MISSION section) to ~/.claude/handoffs/, " +
-  "tell the user the file path, and recommend /clear + a fresh session (a SessionStart hook that surfaces ~/.claude/handoffs/, if one is installed, will find the file). Then continue with the user's request.";
+  "Before working on the user's request, write a handoff to ~/.claude/handoffs/: if a handoff skill is available (the context-handoff plugin's, in FILE mode), use it; " +
+  "otherwise write a self-contained Markdown file yourself with the goal, the current state, the decisions made, the open problems and the first next step. " +
+  "Tell the user the file path, and recommend /clear + a fresh session (a SessionStart hook that surfaces ~/.claude/handoffs/, if one is installed, will find the file). Then continue with the user's request.";
 
 export const register: Register = (on) => {
   let lastSkippedTurn: string | null = null;
@@ -90,7 +94,14 @@ export const register: Register = (on) => {
     const summedTokens =
       input_tokens + cache_read_input_tokens + cache_creation_input_tokens;
     const serverTools = response.serverToolUses?.length ?? 0;
-    const tokens = Math.round(summedTokens / (serverTools + 1));
+    const previous = await read($, reading);
+    const tokens =
+      serverTools === 0 || previous === null
+        ? summedTokens
+        : Math.max(
+            Math.round(summedTokens / (serverTools + 1)),
+            summedTokens - serverTools * previous.tokens,
+          );
     const { context } = await $.session.usage();
     const window = context.window;
     if (!(window > 0)) return response;
