@@ -108,7 +108,11 @@ export const register: Register = (on) => {
     } = response.usage;
     const summedTokens =
       input_tokens + cache_read_input_tokens + cache_creation_input_tokens;
-    const serverTools = response.serverToolUses?.length ?? 0;
+    // Only a call that finished was followed by another message iteration; one
+    // cut short (no `endedAt`) added nothing to the sum.
+    const serverTools =
+      response.serverToolUses?.filter((use) => use.endedAt !== undefined)
+        .length ?? 0;
     // Every iteration here is at least the previous floor, and the last one is
     // at least their average, since each iteration's prompt holds the one before.
     const previousFloor = (await read($, reading))?.floorTokens ?? 0;

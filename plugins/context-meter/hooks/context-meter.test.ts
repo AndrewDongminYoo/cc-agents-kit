@@ -22,7 +22,7 @@ const ONE_MESSAGE: SessionMessage[] = [
  * the sum of the message iterations around it (measured 2026-10-07: 593,788 =
  * 294,371 + 299,417 in this config repo's session e4b943b6).
  */
-type Step = { tokens: number; serverTools?: number };
+type Step = { tokens: number; serverTools?: number; isCutShort?: boolean };
 
 function usage(tokens: number): TurnUsage {
   return {
@@ -57,7 +57,7 @@ function bottom(on: On, options: { steps: Step[]; harnessPercent: number }) {
         name: "advisor",
         input: {},
         startedAt: 0,
-        endedAt: 0,
+        ...(one.isCutShort === true ? {} : { endedAt: 0 }),
       }),
     );
     const result: TurnStepResult = {
@@ -160,6 +160,23 @@ test("bounds a second advisor request by the first one's floor, not its estimate
     trigger: "auto",
     messages: ONE_MESSAGE,
   });
+  expect(answer.skip).toBeUndefined();
+});
+
+test("reads a request whose advisor call was cut short as measured", async ($, on) => {
+  // The stream ended before the advisor answered: one iteration of 170k, not
+  // two, so the window is at 85% and the compaction goes ahead.
+  bottom(on, {
+    steps: [
+      { tokens: 160_000 },
+      { tokens: 170_000, serverTools: 1, isCutShort: true },
+    ],
+    harnessPercent: 85,
+  });
+  await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
+
+  const answer = await $.session.compact({ trigger: "auto", messages: ONE_MESSAGE });
   expect(answer.skip).toBeUndefined();
 });
 
