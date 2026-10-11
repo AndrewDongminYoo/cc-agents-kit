@@ -23,6 +23,18 @@
       "source": "./plugins/repo-gate",
       "description": "What runs between \"the code works\" and \"it is pushed\": trunk setup, conventional-commit splitting, dependency vulnerability triage, spell-check and markdownlint triage, and babysitting CI until it is green.",
       "category": "productivity"
+    },
+    {
+      "name": "context-meter",
+      "source": "./plugins/context-meter",
+      "description": "A function-hook mod that reads each model request's own usage, shows the real context fill above the prompt, vetoes an auto-compact the advisor's double-counted usage would fire, and sends the handoff nudge once at 80%.",
+      "category": "productivity"
+    },
+    {
+      "name": "quick-look",
+      "source": "./plugins/quick-look",
+      "description": "A function-hook mod that collects the files the agent reads, writes or names, and opens them in macOS Quick Look from /ql or a pane, in any terminal including Warp.",
+      "category": "productivity"
     }
   ]
 }

@@ -1,0 +1,193 @@
+import { atom, read, update } from "claude-code";
+import type { Register } from "claude-code";
+
+import type { ContextReading } from "../types";
+
+// Why this mod exists: a turn that calls the advisor runs several API
+// iterations, and the harness sums their input tokens into one usage record,
+// so the status line's percentage reads about twice the real context for that
+// turn. One such sample at 51% read as 103% and fired an auto-compact that
+// ended the session (memory: advisor-turns-double-count-context). The advisor
+// is a server tool: no tool.call, tool.check or classic PreToolUse hook runs
+// for it, so it cannot be blocked. It runs inside one API request, so that
+// request's usage is itself the sum of the message iterations around it
+// (2026-10-07: 593,788 = 294,371 + 299,417). turn.step does not carry the
+// iterations, so a request with server tools is read as an estimate: its
+// input divided by the message iterations it summed (server tools + 1). The
+// estimate runs a little low (296,894 against a last iteration of 299,417);
+// it is good enough to veto a false compaction and is never used to nudge.
+
+const PLUGIN = "context-meter";
+
+/** Below this real reading an auto-compact is a false alarm worth vetoing. */
+const SAFE_PERCENT = 70;
+/** ...but only when the harness reads at least this much higher. */
+const GAP_PERCENT = 20;
+/** The handoff-first policy's threshold (handoff-due-nudge.sh used 80). */
+const NUDGE_PERCENT = 80;
+/** The band stays quiet below this real reading unless the gap shows. */
+const SHOW_PERCENT = 50;
+
+// The scan that lists a module's state values needs these spelled as literals.
+const reading = atom(
+  { plugin: "context-meter", key: "reading" } as const,
+  null,
+);
+const isNudged = atom(
+  { plugin: "context-meter", key: "isNudged" } as const,
+  false,
+);
+const isHidden = atom(
+  { plugin: "context-meter", key: "isHidden" } as const,
+  false,
+);
+
+const NUDGE_TEXT =
+  "Context usage has crossed 80% of the window (handoff-first policy, measured per request by the context-meter mod). " +
+  "Before working on the user's request: invoke the handoff skill in FILE mode, write the handoff (including its NEXT MISSION section) to ~/.claude/handoffs/, " +
+  "tell the user the file path, and recommend /clear + a fresh session (the SessionStart pickup hook will find the file). Then continue with the user's request.";
+
+export const register: Register = (on) => {
+  let lastSkippedTurn: string | null = null;
+
+  // One reading per request, from the request's own usage, main loop only.
+  on("turn.step", async function* ($, e, next) {
+    const response = yield* next(e);
+    if (e.agentId !== undefined || response.usage === null) return response;
+
+    const {
+      input_tokens,
+      cache_read_input_tokens,
+      cache_creation_input_tokens,
+    } = response.usage;
+    const summedTokens =
+      input_tokens + cache_read_input_tokens + cache_creation_input_tokens;
+    const serverTools = response.serverToolUses?.length ?? 0;
+    const tokens = Math.round(summedTokens / (serverTools + 1));
+    const { context } = await $.session.usage();
+    const window = context.window;
+    if (!(window > 0)) return response;
+
+    const next_: ContextReading = {
+      turnId: e.turnId,
+      tokens,
+      window,
+      percent: Math.round((tokens / window) * 100),
+      harnessPercent: context.percent ?? null,
+      summedTokens,
+      isEstimated: serverTools > 0,
+    };
+    await update($, reading, () => next_);
+    try {
+      // A copy the operator (or a later session) can read from disk, since
+      // the band is drawn only on the operator's screen.
+      await $.store.set("lastReading", next_);
+    } catch {
+      // Diagnostic only: a store that refuses must not cost the reading.
+    }
+    return response;
+  });
+
+  // Veto the auto-compact that only the double count asked for. Fail open:
+  // a compaction this hook cannot judge proceeds as the engine meant it to.
+  on("session.compact", { trigger: "auto" }, async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e);
+    const real = await read($, reading);
+    if (real === null) return next(e);
+    const harness =
+      (await $.session.usage()).context.percent ?? real.harnessPercent;
+    if (harness === null) return next(e);
+
+    const gap = harness - real.percent;
+    if (real.percent < SAFE_PERCENT && gap >= GAP_PERCENT) {
+      if (lastSkippedTurn !== real.turnId) {
+        lastSkippedTurn = real.turnId;
+        $.ui.toast(
+          `${PLUGIN}: auto-compact skipped, real context ${real.percent}% (harness read ${harness}%)`,
+        );
+      }
+      return {
+        skip: `${PLUGIN}: the last request carried ${real.percent}% of the window; the harness read ${harness}% (an advisor double count). Auto-compact skipped.`,
+      };
+    }
+    return next(e);
+  }).catch(($, e, next) => next(e));
+
+  // The handoff nudge, once per session, by the real reading. The row the
+  // model reads goes through session.append; the operator gets a toast.
+  on("prompt.submit", async ($, e, next) => {
+    const real = await read($, reading);
+    if (
+      real !== null &&
+      !real.isEstimated &&
+      real.percent >= NUDGE_PERCENT &&
+      !(await read($, isNudged))
+    ) {
+      await update($, isNudged, () => true);
+      try {
+        await $.session.append({
+          message: {
+            type: "user",
+            content: [{ type: "text", text: NUDGE_TEXT }],
+          },
+        });
+        $.ui.toast(
+          `${PLUGIN}: real context ${real.percent}%, handoff nudge sent to the model`,
+        );
+      } catch {
+        // A run no plugin may shape (settings hooks off, a delegated observation)
+        // refuses the append; the prompt still goes through.
+        $.ui.toast(
+          `${PLUGIN}: real context ${real.percent}%, run /handoff before continuing`,
+        );
+      }
+    }
+    return next(e);
+  });
+
+  // /clear empties the window; the reading and the nudge start over.
+  on("session.end", async ($, e, next) => {
+    if (e.reason === "clear") {
+      await update($, reading, () => null);
+      await update($, isNudged, () => false);
+    }
+    return next(e);
+  });
+
+  on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
+    const real = await read($, reading);
+    if (e.props.hasSurvey || real === null || (await read($, isHidden)))
+      return next(e);
+
+    // The figure recorded at turn.step is the harness's previous one: it takes
+    // in the summed usage only after the step (2026-10-07: recorded 40 where
+    // the summed request read 81). Read it live, as the compact veto does.
+    const harnessPercent =
+      (await $.session.usage()).context.percent ?? real.harnessPercent;
+    const gap = harnessPercent === null ? 0 : harnessPercent - real.percent;
+    if (real.percent < SHOW_PERCENT && gap < GAP_PERCENT) return next(e);
+
+    const { Box, Button, Text } = $.ui.resolve(e);
+    const harness =
+      harnessPercent === null ? "" : ` · harness ${harnessPercent}%`;
+    const flag = gap >= GAP_PERCENT ? " · inflated" : "";
+    const value = real.isEstimated
+      ? `ctx ~${real.percent}% est`
+      : `ctx ${real.percent}% real`;
+
+    return (
+      <Box>
+        <Text dimColor>
+          {value}
+          {harness}
+          {flag}{" "}
+        </Text>
+        <Button
+          key="hide"
+          label="Hide"
+          onPress={() => update($, isHidden, () => true)}
+        />
+      </Box>
+    );
+  });
+};

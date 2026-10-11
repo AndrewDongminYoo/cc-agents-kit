@@ -21,6 +21,8 @@ Hooks are read when a session starts, so restart any session that is already ope
 | [`guard-hooks`](#guard-hooks) | Nine defensive hooks — five block, three warn, one rewrites Bash output. |
 | [`context-handoff`](#context-handoff) | Carry work across sessions, and keep the context that carries it lean. |
 | [`repo-gate`](#repo-gate) | What runs between "the code works" and "it is pushed". |
+| [`context-meter`](#context-meter) | A mod that shows the real context fill and vetoes an auto-compact the advisor's usage would fire. |
+| [`quick-look`](#quick-look) | A mod that opens the files the agent touched in macOS Quick Look. |
 
 ## guard-hooks
 
@@ -281,6 +283,30 @@ Six skills for the stretch between "the code works" and "it is pushed".
 | `markdownlint-triage` | A markdownlint log needs summarizing by rule, the rule set needs trimming to what catches real defects, or an existing backlog needs fixing file by file. Ships `markdownlint-summary` on PATH. |
 
 These are ecosystem-agnostic where the task allows it: the commit and CI skills read the project's own declared scripts rather than assuming a stack.
+
+## context-meter
+
+```bash
+/plugin install context-meter@cc-agents-kit
+```
+
+A function-hook mod (Claude Code mods, tested on 2.1.292 and 2.1.296).
+A request that runs the advisor reports usage summed over the message iterations around the call, so the harness reads such a turn as about twice its real context fill and can auto-compact a session that is only half full.
+The mod reads each request's own usage, treats an advisor request as an estimate (its input divided by the server tool count plus one), and answers an automatic compaction with a skip when the real reading is below 70% and the harness reads at least 20 points higher.
+At a measured 80% it sends one handoff nudge, and it draws the reading above the prompt once it passes 50% or the gap reaches 20 points.
+Every hook fails open: a compaction it cannot judge goes ahead.
+
+## quick-look
+
+```bash
+/plugin install quick-look@cc-agents-kit
+```
+
+A function-hook mod for macOS (Claude Code mods, tested on 2.1.292 and 2.1.296).
+It keeps the nine files the main agent most recently read, wrote or edited, plus existing files named in backticks in its answers.
+`/ql` opens a pane listing them with hotkeys 1 to 9, `/ql <n>` previews one directly, and `/ql <path>` previews any file.
+The preview is `/usr/bin/qlmanage -p`, started without a shell after an existence check, so it works in any terminal, Warp included, and it opens on the Mac's own screen rather than on a Remote Control device.
+Nothing opens a window unless you ask: the model has no tool for it.
 
 ## Licence
 
