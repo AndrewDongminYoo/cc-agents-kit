@@ -223,6 +223,25 @@ test("sends the handoff nudge once at a measured 80% of the window", async ($, o
   expect(nudges.value).toBe(1);
 });
 
+test("retries the nudge on the next prompt when the append was refused", async ($, on) => {
+  const appends = { tried: 0, stored: 0 };
+  // A refusal resolves to `{ deny }`; next(e) reaches the kit's own store.
+  on("session.append", (_$, e, next) => {
+    appends.tried += 1;
+    if (appends.tried === 1) return { deny: "refused for the test" };
+    appends.stored += 1;
+    return next(e);
+  });
+  bottom(on, { steps: [{ tokens: 164_000 }], harnessPercent: 82 });
+  await runStep($, step("t1", 0));
+
+  await $.prompt.submit(typed("first prompt, append refused"));
+  await $.prompt.submit(typed("second prompt, append stored"));
+  await $.prompt.submit(typed("third prompt, already nudged"));
+  expect(appends.tried).toBe(2);
+  expect(appends.stored).toBe(1);
+});
+
 test("never nudges on an estimated reading", async ($, on) => {
   // An advisor request summing two 164k iterations: the estimate is 82%, but
   // an estimate is not a measurement, and the shell hook it replaces also

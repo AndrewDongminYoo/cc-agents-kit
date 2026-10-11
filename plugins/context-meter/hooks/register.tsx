@@ -73,6 +73,9 @@ const NUDGE_TEXT =
 
 export const register: Register = (on) => {
   let lastSkippedTurn: string | null = null;
+  // A refused append leaves the nudge unsent, so it is retried on the next
+  // prompt; the operator is told only once.
+  let isRefusalToasted = false;
 
   // One reading per request, from the request's own usage, main loop only.
   on("turn.step", async function* ($, e, next) {
@@ -161,20 +164,28 @@ export const register: Register = (on) => {
       real.percent >= NUDGE_PERCENT &&
       !(await read($, isNudged))
     ) {
-      await update($, isNudged, () => true);
+      let isStored = false;
       try {
-        await $.session.append({
+        // A refusal resolves to `{ deny }`; a run no plugin may shape
+        // (settings hooks off, a delegated observation) throws instead.
+        const appended = await $.session.append({
           message: {
             type: "user",
             content: [{ type: "text", text: NUDGE_TEXT }],
           },
         });
+        isStored = appended.deny === undefined;
+      } catch {
+        isStored = false;
+      }
+      if (isStored) {
+        await update($, isNudged, () => true);
         $.ui.toast(
           `${PLUGIN}: real context ${real.percent}%, handoff nudge sent to the model`,
         );
-      } catch {
-        // A run no plugin may shape (settings hooks off, a delegated observation)
-        // refuses the append; the prompt still goes through.
+      } else if (!isRefusalToasted) {
+        // The prompt still goes through; the nudge is tried again next prompt.
+        isRefusalToasted = true;
         $.ui.toast(
           `${PLUGIN}: real context ${real.percent}%, run /handoff before continuing`,
         );
@@ -188,6 +199,7 @@ export const register: Register = (on) => {
     if (e.reason === "clear") {
       await update($, reading, () => null);
       await update($, isNudged, () => false);
+      isRefusalToasted = false;
     }
     return next(e);
   });
