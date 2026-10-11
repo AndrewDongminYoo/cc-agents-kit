@@ -75,17 +75,22 @@ async function preview($: EngineInterface, path: string): Promise<string> {
   current = stream;
   void (async () => {
     try {
-      for await (const _piece of stream) {
-        // qlmanage prints a line or two; the panel's life is the loop's.
-      }
+      // qlmanage prints a line or two; the panel's life is the loop's.
+      let step = await stream.next();
+      while (step.done !== true) step = await stream.next();
+      const { code } = step.value;
+      if (current === stream && code !== null && code !== 0)
+        $.ui.toast(`quick-look: qlmanage exited ${code} for ${basename(path)}`);
     } catch {
-      // It could not start, or it was replaced: nothing to report.
+      // A replaced panel ends without throwing, so this one could not start.
+      if (current === stream)
+        $.ui.toast(`quick-look: could not start Quick Look for ${basename(path)}`);
     } finally {
       if (current === stream) current = null;
     }
   })();
   $.ui.toast(`Quick Look: ${basename(path)}`);
-  return `Quick Look opened ${path}`;
+  return `Quick Look opening ${path}`;
 }
 
 export const register: Register = (on) => {

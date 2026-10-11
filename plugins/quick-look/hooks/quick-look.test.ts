@@ -10,19 +10,28 @@ const FILES = new Set([
   "/Users/me/notes/today.md",
 ]);
 const ORIGIN: PromptOrigin = { kind: "composer" };
+
+// The test runner has timers even though a mod's own environment has none:
+// /ql returns before its background preview loop has seen the child end.
+declare const setTimeout: (done: () => void, ms: number) => unknown;
+const settled = () => new Promise<void>((done) => setTimeout(done, 0));
 const PRESENTATION = { isFullscreen: true, columns: 160 };
 
 // The world beneath the plugin: a small file system, the session's directory,
 // HOME, and a process.spawn that records the argv instead of running anything.
-function bottom(on: On) {
+function bottom(on: On, exit: { code: number | null; fails?: boolean } = { code: 0 }) {
   const spawned: string[][] = [];
+  const toasts: string[] = [];
   const recent: { value: string[] } = { value: [] };
   // The test's $ has no state noun: the list is read where the mod writes it.
   on("state.set", { plugin: "quick-look", key: "recent" }, (_$, e, next) => {
     recent.value = [...(e.value as string[])];
     return next(e);
   });
-  on("ui.toast", () => ({ value: undefined }) as never);
+  on("ui.toast", (_$, e) => {
+    toasts.push((e as { text: string }).text);
+    return { value: undefined } as never;
+  });
   on("fs.exists", (_$, e) => ({ value: FILES.has(e.path) }));
   on("fs.stat", (_$, e) => ({
     value: {
@@ -36,12 +45,13 @@ function bottom(on: On) {
   mock.env(on, { HOME: "/Users/me" });
   on("process.spawn", async function* (_$, e) {
     spawned.push([...e.argv]);
-    return { value: { code: 0, signal: null } } as never;
+    if (exit.fails === true) throw new Error("spawn refused");
+    return { value: { code: exit.code, signal: null } } as never;
   });
   on("tool.call", () => ({ result: { type: "text" } }) as never);
   on("turn.complete", (_$, e) => ({ text: e.answer }));
   on("ui.open", () => ({ value: undefined }) as never);
-  return { spawned, recent };
+  return { spawned, toasts, recent };
 }
 
 async function ql($: Engine, args: string) {
@@ -95,8 +105,24 @@ test("/ql <n> opens that file in Quick Look by argv, no shell", async ($, on) =>
   await $.tool.call({ tool: "Read", file_path: "/repo/docs/plan.md" } as never);
 
   const out = await ql($, "2");
-  expect(out.text).toBe("Quick Look opened /repo/src/app.ts");
+  expect(out.text).toBe("Quick Look opening /repo/src/app.ts");
   expect(spawned).toEqual([["/usr/bin/qlmanage", "-p", "/repo/src/app.ts"]]);
+});
+
+test("/ql says so when Quick Look cannot start", async ($, on) => {
+  const { toasts } = bottom(on, { code: null, fails: true });
+
+  await ql($, "docs/plan.md");
+  await settled();
+  expect(toasts).toContain("quick-look: could not start Quick Look for plan.md");
+});
+
+test("/ql says so when qlmanage exits with an error", async ($, on) => {
+  const { toasts } = bottom(on, { code: 1 });
+
+  await ql($, "docs/plan.md");
+  await settled();
+  expect(toasts).toContain("quick-look: qlmanage exited 1 for plan.md");
 });
 
 test("/ql <path> resolves against the session directory", async ($, on) => {
