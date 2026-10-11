@@ -16,8 +16,8 @@ import type { ContextReading } from "../types";
 // average would run low when an iteration grows the prompt, so the estimate
 // is an upper bound on the last iteration instead: the window only grows, so
 // the previous request's floor (its measured fill, or for an estimate the
-// fill it certainly reached) is no larger than any iteration here, and the
-// last one is at most the sum less that floor for every other iteration.
+// fill it certainly reached) is no larger than any iteration here, and with
+// at least two iterations the last one is at most the sum less that floor.
 // With no previous reading the sum stands, and nothing is vetoed.
 // An estimate is never used to nudge.
 
@@ -115,12 +115,16 @@ export const register: Register = (on) => {
         .length ?? 0;
     // Every iteration here is at least the previous floor, and the last one is
     // at least their average, since each iteration's prompt holds the one before.
+    // Parallel calls share an iteration, so the call count only bounds the
+    // iteration count from above: a finished call proves two iterations, and
+    // the floor is subtracted once. Counting iterations high only lowers the
+    // average, which stays a floor.
     const previousFloor = (await read($, reading))?.floorTokens ?? 0;
     const average = Math.round(summedTokens / (serverTools + 1));
     const tokens =
       serverTools === 0
         ? summedTokens
-        : Math.max(average, summedTokens - serverTools * previousFloor);
+        : Math.max(average, summedTokens - previousFloor);
     const floorTokens =
       serverTools === 0 ? summedTokens : Math.max(average, previousFloor);
     const { context } = await $.session.usage();
@@ -232,10 +236,12 @@ export const register: Register = (on) => {
 
   // /clear empties the window; the reading and the nudge start over.
   on("session.end", async ($, e, next) => {
+    // The refusal toast is this process's own state; /resume and /branch end
+    // the session without a new session.start, so it starts over on any end.
+    isRefusalToasted = false;
     if (e.reason === "clear") {
       await update($, reading, () => null);
       await update($, isNudged, () => false);
-      isRefusalToasted = false;
     }
     return next(e);
   });

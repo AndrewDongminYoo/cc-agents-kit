@@ -163,6 +163,20 @@ test("bounds a second advisor request by the first one's floor, not its estimate
   expect(answer.skip).toBeUndefined();
 });
 
+test("subtracts the floor once when server calls ran in parallel", async ($, on) => {
+  // Two parallel calls share one iteration: 100k and 160k after a 95k
+  // request. Subtracting the floor per call would read 87k; once gives 165k.
+  bottom(on, {
+    steps: [{ tokens: 95_000 }, { tokens: 260_000, serverTools: 2 }],
+    harnessPercent: 130,
+  });
+  await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
+
+  const answer = await $.session.compact({ trigger: "auto", messages: ONE_MESSAGE });
+  expect(answer.skip).toBeUndefined();
+});
+
 test("reads a request whose advisor call was cut short as measured", async ($, on) => {
   // The stream ended before the advisor answered: one iteration of 170k, not
   // two, so the window is at 85% and the compaction goes ahead.
