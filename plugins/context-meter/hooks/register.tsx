@@ -1,5 +1,5 @@
 import { atom, read, update } from "claude-code";
-import type { Register } from "claude-code";
+import type { Register, SessionMessage } from "claude-code";
 
 import type { ContextReading } from "../types";
 
@@ -27,6 +27,30 @@ const GAP_PERCENT = 20;
 const NUDGE_PERCENT = 80;
 /** The band stays quiet below this real reading unless the gap shows. */
 const SHOW_PERCENT = 50;
+/** Characters per token, low on purpose: an overestimate lets a compaction through. */
+const CHARS_PER_TOKEN = 3;
+
+/**
+ * Tokens the conversation gained after the request a reading came from: that
+ * request's own answer and every message after it. A reading is one request
+ * old, so a large tool result since then is not in it.
+ */
+function tokensSince(messages: readonly SessionMessage[]): number {
+  let start = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "assistant") {
+      start = i;
+      break;
+    }
+  }
+  let chars = 0;
+  for (const message of messages.slice(start)) {
+    chars += message.text.length;
+    for (const use of message.toolUses) chars += JSON.stringify(use.input).length;
+    for (const result of message.toolResults ?? []) chars += result.text.length;
+  }
+  return Math.ceil(chars / CHARS_PER_TOKEN);
+}
 
 // The scan that lists a module's state values needs these spelled as literals.
 const reading = atom(
@@ -99,7 +123,11 @@ export const register: Register = (on) => {
     if (harness === null) return next(e);
 
     const gap = harness - real.percent;
-    if (real.percent < SAFE_PERCENT && gap >= GAP_PERCENT) {
+    // The window now: the reading plus what arrived after its request.
+    const nowPercent = Math.round(
+      ((real.tokens + tokensSince(e.messages)) / real.window) * 100,
+    );
+    if (nowPercent < SAFE_PERCENT && gap >= GAP_PERCENT) {
       if (lastSkippedTurn !== real.turnId) {
         lastSkippedTurn = real.turnId;
         $.ui.toast(
@@ -112,6 +140,16 @@ export const register: Register = (on) => {
     }
     return next(e);
   }).catch(($, e, next) => next(e));
+
+  // A compaction that ran leaves the reading one window old: drop it, so the
+  // next request measures again. A precompute keeps the window as it is.
+  on("session.compact", async ($, e, next) => {
+    const result = await next(e);
+    if (e.agentId === undefined && e.trigger !== "precompute" && !("skip" in result)) {
+      await update($, reading, () => null);
+    }
+    return result;
+  });
 
   // The handoff nudge, once per session, by the real reading. The row the
   // model reads goes through session.append; the operator gets a toast.

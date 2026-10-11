@@ -138,6 +138,44 @@ test("vetoes an auto-compact the double count asked for", async ($, on) => {
   expect(answer.skip).toContain("Auto-compact skipped");
 });
 
+test("lets an auto-compact through when a large result arrived after the advisor request", async ($, on) => {
+  // The advisor request measured 51%, but a 180,000-character tool result came
+  // back after it: about 60k more tokens, so the window is now past 70%.
+  bottom(on, {
+    steps: [{ tokens: 204_000, serverTools: 1 }],
+    harnessPercent: 102,
+  });
+  await runStep($, step("t1", 0));
+
+  const messages: SessionMessage[] = [
+    { role: "assistant", text: "Reading the log.", toolUses: [] },
+    {
+      role: "user",
+      text: "",
+      toolUses: [],
+      toolResults: [
+        {
+          tool_use_id: "r1",
+          text: "x".repeat(180_000),
+          isError: false,
+        } as never,
+      ],
+    },
+  ];
+  const answer = await $.session.compact({ trigger: "auto", messages });
+  expect(answer.skip).toBeUndefined();
+});
+
+test("a compaction that ran drops the reading, so the next prompt does not nudge", async ($, on) => {
+  bottom(on, { steps: [{ tokens: 164_000 }], harnessPercent: 82 });
+  const nudges = countNudges(on);
+  await runStep($, step("t1", 0));
+
+  await $.session.compact({ trigger: "manual", messages: ONE_MESSAGE });
+  await $.prompt.submit(typed("a prompt after /compact"));
+  expect(nudges.value).toBe(0);
+});
+
 test("lets an honest auto-compact proceed", async ($, on) => {
   bottom(on, { steps: [{ tokens: 170_000 }], harnessPercent: 85 });
   await runStep($, step("t1", 0));

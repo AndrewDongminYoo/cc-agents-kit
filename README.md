@@ -292,7 +292,8 @@ These are ecosystem-agnostic where the task allows it: the commit and CI skills 
 
 A function-hook mod (Claude Code mods, tested on 2.1.292 and 2.1.296).
 A request that runs the advisor reports usage summed over the message iterations around the call, so the harness reads such a turn as about twice its real context fill and can auto-compact a session that is only half full.
-The mod reads each request's own usage, treats an advisor request as an estimate (its input divided by the server tool count plus one), and answers an automatic compaction with a skip when the real reading is below 70% and the harness reads at least 20 points higher.
+The mod reads each request's own usage, treats an advisor request as an estimate (its input divided by the server tool count plus one), and answers an automatic compaction with a skip when the harness reads at least 20 points higher than that reading and the reading plus what arrived after its request (estimated at three characters per token) stays below 70%.
+A compaction that runs drops the reading, so the next request measures afresh.
 At a measured 80% it sends one handoff nudge, and it draws the reading above the prompt once it passes 50% or the gap reaches 20 points.
 Every hook fails open: a compaction it cannot judge goes ahead.
 
