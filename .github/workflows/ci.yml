@@ -142,7 +142,12 @@ jobs:
               root = hooks_json.parent.parent
               with hooks_json.open(encoding="utf-8") as hooks_file:
                   hooks_manifest = json.load(hooks_file, parse_constant=reject_nonstandard_constant)
-              for groups in hooks_manifest["hooks"].values():
+              # A function-hook mod names its module instead of shell commands.
+              for module in hooks_manifest.get("modules", []):
+                  wired += 1
+                  if not (hooks_json.parent / module).is_file():
+                      missing.append(f"{root.name}: {module}")
+              for groups in hooks_manifest.get("hooks", {}).values():
                   for group in groups:
                       for hook in group["hooks"]:
                           name = hook["command"].split("/hooks/")[-1].rstrip('"')
