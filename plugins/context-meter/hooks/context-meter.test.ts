@@ -257,6 +257,20 @@ test("a compaction that ran drops the reading, so the next prompt does not nudge
   expect(nudges.value).toBe(0);
 });
 
+test("vetoes once per reading, so a wrong estimate delays a compaction by one request at most", async ($, on) => {
+  bottom(on, {
+    steps: [{ tokens: 100_000 }, { tokens: 204_000, serverTools: 1 }],
+    harnessPercent: 102,
+  });
+  await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
+
+  const first = await $.session.compact({ trigger: "auto", messages: ONE_MESSAGE });
+  const second = await $.session.compact({ trigger: "auto", messages: ONE_MESSAGE });
+  expect(first.skip).toContain("Auto-compact skipped");
+  expect(second.skip).toBeUndefined();
+});
+
 test("lets an honest auto-compact proceed", async ($, on) => {
   bottom(on, { steps: [{ tokens: 170_000 }], harnessPercent: 85 });
   await runStep($, step("t1", 0));

@@ -88,7 +88,10 @@ const NUDGE_TEXT =
   "Tell the user the file path, and recommend /clear + a fresh session (a SessionStart hook that surfaces ~/.claude/handoffs/, if one is installed, will find the file). Then continue with the user's request.";
 
 export const register: Register = (on) => {
-  let lastSkippedTurn: string | null = null;
+  // The reading the last veto relied on. A reading backs one veto at most, so
+  // an estimate that is wrong (an image added since the request is invisible
+  // here) delays a needed compaction by one request, never more.
+  let lastVetoedReading: string | null = null;
   // A refused append leaves the nudge unsent, so it is retried on the next
   // prompt; the operator is told only once.
   let isRefusalToasted = false;
@@ -156,13 +159,16 @@ export const register: Register = (on) => {
     const nowPercent = Math.round(
       ((real.tokens + tokensSince(e.messages)) / real.window) * 100,
     );
-    if (nowPercent < SAFE_PERCENT && gap >= GAP_PERCENT) {
-      if (lastSkippedTurn !== real.turnId) {
-        lastSkippedTurn = real.turnId;
-        $.ui.toast(
-          `${PLUGIN}: auto-compact skipped, real context ${real.percent}% (harness read ${harness}%)`,
-        );
-      }
+    const readingKey = `${real.turnId}:${real.summedTokens}`;
+    if (
+      nowPercent < SAFE_PERCENT &&
+      gap >= GAP_PERCENT &&
+      lastVetoedReading !== readingKey
+    ) {
+      lastVetoedReading = readingKey;
+      $.ui.toast(
+        `${PLUGIN}: auto-compact skipped, real context ${real.percent}% (harness read ${harness}%)`,
+      );
       return {
         skip: `${PLUGIN}: the last request carried ${real.percent}% of the window; the harness read ${harness}% (an advisor double count). Auto-compact skipped.`,
       };
