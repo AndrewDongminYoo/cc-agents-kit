@@ -221,6 +221,32 @@ test("lets an auto-compact through when a large result arrived after the advisor
   expect(answer.skip).toBeUndefined();
 });
 
+test("counts a Korean tool result by its bytes, not as ASCII", async ($, on) => {
+  // 15,000 Hangul syllables are 45,000 UTF-8 bytes. A three-characters-per-
+  // token guess (5k) would keep the window at 55% and veto; the byte bound
+  // (45k) puts it at 75%, so the compaction goes ahead.
+  bottom(on, {
+    steps: [{ tokens: 100_000 }, { tokens: 204_000, serverTools: 1 }],
+    harnessPercent: 102,
+  });
+  await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
+
+  const messages: SessionMessage[] = [
+    { role: "assistant", text: "로그를 읽습니다.", toolUses: [] },
+    {
+      role: "user",
+      text: "",
+      toolUses: [],
+      toolResults: [
+        { tool_use_id: "r1", text: "가".repeat(15_000), isError: false } as never,
+      ],
+    },
+  ];
+  const answer = await $.session.compact({ trigger: "auto", messages });
+  expect(answer.skip).toBeUndefined();
+});
+
 test("a compaction that ran drops the reading, so the next prompt does not nudge", async ($, on) => {
   bottom(on, { steps: [{ tokens: 164_000 }], harnessPercent: 82 });
   const nudges = countNudges(on);

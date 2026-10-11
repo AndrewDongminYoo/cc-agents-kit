@@ -31,13 +31,24 @@ const GAP_PERCENT = 20;
 const NUDGE_PERCENT = 80;
 /** The band stays quiet below this real reading unless the gap shows. */
 const SHOW_PERCENT = 50;
-/** Characters per token, low on purpose: an overestimate lets a compaction through. */
-const CHARS_PER_TOKEN = 3;
+/**
+ * UTF-8 bytes in a text. A token covers at least one byte, so this bounds the
+ * token count from above for any text, Korean or emoji included; an
+ * overestimate only lets a compaction through.
+ */
+function utf8Bytes(text: string): number {
+  let bytes = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
 
 /**
- * Tokens the conversation gained after the request a reading came from: that
- * request's own answer and every message after it. A reading is one request
- * old, so a large tool result since then is not in it.
+ * At most the tokens the conversation gained after the request a reading came
+ * from: that request's own answer and every message after it. A reading is
+ * one request old, so a large tool result since then is not in it.
  */
 function tokensSince(messages: readonly SessionMessage[]): number {
   let start = messages.length;
@@ -47,13 +58,13 @@ function tokensSince(messages: readonly SessionMessage[]): number {
       break;
     }
   }
-  let chars = 0;
+  let bytes = 0;
   for (const message of messages.slice(start)) {
-    chars += message.text.length;
-    for (const use of message.toolUses) chars += JSON.stringify(use.input).length;
-    for (const result of message.toolResults ?? []) chars += result.text.length;
+    bytes += utf8Bytes(message.text);
+    for (const use of message.toolUses) bytes += utf8Bytes(JSON.stringify(use.input));
+    for (const result of message.toolResults ?? []) bytes += utf8Bytes(result.text);
   }
-  return Math.ceil(chars / CHARS_PER_TOKEN);
+  return bytes;
 }
 
 // The scan that lists a module's state values needs these spelled as literals.
