@@ -1,2 +1,4 @@
 .DS_Store
 __pycache__/
+# Claude Code writes its own type declarations beside a mod it loads from a folder.
+plugins/*/.claude-plugin/types/

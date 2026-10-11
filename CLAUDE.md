@@ -15,6 +15,8 @@ shellcheck plugins/*/hooks/*.sh
 for t in plugins/*/bin/*.test.py; do python3 "$t" || exit 1; done
 python3 plugins/guard-hooks/hooks/<name>.test.py     # a single suite
 /bin/bash -n plugins/guard-hooks/hooks/<name>.sh     # macOS system bash 3.2, not your shell's bash
+claude plugin validate plugins/<mod>                 # a function-hook mod: manifest, module, state contract
+claude plugin test plugins/<mod>                     # runs the mod's *.test.ts against the engine
 ```
 
 There is no build, no package manager, and no test framework.
@@ -31,6 +33,9 @@ plugins/<plugin>/
   hooks/*.sh
   hooks/*.test.py                 # beside its hook, never in a tests/ directory
   hooks/_optout.py                # shared suite helper; leading _ keeps it out of the *.test.py glob
+  hooks/register.tsx              # a function-hook mod's module, named under "modules" in hooks.json
+  hooks/<mod>.test.ts             # its claude plugin test suite, beside the module
+  types/index.d.ts                # a mod's $.state contract, named by "types" in plugin.json
   skills/<skill>/SKILL.md         # frontmatter name must equal the directory name
   bin/<tool>                      # on PATH while the plugin is enabled; executable, with a shebang
   bin/<tool>.test.py              # beside its tool, resolved the same way as a hook suite

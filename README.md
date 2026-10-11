@@ -21,6 +21,8 @@ Hooks are read when a session starts, so restart any session that is already ope
 | [`guard-hooks`](#guard-hooks) | Nine defensive hooks — five block, three warn, one rewrites Bash output. |
 | [`context-handoff`](#context-handoff) | Carry work across sessions, and keep the context that carries it lean. |
 | [`repo-gate`](#repo-gate) | What runs between "the code works" and "it is pushed". |
+| [`context-meter`](#context-meter) | A mod that shows the real context fill and vetoes an auto-compact the advisor's usage would fire. |
+| [`quick-look`](#quick-look) | A mod that opens the files the agent touched in macOS Quick Look. |
 
 ## guard-hooks
 
@@ -281,6 +283,32 @@ Six skills for the stretch between "the code works" and "it is pushed".
 | `markdownlint-triage` | A markdownlint log needs summarizing by rule, the rule set needs trimming to what catches real defects, or an existing backlog needs fixing file by file. Ships `markdownlint-summary` on PATH. |
 
 These are ecosystem-agnostic where the task allows it: the commit and CI skills read the project's own declared scripts rather than assuming a stack.
+
+## context-meter
+
+```bash
+/plugin install context-meter@cc-agents-kit
+```
+
+A function-hook mod (Claude Code mods, tested on 2.1.292 and 2.1.296).
+A request that runs the advisor reports usage summed over the message iterations around the call, so the harness reads such a turn as about twice its real context fill and can auto-compact a session that is only half full.
+The mod reads each request's own usage, treats an advisor request as an estimate (an upper bound on its last iteration: the sum less, for each other iteration, the fill the previous request certainly reached, or the whole sum when there is no previous reading), and answers an automatic compaction with a skip when the harness reads at least 20 points higher than that reading and the reading plus what arrived after its request (bounded by its UTF-8 byte count, since a token covers at least one byte) stays below 70%.
+A compaction that runs drops the reading, so the next request measures afresh.
+The estimate rests on assumptions the engine can break: an image or a PDF added after the measured request is invisible to the mod, and a prompt the engine shrinks by itself (microcompaction, cleared tool results) breaks the rule that the window only grows. So one reading backs one veto at most: a wrong estimate delays a needed compaction by one request, never more.
+At a measured 80% it sends one handoff nudge, which uses the `context-handoff` plugin's `handoff` skill when it is installed and asks for a self-contained handoff file otherwise, and it draws the reading above the prompt once it passes 50% or the gap reaches 20 points.
+Every hook fails open: a compaction it cannot judge goes ahead.
+
+## quick-look
+
+```bash
+/plugin install quick-look@cc-agents-kit
+```
+
+A function-hook mod for macOS (Claude Code mods, tested on 2.1.292 and 2.1.296).
+It keeps the nine files the main agent most recently read, wrote or edited, plus existing files named in backticks in its answers.
+`/ql` opens a pane listing them with hotkeys 1 to 9, `/ql <n>` previews one directly, and `/ql <path>` previews any file.
+The preview is `/usr/bin/qlmanage -p`, started without a shell after an existence check, so it works in any terminal, Warp included, and it opens on the Mac's own screen rather than on a Remote Control device.
+Nothing opens a window unless you ask: the model has no tool for it.
 
 ## Licence
 
