@@ -44,8 +44,8 @@ const isHidden = atom(
 
 const NUDGE_TEXT =
   "Context usage has crossed 80% of the window (handoff-first policy, measured per request by the context-meter mod). " +
-  "Before working on the user's request: invoke the handoff skill in FILE mode, write the handoff (including its NEXT MISSION section) to ~/.claude/handoffs/, " +
-  "tell the user the file path, and recommend /clear + a fresh session (the SessionStart pickup hook will find the file). Then continue with the user's request.";
+  "Before working on the user's request: invoke the handoff skill (context-handoff plugin) in FILE mode, write the handoff (including its NEXT MISSION section) to ~/.claude/handoffs/, " +
+  "tell the user the file path, and recommend /clear + a fresh session (a SessionStart hook that surfaces ~/.claude/handoffs/, if one is installed, will find the file). Then continue with the user's request.";
 
 export const register: Register = (on) => {
   let lastSkippedTurn: string | null = null;
