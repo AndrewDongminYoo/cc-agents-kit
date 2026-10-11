@@ -3,6 +3,11 @@ export type ContextReading = {
   turnId: string;
   /** The context fill in tokens: measured, or estimated when `isEstimated`. */
   tokens: number;
+  /**
+   * A fill the last iteration certainly reached: `tokens` when measured; when
+   * estimated, the larger of the iterations' average and the previous floor.
+   */
+  floorTokens: number;
   /** The model's context window, in tokens. */
   window: number;
   /** `tokens` over `window`, whole percent. */
@@ -13,8 +18,8 @@ export type ContextReading = {
   summedTokens: number;
   /**
    * True when the request ran a server tool (the advisor): its usage sums the
-   * message iterations around the call, and `tokens` is that sum divided by
-   * their count.
+   * message iterations around the call, and `tokens` is an upper bound on the
+   * last iteration.
    */
   isEstimated: boolean;
 };

@@ -292,7 +292,7 @@ These are ecosystem-agnostic where the task allows it: the commit and CI skills 
 
 A function-hook mod (Claude Code mods, tested on 2.1.292 and 2.1.296).
 A request that runs the advisor reports usage summed over the message iterations around the call, so the harness reads such a turn as about twice its real context fill and can auto-compact a session that is only half full.
-The mod reads each request's own usage, treats an advisor request as an estimate (an upper bound on its last iteration: the sum less the previous request's reading for each other iteration, or the whole sum when there is no previous reading), and answers an automatic compaction with a skip when the harness reads at least 20 points higher than that reading and the reading plus what arrived after its request (estimated at three characters per token) stays below 70%.
+The mod reads each request's own usage, treats an advisor request as an estimate (an upper bound on its last iteration: the sum less, for each other iteration, the fill the previous request certainly reached, or the whole sum when there is no previous reading), and answers an automatic compaction with a skip when the harness reads at least 20 points higher than that reading and the reading plus what arrived after its request (estimated at three characters per token) stays below 70%.
 A compaction that runs drops the reading, so the next request measures afresh.
 At a measured 80% it sends one handoff nudge, which uses the `context-handoff` plugin's `handoff` skill when it is installed and asks for a self-contained handoff file otherwise, and it draws the reading above the prompt once it passes 50% or the gap reaches 20 points.
 Every hook fails open: a compaction it cannot judge goes ahead.

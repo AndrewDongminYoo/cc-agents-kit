@@ -143,6 +143,26 @@ test("lets an auto-compact through when an advisor iteration grew the prompt", a
   expect(answer.skip).toBeUndefined();
 });
 
+test("bounds a second advisor request by the first one's floor, not its estimate", async ($, on) => {
+  // 102k + 102k with no earlier reading (estimate 204k, floor 102k), then
+  // 102k + 170k: the last iteration may be up to 170k, 85% of the window.
+  bottom(on, {
+    steps: [
+      { tokens: 204_000, serverTools: 1 },
+      { tokens: 272_000, serverTools: 1 },
+    ],
+    harnessPercent: 136,
+  });
+  await runStep($, step("t1", 0));
+  await runStep($, step("t1", 1));
+
+  const answer = await $.session.compact({
+    trigger: "auto",
+    messages: ONE_MESSAGE,
+  });
+  expect(answer.skip).toBeUndefined();
+});
+
 test("does not veto from an advisor request with no earlier reading", async ($, on) => {
   bottom(on, {
     steps: [{ tokens: 204_000, serverTools: 1 }],

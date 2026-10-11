@@ -15,9 +15,10 @@ import type { ContextReading } from "../types";
 // iterations, so a request with server tools is read as an estimate. An
 // average would run low when an iteration grows the prompt, so the estimate
 // is an upper bound on the last iteration instead: the window only grows, so
-// the previous request's reading is no larger than any iteration here, and
-// the last one is at most the sum less that reading for every other
-// iteration. With no previous reading the sum stands, and nothing is vetoed.
+// the previous request's floor (its measured fill, or for an estimate the
+// fill it certainly reached) is no larger than any iteration here, and the
+// last one is at most the sum less that floor for every other iteration.
+// With no previous reading the sum stands, and nothing is vetoed.
 // An estimate is never used to nudge.
 
 const PLUGIN = "context-meter";
@@ -94,14 +95,16 @@ export const register: Register = (on) => {
     const summedTokens =
       input_tokens + cache_read_input_tokens + cache_creation_input_tokens;
     const serverTools = response.serverToolUses?.length ?? 0;
-    const previous = await read($, reading);
+    // Every iteration here is at least the previous floor, and the last one is
+    // at least their average, since each iteration's prompt holds the one before.
+    const previousFloor = (await read($, reading))?.floorTokens ?? 0;
+    const average = Math.round(summedTokens / (serverTools + 1));
     const tokens =
-      serverTools === 0 || previous === null
+      serverTools === 0
         ? summedTokens
-        : Math.max(
-            Math.round(summedTokens / (serverTools + 1)),
-            summedTokens - serverTools * previous.tokens,
-          );
+        : Math.max(average, summedTokens - serverTools * previousFloor);
+    const floorTokens =
+      serverTools === 0 ? summedTokens : Math.max(average, previousFloor);
     const { context } = await $.session.usage();
     const window = context.window;
     if (!(window > 0)) return response;
@@ -109,6 +112,7 @@ export const register: Register = (on) => {
     const next_: ContextReading = {
       turnId: e.turnId,
       tokens,
+      floorTokens,
       window,
       percent: Math.round((tokens / window) * 100),
       harnessPercent: context.percent ?? null,
