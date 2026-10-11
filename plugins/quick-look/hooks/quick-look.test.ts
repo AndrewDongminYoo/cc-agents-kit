@@ -8,6 +8,8 @@ const FILES = new Set([
   "/repo/src/app.ts",
   "/repo/assets/icon.png",
   "/Users/me/notes/today.md",
+  "/repo/docs/release notes.pdf",
+  "/repo/노트/회의록.md",
 ]);
 const ORIGIN: PromptOrigin = { kind: "composer" };
 
@@ -96,6 +98,19 @@ test("records backticked paths the answer names, only when they exist", async ($
     "/repo/docs/plan.md",
     "/Users/me/notes/today.md",
     "/repo/assets/icon.png",
+  ]);
+});
+
+test("records backticked paths with spaces or non-ASCII names", async ($, on) => {
+  const { recent } = bottom(on);
+  await answer(
+    $,
+    "Open `docs/release notes.pdf` and `노트/회의록.md`, not `run the tests`.",
+  );
+
+  expect(recent.value).toEqual([
+    "/repo/docs/release notes.pdf",
+    "/repo/노트/회의록.md",
   ]);
 });
 

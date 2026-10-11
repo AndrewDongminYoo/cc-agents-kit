@@ -16,9 +16,15 @@ const PER_ANSWER = 5;
 
 const recent = atom({ plugin: "quick-look", key: "recent" } as const, []);
 
-/** A backticked token that looks like a file path: a slash or an extension. */
-const BACKTICKED = /`([^`\s]+)`/g;
-const PATHLIKE = /^(~\/|\/|\.{1,2}\/)?[\w.@~+-]+(\/[\w.@~+-]+)*$/;
+/**
+ * A whole backtick span on one line. Spaces and non-ASCII names are common on
+ * macOS, so the file system, not a character class, decides what is a path.
+ */
+const BACKTICKED = /`([^`\n]+)`/g;
+/** Longer spans are code, not a path a person would name. */
+const MAX_SPAN = 1024;
+/** Spans checked against the file system per answer, at most. */
+const MAX_CHECKS = 40;
 
 function remember(list: readonly string[], path: string): string[] {
   return [path, ...list.filter((one) => one !== path)].slice(0, LIMIT);
@@ -130,16 +136,19 @@ export const register: Register = (on) => {
       const cwd = await $.session.cwd();
       const home = await $.env.get("HOME");
       const found: string[] = [];
+      let checks = 0;
       for (const match of e.answer.matchAll(BACKTICKED)) {
         const raw = match[1];
         if (
           raw === undefined ||
-          !PATHLIKE.test(raw.replace(/:\d+(:\d+)?$/, ""))
+          raw.length > MAX_SPAN ||
+          raw !== raw.trim() ||
+          (!raw.includes("/") && !raw.includes("."))
         )
           continue;
-        if (!raw.includes("/") && !raw.includes(".")) continue;
         const path = resolve(raw, cwd, home);
         if (path === null || found.includes(path)) continue;
+        if (++checks > MAX_CHECKS) break;
         if (await isFile($, path)) found.push(path);
         if (found.length >= PER_ANSWER) break;
       }
