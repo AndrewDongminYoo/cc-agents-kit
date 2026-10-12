@@ -39,7 +39,8 @@ Read each changed file if the diff alone is insufficient to determine intent.
 Treat the existing index as owned work.
 Do not reset, unstage, or replace it without explicit approval.
 
-Record a baseline that Step 4 compares against: the `git status --porcelain` output, `git hash-object -- <path>` for every changed or untracked path, and `git diff --raw` for the tracked ones.
+Record a baseline that Step 4 compares against: the `git status --porcelain` output, `git hash-object -- <path>` for every changed or untracked path that still exists, and `git diff --raw` for the tracked ones.
+A deleted path, including the old side of a rename, has no file to hash; its porcelain line is its baseline.
 The porcelain line alone cannot show that a file which was already modified changed again, because it stays ` M <path>`; the content hash shows a content change, and the raw diff shows a mode change such as a new executable bit, which leaves the hash unchanged.
 
 ### 2. Group by Concern
