@@ -112,7 +112,7 @@ For each group in order:
    ```
 
    Confirm that the full index contains only the planned group and intended hunks.
-   Compare it with `planned.patch` from Step 1 by content, not by hunk shape: every added or removed line, mode change, and path in `git diff --cached` must come from the planned change, or from a fix you made yourself during verification (Step 4.5).
+   Compare it with `planned.patch` from Step 1 by content, not by hunk shape: every added or removed line, mode change, and path in `git diff --cached --binary` must come from the planned change (without `--binary`, any two versions of a binary file read the same `Binary files differ` line), or from a fix you made yourself during verification (Step 4.5).
    Hunk boundaries, context lines, and line numbers will differ, because a split hunk and each earlier commit of this run change the base the diff is taken against.
    Anything else, such as new content, an executable bit, or a new or deleted file, was written by a parallel writer: the user in another editor, another agent session, or a tool.
    The index is the only way such an edit reaches a commit, so this one comparison covers it however it got there; stop and ask, and do not stage, stash, or restore it.
