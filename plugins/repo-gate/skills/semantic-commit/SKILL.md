@@ -39,8 +39,8 @@ Read each changed file if the diff alone is insufficient to determine intent.
 Treat the existing index as owned work.
 Do not reset, unstage, or replace it without explicit approval.
 
-Record a baseline that Step 4 compares against: the `git status --porcelain` output, and `git hash-object -- <path>` for every changed or untracked path.
-The porcelain line alone cannot show that a file which was already modified changed again, because it stays ` M <path>`; the content hash can.
+Record a baseline that Step 4 compares against: the `git status --porcelain` output, `git hash-object -- <path>` for every changed or untracked path, and `git diff --raw` for the tracked ones.
+The porcelain line alone cannot show that a file which was already modified changed again, because it stays ` M <path>`; the content hash shows a content change, and the raw diff shows a mode change such as a new executable bit, which leaves the hash unchanged.
 
 ### 2. Group by Concern
 
@@ -94,8 +94,8 @@ For each group in order:
 
 1. Inspect the full index with `git diff --cached --name-only` and `git diff --cached`.
    If it contains a file or hunk outside this group, stop and ask for direction.
-   Re-run `git status --porcelain` and `git hash-object` on the paths this group stages, and compare them with the Step 1 baseline.
-   A new path, or a hash that changed on a path you did not edit, belongs to a parallel writer, such as the user in another editor or another agent session.
+   Re-run `git status --porcelain`, and `git hash-object` and `git diff --raw` on the paths this group stages, and compare them with the Step 1 baseline.
+   A new path, or a hash or mode that changed on a path you did not edit, belongs to a parallel writer, such as the user in another editor or another agent session.
    Stop and ask; do not stage, stash, or restore it.
 2. Stage only the files in this group: `git add <files>`.
    For a file split across groups, stage only its hunks (see Hunk-Level Splitting).
