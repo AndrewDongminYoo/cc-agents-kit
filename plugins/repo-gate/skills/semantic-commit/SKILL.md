@@ -42,12 +42,13 @@ Do not reset, unstage, or replace it without explicit approval.
 Save the change you are about to split as one patch, so Step 4 can tell your hunks from anyone else's:
 
 ```bash
-git diff HEAD --binary > <scratch>/planned.patch
+git diff HEAD --binary --no-textconv > <scratch>/planned.patch
 git status --porcelain --untracked-files=all                               # lists every untracked file, also inside new directories
-git diff --no-index --binary /dev/null <untracked-file> >> <scratch>/planned.patch   # once per untracked file; exits 1 by design
+git diff --no-index --binary --no-textconv /dev/null <untracked-file> >> <scratch>/planned.patch   # once per untracked file; exits 1 by design
 ```
 
 `git diff HEAD` leaves untracked files out, and plain `git status --porcelain` shows a new directory as one `?? dir/` line; the `--no-index` form records each untracked file with its content and mode.
+Every patch in this skill is built with `--binary --no-textconv`: without `--binary` a changed binary file reads only `Binary files differ`, and a repository's `textconv` driver replaces the real bytes with converted text that `git apply` rejects.
 
 ### 2. Group by Concern
 
@@ -112,7 +113,8 @@ For each group in order:
    ```
 
    Confirm that the full index contains only the planned group and intended hunks.
-   Compare it with `planned.patch` from Step 1 by content, not by hunk shape: every added or removed line, mode change, and path in `git diff --cached --binary` must come from the planned change (without `--binary`, any two versions of a binary file read the same `Binary files differ` line), or from a fix you made yourself during verification (Step 4.5).
+   Compare it with `planned.patch` from Step 1 by content, not by hunk shape: every added or removed line, mode change, and path in `git diff --cached --binary --no-textconv` must come from the planned change, or from a fix you made yourself during verification (Step 4.5).
+   The comparison runs both ways: every change the plan assigns to this group must also still be there, because a parallel edit can revert one of your hunks while another planned hunk keeps the file dirty.
    Hunk boundaries, context lines, and line numbers will differ, because a split hunk and each earlier commit of this run change the base the diff is taken against.
    Anything else, such as new content, an executable bit, or a new or deleted file, was written by a parallel writer: the user in another editor, another agent session, or a tool.
    The index is the only way such an edit reaches a commit, so this one comparison covers it however it got there; stop and ask, and do not stage, stash, or restore it.
@@ -176,7 +178,7 @@ Rules:
 
   ```bash
   git worktree add --detach <scratch>/candidate HEAD
-  git diff --cached --binary > <scratch>/candidate.patch
+  git diff --cached --binary --no-textconv > <scratch>/candidate.patch
   git -C <scratch>/candidate apply --index <scratch>/candidate.patch
   ```
 
