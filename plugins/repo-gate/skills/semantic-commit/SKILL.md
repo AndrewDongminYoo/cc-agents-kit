@@ -185,10 +185,11 @@ Rules:
   Run verification inside `<scratch>/candidate`, installing dependencies there first when the checks need them, and prefer each tool's check-only mode.
   Before committing, confirm that the candidate still is what you staged:
   - `git -C <scratch>/candidate diff --quiet` exits `0` (no unstaged rewrite),
-  - `git -C <scratch>/candidate write-tree` equals `git write-tree` in the main checkout (no rewrite the verifier staged itself), and
+  - `git -C <scratch>/candidate write-tree` equals `$reviewed` from Step 4.3 (no rewrite the verifier staged itself), and
   - `git -C <scratch>/candidate ls-files --others --exclude-standard` lists nothing (no new non-ignored file that the commit would lack).
     Ignored outputs are out of scope: the candidate holds only `HEAD` plus the staged diff, so anything a verifier writes to an ignored path is derived from the candidate, and the repository has declared that path as never committed.
-  Any mismatch means a verifier changed the candidate only, so the main index no longer matches what passed: carry the change into the main checkout, stage it, run `git worktree remove --force <scratch>/candidate` (a second `git worktree add` on the existing path fails with `already exists`), rebuild the candidate, and verify again.
+  Also confirm that `git write-tree` in the main checkout still equals `$reviewed`; if it does not, a parallel writer changed the main index during verification, so stop and ask as Step 4.3 requires, whatever the candidate shows.
+  Otherwise, any candidate mismatch means a verifier changed the candidate only, so the main index no longer matches what passed: carry the change into the main checkout, stage it, run `git worktree remove --force <scratch>/candidate` (a second `git worktree add` on the existing path fails with `already exists`), rebuild the candidate, and verify again.
   Then commit from the main checkout as usual and run `git worktree remove --force <scratch>/candidate`; `--force` is required because `apply --index` always leaves the candidate with staged changes.
   The worktree holds `HEAD` plus the staged diff and nothing else, so an untracked file that belongs to a later group stays out of test discovery and out of the compiler.
   Before building the patch, confirm that the index contains only the planned group.
