@@ -402,7 +402,144 @@ for name in RG_VALUE_SHORT:
     RECURSIVE.append((2, f"rg -{name} takes the -g", f"rg --hidden -e KEY -{name} -g '!.env*' ."))
     RECURSIVE.append((0, f"rg -{name} value then the exclusion", f"rg --hidden -e KEY -{name} x -g '!.env*' ."))
 
+# Every runner option that takes a value, from bash `help exec`/`help time`, the
+# macOS env, nice, time and xargs pages, GNU coreutils env, nice and timeout
+# --help, and the getopt tables of GNU findutils xargs.c and sudo parse_args.c.
+# Each one must skip its value as the next word and as an attached value, and a
+# value named grep is not the program. timeout's duration follows the option.
+RUNNER_VALUE_OPTIONS = {
+    "exec": [("-a", "fake")],
+    "env": [("-a", "fake"), ("--argv0", "fake"), ("-C", "/tmp"), ("--chdir", "/tmp"), ("-P", "/bin"),
+            ("-u", "HOME"), ("--unset", "HOME"), ("--env0-from", "vars")],
+    "nice": [("-n", "5"), ("--adjustment", "5")],
+    "timeout": [("-s", "KILL"), ("--signal", "KILL"), ("-k", "2"), ("--kill-after", "2")],
+    "time": [("-f", "%e"), ("--format", "%e"), ("-o", "out"), ("--output", "out")],
+    "xargs": [("-a", "list"), ("--arg-file", "list"), ("-d", "x"), ("--delimiter", "x"), ("-E", "EOF"),
+              ("-I", "{}"), ("-J", "%"), ("-L", "1"), ("-n", "1"), ("--max-args", "1"), ("-P", "2"),
+              ("--max-procs", "2"), ("-R", "2"), ("-S", "300"), ("-s", "4096"), ("--max-chars", "4096"),
+              ("--process-slot-var", "SLOT")],
+    "sudo": [("-a", "pam"), ("--auth-type", "pam"), ("-C", "3"), ("--close-from", "3"), ("-c", "staff"),
+             ("--login-class", "staff"), ("-D", "/tmp"), ("--chdir", "/tmp"), ("-g", "wheel"),
+             ("--group", "wheel"), ("-h", "host"), ("--host", "host"), ("-p", "pw"), ("--prompt", "pw"),
+             ("-R", "/"), ("--chroot", "/"), ("-r", "role"), ("--role", "role"), ("-T", "5"),
+             ("--command-timeout", "5"), ("-t", "type"), ("--type", "type"), ("-U", "bob"),
+             ("--other-user", "bob"), ("-u", "root"), ("--user", "root")],
+}
+for runner, options in RUNNER_VALUE_OPTIONS.items():
+    dur = " 5" if runner == "timeout" else ""
+    for opt, val in options:
+        attached = f"{opt}={val}" if opt.startswith("--") else f"{opt}{val}"
+        RECURSIVE.append((2, f"{runner} {opt} skips its value", f"{runner} {opt} {val}{dur} grep -r SECRET ."))
+        RECURSIVE.append((2, f"{runner} {attached} carries its value", f"{runner} {attached}{dur} grep -r SECRET ."))
+        RECURSIVE.append((0, f"{runner} {opt} value named grep", f"{runner} {opt} grep{dur} ls -r"))
+RECURSIVE += [
+    # An option without a value, or with an optional one that is only ever
+    # attached (GNU xargs -e -i -l, --eof --replace --max-lines; sudo -h in a
+    # cluster, --preserve-env), does not take the next word.
+    (2, "exec -c takes no value", "exec -c grep -r SECRET ."),
+    (2, "exec -l takes no value", "exec -l grep -r SECRET ."),
+    (2, "command -p takes no value", "command -p grep -r SECRET ."),
+    (2, "time -p takes no value", "time -p grep -r SECRET ."),
+    (2, "env -i takes no value", "env -i grep -r SECRET ."),
+    (2, "env - takes no value", "env - grep -r SECRET ."),
+    (2, "nohup -- takes no value", "nohup -- grep -r SECRET ."),
+    (2, "nice -5 takes no value", "nice -5 grep -r SECRET ."),
+    (2, "timeout -v takes no value", "timeout -v 5 grep -r SECRET ."),
+    (2, "timeout --foreground takes no value", "timeout --foreground 5 grep -r SECRET ."),
+    (2, "xargs -0 takes no value", "xargs -0 grep -r SECRET ."),
+    (2, "xargs -t takes no value", "xargs -t grep -r SECRET ."),
+    (2, "xargs -i takes only an attached value", "xargs -i grep -r SECRET ."),
+    (2, "xargs -e takes only an attached value", "xargs -e grep -r SECRET ."),
+    (2, "xargs -l takes only an attached value", "xargs -l grep -r SECRET ."),
+    (2, "xargs --max-lines takes only an attached value", "xargs --max-lines grep -r SECRET ."),
+    (2, "xargs --replace takes only an attached value", "xargs --replace grep -r SECRET ."),
+    (2, "xargs --eof takes only an attached value", "xargs --eof grep -r SECRET ."),
+    (2, "xargs -l1 carries its value", "xargs -l1 grep -r SECRET ."),
+    (2, "xargs --replace={} carries its value", "xargs --replace={} grep -r SECRET ."),
+    # A flag whose other-case letter takes a value: letters match by case.
+    (2, "xargs -r takes no value (-R does)", "xargs -r grep -r SECRET ."),
+    (2, "xargs -p takes no value (-P does)", "xargs -p grep -r SECRET ."),
+    (2, "sudo -H takes no value (-h host does)", "sudo -H grep -r SECRET ."),
+    (2, "sudo -A takes no value (-a does)", "sudo -A grep -r SECRET ."),
+    (2, "sudo -n takes no value", "sudo -n grep -r SECRET ."),
+    (2, "sudo -E takes no value", "sudo -E grep -r SECRET ."),
+    (2, "sudo --preserve-env takes only an attached value", "sudo --preserve-env grep -r SECRET ."),
+    (2, "sudo --login is not --login-class", "sudo --login grep -r SECRET ."),
+    (2, "sudo -nh takes no host from the next word", "sudo -nh grep -r SECRET ."),
+    (2, "sudo -h before an option takes no host", "sudo -h -u root grep -r SECRET ."),
+    (2, "sudo -h before NAME=value takes no host", "sudo -h FOO=1 grep -r SECRET ."),
+    # A cluster of short options: a value letter takes the rest, or the next word.
+    (2, "sudo -nu cluster", "sudo -nu root grep -r SECRET ."),
+    (2, "exec -ca cluster", "exec -ca fake grep -r SECRET ."),
+    (2, "exec -la cluster", "exec -la fake grep -r SECRET ."),
+    (2, "env -iu cluster", "env -iu HOME grep -r SECRET ."),
+    (2, "xargs -0n cluster", "find . -print0 | xargs -0n 1 grep -r SECRET"),
+    (2, "xargs -tI cluster", "xargs -tI {} grep -r SECRET {}"),
+    (2, "timeout -vs cluster", "timeout -vs KILL 5 grep -r SECRET ."),
+    (2, "nice -n5 attached in a cluster", "nice -n5 grep -r SECRET ."),
+    # getopt_long takes any unambiguous prefix of a long option.
+    (2, "sudo --us prefix", "sudo --us root grep -r SECRET ."),
+    (2, "sudo --other prefix", "sudo --other bob grep -r SECRET ."),
+    (2, "env --unse prefix", "env --unse HOME grep -r SECRET ."),
+    (2, "env --arg prefix", "env --arg fake grep -r SECRET ."),
+    (2, "xargs --max-ar prefix", "xargs --max-ar 1 grep -r SECRET ."),
+    (2, "xargs --arg prefix", "xargs --arg list grep -r SECRET ."),
+    (2, "timeout --sig prefix", "timeout --sig KILL 5 grep -r SECRET ."),
+    (2, "timeout --kill prefix", "timeout --kill 2 5 grep -r SECRET ."),
+    (2, "nice --adj prefix", "nice --adj 5 grep -r SECRET ."),
+    (2, "time --out prefix", "time --out out grep -r SECRET ."),
+    (0, "sudo --us prefix value named grep", "sudo --us grep ls -r"),
+    # A runner named by its path.
+    (2, "/usr/bin/env runner", "/usr/bin/env -u HOME grep -r SECRET ."),
+    (2, "/usr/bin/sudo runner", "/usr/bin/sudo -u root grep -r SECRET ."),
+    (2, "/usr/bin/xargs runner", "/usr/bin/xargs -n 1 grep -r SECRET ."),
+    (2, "/usr/bin/nice runner", "/usr/bin/nice -n 5 grep -r SECRET ."),
+    (2, "/usr/bin/nohup runner", "/usr/bin/nohup grep -r SECRET ."),
+    (2, "/usr/bin/time runner", "/usr/bin/time -o out grep -r SECRET ."),
+    (2, "a timeout path keeps the duration", "/opt/homebrew/bin/timeout -s KILL 5 grep -r SECRET ."),
+    (0, "a path runner value named grep", "/usr/bin/sudo -u grep ls -r"),
+    # Homebrew's GNU tools, with a g prefix.
+    (2, "genv runner", "genv -u HOME grep -r SECRET ."),
+    (2, "gtimeout runner keeps the duration", "gtimeout -s KILL 5 grep -r SECRET ."),
+    (2, "gnice runner", "/opt/homebrew/bin/gnice -n 5 grep -r SECRET ."),
+    (2, "gnohup runner", "gnohup grep -r SECRET ."),
+    (2, "gxargs runner", "gxargs -n 1 grep -r SECRET ."),
+    (2, "gtime runner", "gtime -o out grep -r SECRET ."),
+    (2, "genv -S", "genv -S 'grep -r SECRET .'"),
+]
+
+# env -S splits a string into words that env parses again; the hook refuses a
+# grep or rg word in the string or after it rather than replay that parse.
+SPLIT_CASES = [
+    (2, "env -S value", "env -S 'grep -r SECRET .'"),
+    (2, "env -S attached value", "env -S'grep -r SECRET .'"),
+    (2, "env -iS cluster", "env -iS 'grep -r SECRET .'"),
+    (2, "env --split-string value", "env --split-string 'grep -r SECRET .'"),
+    (2, "env --split-string= value", "env --split-string='grep -r SECRET .'"),
+    (2, "env --sp prefix", "env --sp 'grep -r SECRET .'"),
+    (2, "env -S options then grep", "env -S '-u HOME' grep -r SECRET ."),
+    (2, "env -S with a program path", "env -S '/usr/bin/grep -r SECRET .'"),
+    (2, "env -S rg", "env -S 'rg --hidden SECRET .'"),
+    (2, "env -S quoted program word", "env -S \"'grep' -r SECRET .\""),
+    (2, "env -S escaped spaces", "env -S 'grep\\_-r\\_SECRET\\_.'"),
+    (2, "env -S value over 1 KiB", "env -S '" + "x " * 600 + "' grep -n KEY a.txt"),
+    (2, "env -S even with a non-recursive grep", "env -S 'grep -n KEY a.txt'"),
+    (2, "env -S behind sudo", "sudo -u root env -S 'grep -r SECRET .'"),
+    (0, "env -S of another program", "env -S 'echo hi' ls -r"),
+    (0, "env -S with no grep in the segment", "env -S '-i' ls; echo grep"),
+]
+SPLIT_MSG = "env -S (--split-string)"
+
 fails = 0
+for expected, label, command in SPLIT_CASES:
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    ok = proc.returncode == expected and ((SPLIT_MSG in proc.stderr) == (expected == 2))
+    fails += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want {expected})  split: {label}")
+    if not ok and proc.stderr:
+        print(f"       stderr: {proc.stderr.strip()[:160]}")
+
 for expected, label, command in RECURSIVE:
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
     proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
@@ -611,6 +748,13 @@ for command, expected, limit, label in (
     ("grep $'" + "\\x41" * 15000 + "'\nls", 0, 2.5, "a 60 KiB $'...' word stays inside the timeout"),
     ("rg --hidden " + " ".join("--type-add 'x:" + "*.ts," * 203 + "'" for _ in range(55)) + " KEY .",
      2, 2.5, "many 1 KiB --type-add values are split inside the timeout"),
+    # Runner options are read word by word, each cluster or long name in one match.
+    # 700 x 4 words and 4 blanks stays under the 8,000-pass budget.
+    ("sudo " + "-nu root --us root " * 700 + "grep -r SECRET .", 2, 2.5,
+     "1,400 runner options with values are read inside the timeout"),
+    ("sudo -" + "n" * 60000 + "u root grep -r SECRET .", 2, 2.5, "a 60 KiB runner option cluster is read inside the timeout"),
+    ("sudo --user=" + "u" * 60000 + " grep -r SECRET .", 2, 2.5, "a 60 KiB attached runner value is read inside the timeout"),
+    ("env -S '" + "x " * 30000 + "' grep -n KEY a.txt", 2, 2.5, "a 60 KiB env -S value is refused inside the timeout"),
 ):
     started = time.monotonic()
     proc = subprocess.run(

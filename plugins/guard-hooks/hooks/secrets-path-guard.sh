@@ -190,6 +190,7 @@ done
 # without naming a .env token. Block it unless it excludes dotenv files.
 RECURSIVE_MSG="Blocked: a recursive search can print dotenv contents. Exclude dotenv files: grep -r ... --exclude='.env*' (or limit every --include to *.<ext>), and rg with --hidden, -. or -uu, or with a glob or type that can match a dotenv name (-g '*', -t sh) ... -g '!.env*'. Do not request secret values in chat or copy them to another file."
 IGNORE_FILE_MSG="Blocked: an rg --ignore-file can whitelist dotenv files (!.env), and this hook does not read it. Add -g '!.env*' as the last glob. Do not request secret values in chat or copy them to another file."
+SPLIT_MSG="Blocked: env -S (--split-string) builds the command it runs from a string, so this hook cannot check a grep or rg after it for a recursive search that prints dotenv contents. Run grep or rg without env -S. Do not request secret values in chat or copy them to another file."
 # Dotenv suffixes that an --include='*.<ext>' glob would match (.env.local etc.).
 dotenv_ext() {
   shopt -s nocasematch
@@ -496,10 +497,104 @@ check_rg() {
   return 0
 }
 
+# Read option word $2 of runner $1 as that runner parses it; $3 is the word
+# after it. Sets RO_SKIP to 1 when the option takes the next word as its value,
+# RO_VALUE to a value attached to the word, and RO_SPLIT to 1 for env -S.
+# The option sets come from bash 3.2 and 5.3 `help exec` and `help time`, the
+# macOS env(1), nice(1), time(1) and xargs(1) pages, `--help` of GNU coreutils
+# 9.12 env, nice and timeout, the getopt tables of GNU findutils xargs.c and
+# sudo 1.9 parse_args.c, and `sudo -h` of sudo 1.9.17. command, builtin and
+# nohup take no option value. A short option takes the rest of its cluster as
+# its value (-nuroot, -afake), or else the next word; an optional value (GNU
+# xargs -e, -i, -l; sudo -h) is only ever attached. A long option takes the
+# value after = or else the next word, under any prefix of its name, since
+# getopt_long accepts one; an ambiguous prefix is an error that runs nothing.
+# GNU xargs --eof, --replace and --max-lines take an optional value, so only
+# an attached one.
+runner_option() {
+  local req='' opt='' longs='' name l re
+  RO_SKIP=0
+  RO_VALUE=''
+  RO_SPLIT=0
+  case "$1" in
+    exec) req=a ;;
+    env) req=aCPSu longs='argv0 chdir env0-from split-string unset' ;;
+    nice) req=n longs=adjustment ;;
+    timeout) req=ks longs='kill-after signal' ;;
+    time) req=fo longs='format output' ;;
+    xargs) req=adEIJLnPRSs opt=eil longs='arg-file delimiter max-args max-chars max-procs process-slot-var' ;;
+    sudo) req=aCcDgpRrTtUu opt=h longs='auth-type chdir chroot close-from command-timeout group host login-class other-user prompt role type user' ;;
+    *) return 0 ;;
+  esac
+  if [[ "$2" == --?* ]]; then
+    name=${2#--}
+    if [[ "$name" == *=* ]]; then
+      RO_VALUE=${name#*=}
+      name=${name%%=*}
+    fi
+    # sudo --login is an option of its own that takes no value; every other
+    # name without a value is not a prefix of a name with one.
+    [[ "$1:$name" != sudo:login ]] || return 0
+    for l in $longs; do
+      if [[ "$l" == "$name"* ]]; then
+        [[ "$2" == *=* ]] || RO_SKIP=1
+        [[ "$l" != split-string ]] || RO_SPLIT=1
+      fi
+    done
+    return 0
+  fi
+  re="^-([^$req$opt]*)([$req$opt])(.*)$"
+  [[ "$2" =~ $re ]] || return 0
+  if [[ "$1:$2" == sudo:-h ]]; then
+    # A lone -h takes the next word as a host unless it is an option or a
+    # NAME=value word (sudo's got_host_flag and is_envar).
+    if [[ -n "${3-}" && "$3" != -* && ! ("$3" == *=* && "$3" != /* && "$3" != =*) ]]; then
+      RO_SKIP=1
+    fi
+    return 0
+  fi
+  [[ "$1:${BASH_REMATCH[2]}" != env:S ]] || RO_SPLIT=1
+  if [[ -n "${BASH_REMATCH[3]}" ]]; then
+    RO_VALUE=${BASH_REMATCH[3]}
+  elif [[ "$opt" != *"${BASH_REMATCH[2]}"* ]]; then
+    RO_SKIP=1
+  fi
+  return 0
+}
+
+# env -S splits its value into words that env parses again, so the program it
+# runs may sit inside the value or after it. Refuse a grep or rg word in the
+# value ($1) or in a later word of the segment, from index $2 up to $3.
+# Quotes and backslashes are dropped and env's \_ \t \n \v \f \r \c read as a
+# space, so a split grep word is still seen; a value over 1 KiB counts as one.
+check_split() {
+  local s=$1 j=$2 n=$3
+  if ((${#s} > 1024)); then
+    echo "$SPLIT_MSG" >&2
+    exit 2
+  fi
+  s=${s//\\[_tnvfrc]/ }
+  s=${s//[\'\"\\]/}
+  if [[ "$s" =~ (^|[[:space:]])([^[:space:]]*/)?([ef]?grep|rg)([[:space:]]|$) ]]; then
+    echo "$SPLIT_MSG" >&2
+    exit 2
+  fi
+  while ((j < n)); do
+    case "${SEG_WORDS[j]}" in
+      grep | */grep | egrep | */egrep | fgrep | */fgrep | rg | */rg)
+        echo "$SPLIT_MSG" >&2
+        exit 2
+        ;;
+    esac
+    j=$((j + 1))
+  done
+  return 0
+}
+
 # Find the program word of SEG_WORDS, past NAME=value assignments and runner
 # prefixes with their option values, and inspect a grep or rg invocation.
 check_segment() {
-  local n=${#SEG_WORDS[@]} i=$SEG_BASE j w prefixed=0 runner='' duration=0
+  local n=${#SEG_WORDS[@]} i=$SEG_BASE j w v prefixed=0 runner='' duration=0
   while ((i < n)); do
     w=${SEG_WORDS[i]}
     if [[ "$w" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
@@ -513,11 +608,25 @@ check_segment() {
       continue
     fi
     case "$w" in
-      command | builtin | env | exec | nohup | time | xargs | sudo | nice | timeout)
+      command | builtin | exec | env | nohup | time | xargs | sudo | nice | timeout \
+        | */env | */nohup | */time | */xargs | */sudo | */nice | */timeout \
+        | genv | */genv | gnohup | */gnohup | gtime | */gtime | gxargs | */gxargs \
+        | gnice | */gnice | gtimeout | */gtimeout)
         prefixed=1
-        runner=$w
+        # Patterns, not ${w##*/}, as for the program word below. Homebrew
+        # installs the GNU tools with a g prefix.
+        case "$w" in
+          env | */env | genv | */genv) runner='env' ;;
+          nohup | */nohup | gnohup | */gnohup) runner='nohup' ;;
+          time | */time | gtime | */gtime) runner='time' ;;
+          xargs | */xargs | gxargs | */gxargs) runner='xargs' ;;
+          */sudo) runner='sudo' ;;
+          nice | */nice | gnice | */gnice) runner='nice' ;;
+          timeout | */timeout | gtimeout | */gtimeout) runner='timeout' ;;
+          *) runner=$w ;;
+        esac
         # timeout's first operand is a duration, not the command.
-        [[ "$w" != timeout ]] || duration=1
+        [[ "$runner" != timeout ]] || duration=1
         ;;
       '!' | '{' | if | then | elif | else | while | until | do)
         prefixed=1
@@ -525,20 +634,13 @@ check_segment() {
         ;;
       -*)
         ((prefixed)) || break
-        # A runner option that takes the next word as its value; the same
-        # arity table as staged-secret-guard's parse_runner.
-        case "$runner:$w" in
-          nice:-n | nice:--adjustment | timeout:-s | timeout:--signal | timeout:-k | timeout:--kill-after \
-            | sudo:-u | sudo:--user | sudo:-g | sudo:--group | sudo:-h | sudo:--host \
-            | sudo:-p | sudo:--prompt | sudo:-C | sudo:--close-from | sudo:-T | sudo:--command-timeout \
-            | sudo:-R | sudo:--chroot | sudo:-D | sudo:--chdir | sudo:-r | sudo:--role | sudo:-t | sudo:--type \
-            | env:-u | env:--unset | env:-C | env:--chdir \
-            | xargs:-a | xargs:--arg-file | xargs:-d | xargs:--delimiter | xargs:-E | xargs:-I \
-            | xargs:-L | xargs:--max-lines | xargs:-n | xargs:--max-args | xargs:-P | xargs:--max-procs \
-            | xargs:-s | xargs:--max-chars | xargs:--process-slot-var)
-            i=$((i + 1))
-            ;;
-        esac
+        runner_option "$runner" "$w" "${SEG_WORDS[i + 1]-}"
+        v=$RO_VALUE
+        if ((RO_SKIP)); then
+          i=$((i + 1))
+          v=${SEG_WORDS[i]-}
+        fi
+        ((!RO_SPLIT)) || check_split "$v" $((i + 1)) "$n"
         ;;
       *)
         ((duration)) || break
