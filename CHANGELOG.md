@@ -5,6 +5,26 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-12
+
+Two function-hook mods join the marketplace: `context-meter` shows the real context fill and skips an automatic compaction that only an advisor request's summed usage asked for, and `quick-look` opens the files the agent touched in macOS Quick Look.
+`guard-hooks` lets the operator designate development dotenv paths that auto mode may read, and `staged-secret-guard` follows runner commands and quoted substitutions and stays inside its timeout on large inputs.
+`repo-gate`'s `semantic-commit` verifies a partially staged commit in a detached worktree instead of stashing the shared tree.
+`guard-hooks` moves from 0.3.4 to 0.4.0 and `repo-gate` from 0.2.4 to 0.2.5; `context-meter` 0.1.0 and `quick-look` 0.1.0 are new, and `context-handoff` (0.2.1) is unchanged.
+
+### Added
+
+- `context-meter` 0.1.0, a function-hook mod, reads each model request's own usage instead of the advisor request's sum over its message iterations, which made the harness read such a turn as about twice its real context fill and auto-compact a session that was only half full.
+  It treats an advisor request as an upper-bound estimate, skips an automatic compaction only when the harness reads at least 20 points higher and the estimate plus what arrived after the request stays below 70%, and lets one reading back one veto at most, so a wrong estimate delays a needed compaction by one request and never more.
+  It draws the reading above the prompt past 50% or a 20-point gap, sends one handoff nudge at 80% (through `context-handoff` when it is installed, otherwise as a request for a self-contained handoff file), and fails open: a compaction it cannot judge goes ahead.
+- `quick-look` 0.1.0, a function-hook mod for macOS, keeps the nine files the main agent most recently read, wrote or edited, plus existing files named in backticks in its answers, and previews them with `/usr/bin/qlmanage -p` from `/ql`, `/ql <n>`, or `/ql <path>`.
+  It works in a terminal that draws no inline images, Warp included, and reports a preview that could not start or exited with an error.
+  CI checks only that each mod's wired module exists; `claude plugin validate` and `claude plugin test` check their behaviour and run locally.
+- `guard-hooks` 0.4.0 `secrets-path-guard` reads a default-off `CC_GUARD_DEV_ENV_PATHS` JSON array of exact development dotenv paths that the operator designates.
+  Only in auto mode, a recognized reference to one of those paths is left to the normal permissions and auto-mode evaluation instead of being denied, including an absolute-path `source`; the hook never emits `allow` or `ask`.
+  Unregistered or mixed dotenv references stay denied, path validation rejects symlinks, traversal, and shell or glob syntax, and Keychain protection and the other deny rules are unchanged.
+  The agent can read and use the values in a designated file; `docs/environment-access.md` states that tradeoff and that the guard covers literal-path access only, not indirect access, which still depends on host permissions and the sandbox.
+
 ### Fixed
 
 - `repo-gate` 0.2.5 `semantic-commit` isolates a partially staged commit candidate in a detached worktree built from `HEAD` plus the staged diff, instead of `git stash push --keep-index --include-untracked` on the shared tree.
@@ -16,9 +36,14 @@ Entries are grouped by release; the topmost section collects work that has not y
   The worktree is removed with `--force` after every verification attempt, whether it passed or failed, because it always holds staged changes and `git worktree add` refuses a path that already exists.
   Parallel edits are now caught where they enter a commit, the index: Step 1 saves the planned change as one patch (including each untracked file through `git diff --no-index`), each group's `git diff --cached` must contain no content outside that patch (compared by content, since hunk shapes change as the run splits and commits), and after the commit the full `git diff "$reviewed" HEAD` must show at most a hook's formatting of the group's own files.
   Probes confirmed that this catches a rewritten or newly executable file inside a new directory, a parallel `git add -p` on an already modified path, and a pre-commit hook that re-stages another path, each of which a working-tree probe of status, content hash, or mode had missed.
+- `guard-hooks` 0.3.8 `staged-secret-guard` follows `nohup`, `nice` and `timeout` to the git command they run and scans it, and refuses a visible commit through `sudo` or `xargs`, whose user, working directory, or appended input can change the candidate.
+  Double-quoted `$(...)` and backticks are parsed in their own quote context, so a staged credential no longer passes through a quoted substitution, and a substitution that interrupts a function's arguments no longer drops trailing `-a` or pathspec arguments from the candidate.
+  A final quoted heredoc that only feeds `git commit -m`, `echo`, or `gh ... --body` stays data; arbitrary evaluation and complex heredocs remain the known limits tracked in #24.
+- `guard-hooks` 0.3.7 `staged-secret-guard` indexes shell function names, so a call no longer scans every unrelated definition; a workload of 500 definitions and 3,000 calls dropped from 10.90 s to 3.12 s on Linux.
+  Arbitrarily large definition or token streams remain outside the timeout guarantee (#26).
 - `guard-hooks` 0.3.6 `staged-secret-guard` reads its command through a small byte buffer and appends ordinary character runs together, keeping large executable heredocs and quoted words below the hook's 10 s timeout in the regression fixtures.
   Quotes, escapes, operators, expansions and heredoc safety decisions keep their existing parsing; buffer-edge and UTF-8 regressions verify that a real commit following large input still scans the staged credentials.
-  This addresses the remaining tokenizer cost in #26; function-name lookup optimization remains separate.
+  This addresses the remaining tokenizer cost in #26; the function-name lookup follows in 0.3.7.
 - `guard-hooks` 0.3.5 `staged-secret-guard` refuses an unresolved external-git or builtin-exec fallback after a shell function may have been unset and its arguments end at a substitution redirection.
   `git() { :; }; unset -f git; git > >(cat) commit -m x` and `exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x` previously committed staged credentials without a scan.
   The fallback now reads the original call through the existing git/exec parser, which can refuse the unresolved redirection without losing the remaining arguments; certain no-op functions and already identified read-only commands such as `git log -1 > $(echo f)` retain their verdicts.
