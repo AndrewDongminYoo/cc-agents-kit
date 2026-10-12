@@ -51,6 +51,16 @@ Testing through a newer bash on `PATH` hides whole classes of fault: `"${arr[@]}
 Start by comparing `git tag` against `gh release list`.
 The tag and the GitHub release are separate steps at the end of a long task and either can be dropped: on 2026-08-25 two releases were found behind in different ways, one with a pushed tag and no release, the other with a merged changelog section and no tag. Finish whatever is behind before cutting anything new.
 
+Then confirm that every PR merged since the previous tag has its CHANGELOG entry, because a feature PR can merge without one and nothing else catches it:
+
+```bash
+git log --first-parent --oneline vPREV..origin/main
+```
+
+Match each merge against the `[Unreleased]` section, and match each plugin's version there against its `plugin.json`; a plugin whose version moved with no entry naming that version is the usual miss.
+Write a missing entry into the release commit from the PR's description, and say in the release commit body which PRs it covers.
+v0.7.0 found four merged PRs without an entry (#41, #42, #43, #45), including a `guard-hooks` minor bump and two new plugins.
+
 CI validates the manifests structurally, but the CLI's own validator knows the schema and is the last word.
 It needs the `claude` CLI, so it runs locally rather than in CI:
 
