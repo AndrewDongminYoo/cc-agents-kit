@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Fixed
+
+- `repo-gate` 0.2.6 `semantic-commit` counts the index as found at Step 1 as planned work.
+  `planned.patch` compares `HEAD` with the working tree, so a line that was staged and later changed back in the working tree was in the index but not in the patch, and Step 4.3 stopped on it as a parallel edit; Step 1 now also saves `git diff --cached` as `staged.patch`, and content from either one passes (#48).
+  The parallel-edit detection is now stated as best-effort: it covers what reaches the index, and a formatter, a self-staging script, or a new non-ignored file in the candidate, but not a pre-commit hook that rewrites files without staging them, which can change withheld hunks and later-group files in the main checkout while every check passes (#50).
+
 ## [0.7.0] — 2026-10-12
 
 Two function-hook mods join the marketplace: `context-meter` shows the real context fill and skips an automatic compaction that only an advisor request's summed usage asked for, and `quick-look` opens the files the agent touched in macOS Quick Look.
