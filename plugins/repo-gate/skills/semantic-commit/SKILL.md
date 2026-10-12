@@ -43,11 +43,15 @@ Save the change you are about to split as one patch, so Step 4 can tell your hun
 
 ```bash
 git diff HEAD --binary --no-textconv > <scratch>/planned.patch
+git diff --cached --binary --no-textconv > <scratch>/staged.patch          # HEAD to the index as found
+git diff --binary --no-textconv > <scratch>/unstaged.patch                 # the index as found to the working tree
 git status --porcelain --untracked-files=all                               # lists every untracked file, also inside new directories
 git diff --no-index --binary --no-textconv /dev/null <untracked-file> >> <scratch>/planned.patch   # once per untracked file; exits 1 by design
 ```
 
-`git diff HEAD` leaves untracked files out, and plain `git status --porcelain` shows a new directory as one `?? dir/` line; the `--no-index` form records each untracked file with its content and mode.
+`git diff HEAD` compares `HEAD` with the working tree, so a line that was staged and later changed back in the working tree is in the index but not in `planned.patch`, and committing the index first leaves a later group to stage the reversal.
+`staged.patch` and `unstaged.patch` record both steps from `HEAD` through the index to the working tree, so every line a group can stage appears in one of the three patches, and all three count as planned in Step 4.
+`git diff HEAD` also leaves untracked files out, and plain `git status --porcelain` shows a new directory as one `?? dir/` line; the `--no-index` form records each untracked file with its content and mode.
 Every patch in this skill is built with `--binary --no-textconv`: without `--binary` a changed binary file reads only `Binary files differ`, and a repository's `textconv` driver replaces the real bytes with converted text that `git apply` rejects.
 
 ### 2. Group by Concern
@@ -113,7 +117,7 @@ For each group in order:
    ```
 
    Confirm that the full index contains only the planned group and intended hunks.
-   Compare it with `planned.patch` from Step 1 by content, not by hunk shape: every added or removed line, mode change, and path in `git diff --cached --binary --no-textconv` must come from the planned change, or from a fix you made yourself during verification (Step 4.5).
+   Compare it with `planned.patch`, `staged.patch`, and `unstaged.patch` from Step 1 by content, not by hunk shape: every added or removed line, mode change, and path in `git diff --cached --binary --no-textconv` must come from one of them, or from a fix you made yourself during verification (Step 4.5).
    The comparison runs both ways: every change the plan assigns to this group must also still be there, because a parallel edit can revert one of your hunks while another planned hunk keeps the file dirty.
    Hunk boundaries, context lines, and line numbers will differ, because a split hunk and each earlier commit of this run change the base the diff is taken against.
    Anything else, such as new content, an executable bit, or a new or deleted file, was written by a parallel writer: the user in another editor, another agent session, or a tool.
@@ -142,6 +146,9 @@ For each group in order:
 7. Compare what was committed with what you reviewed, and read the full diff rather than its `--stat`: `git diff "$reviewed" HEAD`.
    A pre-commit hook that formats and re-stages this group's own files produces formatting-only lines there, which is expected.
    Any other path, or any content that is not formatting, such as a hunk you withheld for a later group that a hook's `git add` pulled into the same file, means a hook or a parallel writer changed the index during the commit; stop and report it, and do not amend.
+   This detection is best-effort.
+   It covers what reaches the index, and in the candidate a formatter, a self-staging script, or a new non-ignored file.
+   It does not detect a hook that rewrites files without staging them (for example `gofmt -w .` with no `git add`): the hook runs in the main checkout, so it can change withheld hunks and later-group files there while this diff stays empty.
 
 No `Co-authored-by: Claude` or similar AI trailer.
 
