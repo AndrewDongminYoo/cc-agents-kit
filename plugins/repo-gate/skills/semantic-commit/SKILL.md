@@ -112,7 +112,8 @@ For each group in order:
    ```
 
    Confirm that the full index contains only the planned group and intended hunks.
-   Compare it with `planned.patch` from Step 1: every hunk, mode line, and path in `git diff --cached` must appear there.
+   Compare it with `planned.patch` from Step 1 by content, not by hunk shape: every added or removed line, mode change, and path in `git diff --cached` must come from the planned change, or from a fix you made yourself during verification (Step 4.5).
+   Hunk boundaries, context lines, and line numbers will differ, because a split hunk and each earlier commit of this run change the base the diff is taken against.
    Anything else, such as new content, an executable bit, or a new or deleted file, was written by a parallel writer: the user in another editor, another agent session, or a tool.
    The index is the only way such an edit reaches a commit, so this one comparison covers it however it got there; stop and ask, and do not stage, stash, or restore it.
    Then record the reviewed tree: `reviewed=$(git write-tree)`.
@@ -136,9 +137,9 @@ For each group in order:
    )"
    ```
 
-7. Compare what was committed with what you reviewed: `git diff --stat "$reviewed" HEAD`.
-   A pre-commit hook that formats and re-stages this group's own files produces a difference there, which is expected.
-   Any other path, or a withheld hunk, means a hook or a parallel writer changed the index during the commit; stop and report it, and do not amend.
+7. Compare what was committed with what you reviewed, and read the full diff rather than its `--stat`: `git diff "$reviewed" HEAD`.
+   A pre-commit hook that formats and re-stages this group's own files produces formatting-only lines there, which is expected.
+   Any other path, or any content that is not formatting, such as a hunk you withheld for a later group that a hook's `git add` pulled into the same file, means a hook or a parallel writer changed the index during the commit; stop and report it, and do not amend.
 
 No `Co-authored-by: Claude` or similar AI trailer.
 
