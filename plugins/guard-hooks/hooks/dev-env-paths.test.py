@@ -60,6 +60,13 @@ class DevelopmentPathsTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 0)
 
+    def test_abstain_also_leaves_a_recursive_search_to_the_harness(self):
+        # Issue #44 brief: the recursive-search check keeps the abstain path unchanged.
+        command = "source " + shlex.quote(str(self.dev)) + " && grep -rn KEY " + shlex.quote(str(self.project))
+        self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 0)
+        self.expect(self.invoke({"command": command}, mode="default", paths=[str(self.dev)]), 2)
+        self.expect(self.invoke({"command": "grep -rn KEY " + shlex.quote(str(self.project))}, paths=[str(self.dev)]), 2)
+
     def test_direct_tools_resolve_relative_paths_against_cwd(self):
         for tool, field in (("Read", "file_path"), ("Edit", "file_path"), ("Write", "file_path"), ("Grep", "path")):
             for path in (str(self.dev), self.dev.name, "./" + self.dev.name):

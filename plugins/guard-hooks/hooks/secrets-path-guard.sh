@@ -39,12 +39,847 @@ if [[ "$SCRIPT_PATH" == /* && -x /usr/bin/python3 ]] &&
   fi
 fi
 
+# A recursive grep, or an rg that reads hidden files, prints dotenv contents
+# without naming a .env token. Block it unless it excludes dotenv files.
+RECURSIVE_MSG="Blocked: a recursive search can print dotenv contents. Exclude dotenv files: grep -r ... --exclude='.env*' (or limit every --include to *.<ext>), and rg with --hidden, -. or -uu, or with a glob or type that can match a dotenv name (-g '*', -t sh) ... -g '!.env*'. Do not request secret values in chat or copy them to another file."
+# Dotenv suffixes that an --include='*.<ext>' glob would match (.env.local etc.).
+dotenv_ext() {
+  shopt -s nocasematch
+  case "$1" in
+    env | local | development | production | test | staging | dev | prod | example | sample | template | dist | default | defaults)
+      shopt -u nocasematch
+      return 0
+      ;;
+  esac
+  shopt -u nocasematch
+  return 1
+}
+
+# True when a glob can match a dotenv name: anything but *.<non-dotenv ext>.
+dotenv_glob() {
+  ! [[ "$1" =~ ^\*\.([A-Za-z0-9_-]+)$ ]] || dotenv_ext "${BASH_REMATCH[1]}"
+}
+
+# grep-family segment: ARG_WORDS are the words after the program word.
+check_grep() {
+  local n=${#ARG_WORDS[@]} j=0 a v vi c k cluster eq
+  local recursive=0 opt=0 includes=0 last_exclude=0 last_include=0
+  CAND_START=()
+  CAND_END=()
+  while ((j < n)); do
+    a=${ARG_WORDS[j]}
+    j=$((j + 1))
+    v=''
+    case "$a" in
+      --) break ;;
+      --recursive | --dereference-recursive | --directories=recurse) recursive=1 ;;
+      --exclude=* | --include=* | --exclude | --include | --directories)
+        vi=$((j - 1))
+        if [[ "$a" == *=* ]]; then
+          v=${a#*=}
+        elif ((j < n)); then
+          vi=$j
+          v=${ARG_WORDS[j]}
+          j=$((j + 1))
+        fi
+        case "$a" in
+          --exclude*)
+            opt=$((opt + 1))
+            if [[ "$v" == '.env*' ]]; then
+              last_exclude=$opt
+              CAND_START[${#CAND_START[@]}]=${ARG_STARTS[vi]}
+              CAND_END[${#CAND_END[@]}]=${ARG_ENDS[vi]}
+            fi
+            ;;
+          --directories) [[ "$v" == recurse ]] && recursive=1 ;;
+          --include*)
+            opt=$((opt + 1))
+            includes=$((includes + 1))
+            if dotenv_glob "$v"; then
+              last_include=$opt
+            fi
+            ;;
+        esac
+        ;;
+      --regexp | --file | --exclude-dir | --exclude-from | --include-dir | --max-count | --after-context | --before-context | --context | --label | --devices | --binary-files)
+        j=$((j + 1))
+        ;;
+      --*)
+        # getopt_long takes any unambiguous prefix of a long option, so --recurs
+        # is --recursive, --dir=recurse recurses, and GNU grep reads --incl as
+        # --include. An abbreviated --exclude is never accepted as an exclusion:
+        # it is ambiguous with --exclude-dir and --exclude-from.
+        a=${a#--}
+        eq=0
+        if [[ "$a" == *=* ]]; then
+          v=${a#*=}
+          a=${a%%=*}
+          eq=1
+        fi
+        if ((${#a} >= 3)); then
+          if [[ recursive == "$a"* || dereference-recursive == "$a"* ]]; then
+            recursive=1
+          elif [[ directories == "$a"* || include == "$a"* ]]; then
+            if ((!eq && j < n)); then
+              v=${ARG_WORDS[j]}
+              j=$((j + 1))
+            fi
+            if [[ directories == "$a"* ]]; then
+              [[ "$v" == recurse ]] && recursive=1
+            else
+              opt=$((opt + 1))
+              includes=$((includes + 1))
+              if dotenv_glob "$v"; then
+                last_include=$opt
+              fi
+            fi
+          fi
+        fi
+        ;;
+      -?*)
+        cluster=${a#-}
+        k=0
+        while ((k < ${#cluster})); do
+          c=${cluster:k:1}
+          k=$((k + 1))
+          case "$c" in
+            r | R) recursive=1 ;;
+            d | e | f | m | A | B | C | D)
+              # The rest of the cluster, or the next word, is this flag's value.
+              if ((k < ${#cluster})); then
+                v=${cluster:k}
+              elif ((j < n)); then
+                v=${ARG_WORDS[j]}
+                j=$((j + 1))
+              fi
+              [[ "$c" == d && "$v" == recurse ]] && recursive=1
+              break
+              ;;
+          esac
+        done
+        ;;
+    esac
+  done
+  ((recursive)) || return 0
+  # The last --include or --exclude that matches a file wins, so a later include
+  # that can match a dotenv name re-includes it. A file that no option matches
+  # is skipped once any --include is given (macOS grep; see README Known limits).
+  if ((last_exclude <= last_include)) && ! ((last_include == 0 && includes > 0)); then
+    echo "$RECURSIVE_MSG" >&2
+    exit 2
+  fi
+  # The accepted exclusion value names no file to read; the .env token check
+  # skips it. A non-recursive grep keeps the plain .env token check.
+  # A grep inside $(...) is checked before the command around it, so each span
+  # is inserted in command order for the cut below.
+  k=0
+  while ((k < ${#CAND_START[@]})); do
+    j=${#STRIP_START[@]}
+    # Two tests: bash 3.2 checks the [j - 1] subscript even when j is 0.
+    while ((j > 0)); do
+      ((STRIP_START[j - 1] > CAND_START[k])) || break
+      STRIP_START[j]=${STRIP_START[j - 1]}
+      STRIP_END[j]=${STRIP_END[j - 1]}
+      j=$((j - 1))
+    done
+    STRIP_START[j]=${CAND_START[k]}
+    STRIP_END[j]=${CAND_END[k]}
+    k=$((k + 1))
+  done
+  return 0
+}
+
+# True when a positive rg glob can match a dotenv name. Only the last path
+# component can name the file, and it must be able to start with a dot.
+# Splitting a value costs time quadratic in its length, so a value over 1 KiB
+# counts as able to match.
+# ripgrep reads a backslash as an escape of the next character, so \.* matches
+# hidden names; the check drops every backslash and reads that character as
+# written, which can only widen what the glob is taken to match.
+rg_dotenv_glob() {
+  ((${#1} <= 1024)) || return 0
+  local g=${1##*/} e
+  g=${g//\\/}
+  case "$g" in
+    [.*?[\{]*) ;;
+    *) return 1 ;;
+  esac
+  if [[ "$g" =~ ^\*\.\{([A-Za-z0-9_,-]+)\}$ ]]; then
+    e=${BASH_REMATCH[1]},
+    while [[ -n "$e" ]]; do
+      dotenv_ext "${e%%,*}" && return 0
+      e=${e#*,}
+    done
+    return 1
+  fi
+  dotenv_glob "$g"
+}
+
+# rg glob: a positive glob whitelists the files it matches, hidden ones too, and
+# ripgrep lets a later glob override an earlier one, so a later glob that can
+# match a dotenv name re-includes what !.env* excluded.
+rg_glob() {
+  if [[ "$1" == '!.env*' ]]; then
+    excluded=1
+  elif [[ "$1" != '!'* ]] && rg_dotenv_glob "$1"; then
+    listed=1
+    excluded=0
+  fi
+  return 0
+}
+
+# rg type: a selected type whitelists its files, hidden ones too. The built-in
+# sh type lists .env and -t all selects it. --type-add only defines a type; it
+# whitelists nothing until -t selects it, in either order (ripgrep 15.2.0).
+# A glob exclusion overrides a type whatever their order, so excluded stays.
+rg_type() {
+  selected+=" $1"
+  return 0
+}
+
+# Record a --type-add name whose globs can match a dotenv name.
+rg_type_add() {
+  local t name
+  [[ "$1" =~ ^([^:]*): ]] || return 0
+  name=${BASH_REMATCH[1]}
+  if ((${#1} > 1024)); then
+    dotenv_types+=" $name "
+    return 0
+  fi
+  t=${1#*:},
+  if [[ "$t" == include:* ]]; then
+    dotenv_types+=" $name "
+    return 0
+  fi
+  while [[ -n "$t" ]]; do
+    if rg_dotenv_glob "${t%%,*}"; then
+      dotenv_types+=" $name "
+      return 0
+    fi
+    t=${t#*,}
+  done
+  return 0
+}
+
+# rg segment: rg skips hidden files unless --hidden, -. or -uu lets it read them,
+# or a glob or type whitelists a dotenv name. The last of --hidden, -., the
+# second -u and --no-hidden wins; a third -u leaves it (ripgrep 15.2.0).
+check_rg() {
+  local n=${#ARG_WORDS[@]} j=0 a v c k cluster
+  local hidden=0 unrestricted=0 excluded=0 listed=0 selected='' dotenv_types=' sh all ' t
+  while ((j < n)); do
+    a=${ARG_WORDS[j]}
+    j=$((j + 1))
+    v=''
+    case "$a" in
+      --) break ;;
+      --hidden) hidden=1 ;;
+      --no-hidden) hidden=0 ;;
+      --unrestricted)
+        unrestricted=$((unrestricted + 1))
+        ((unrestricted != 2)) || hidden=1
+        ;;
+      --glob=* | --iglob=*) rg_glob "${a#*=}" ;;
+      --glob | --iglob)
+        if ((j < n)); then
+          rg_glob "${ARG_WORDS[j]}"
+          j=$((j + 1))
+        fi
+        ;;
+      --type=*) rg_type "${a#*=}" ;;
+      --type-add=*) rg_type_add "${a#*=}" ;;
+      --type | --type-add)
+        if ((j < n)); then
+          if [[ "$a" == --type ]]; then
+            rg_type "${ARG_WORDS[j]}"
+          else
+            rg_type_add "${ARG_WORDS[j]}"
+          fi
+          j=$((j + 1))
+        fi
+        ;;
+      --regexp | --file | --type-not | --type-clear | --max-count | --after-context | --before-context | --context | --max-columns | --max-depth | --max-filesize | --encoding | --engine | --threads | --replace | --ignore-file | --pre | --pre-glob | --sort | --sortr | --color | --colors | --path-separator | --context-separator | --field-match-separator | --field-context-separator)
+        j=$((j + 1))
+        ;;
+      --*) ;;
+      -?*)
+        cluster=${a#-}
+        k=0
+        while ((k < ${#cluster})); do
+          c=${cluster:k:1}
+          k=$((k + 1))
+          case "$c" in
+            .) hidden=1 ;;
+            u)
+              unrestricted=$((unrestricted + 1))
+              ((unrestricted != 2)) || hidden=1
+              ;;
+            g | e | f | t | T | m | A | B | C | M | E | j | r | d)
+              if ((k < ${#cluster})); then
+                v=${cluster:k}
+              elif ((j < n)); then
+                v=${ARG_WORDS[j]}
+                j=$((j + 1))
+              fi
+              case "$c" in
+                g) rg_glob "$v" ;;
+                t) rg_type "$v" ;;
+              esac
+              break
+              ;;
+          esac
+        done
+        ;;
+    esac
+  done
+  # A selected type that the built-ins or a --type-add let match a dotenv name.
+  # Each name is stored after a space, so a name never globs here.
+  selected+=' '
+  while [[ "$selected" =~ ^\ ([^\ ]*)(\ .*)$ ]]; do
+    t=${BASH_REMATCH[1]}
+    selected=${BASH_REMATCH[2]}
+    [[ "$dotenv_types" == *" $t "* ]] && listed=1
+  done
+  if (((hidden || listed) && !excluded)); then
+    echo "$RECURSIVE_MSG" >&2
+    exit 2
+  fi
+  return 0
+}
+
+# Find the program word of SEG_WORDS, past NAME=value assignments and plain
+# prefixes, and inspect a grep or rg invocation.
+check_segment() {
+  local n=${#SEG_WORDS[@]} i=$SEG_BASE j w prefixed=0
+  while ((i < n)); do
+    w=${SEG_WORDS[i]}
+    if [[ "$w" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      i=$((i + 1))
+      continue
+    fi
+    # A redirection before the program (2>/dev/null grep ...); a bare operator
+    # takes the next word as its target.
+    if ((SEG_REDIR[i])); then
+      i=$((i + SEG_REDIR[i]))
+      continue
+    fi
+    case "$w" in
+      command | builtin | env | exec | nohup | time | xargs | sudo | '!' | '{' | if | then | elif | else | while | until | do)
+        prefixed=1
+        ;;
+      -*) ((prefixed)) || break ;;
+      *) break ;;
+    esac
+    i=$((i + 1))
+  done
+  if ((i < n)); then
+    # Patterns, not ${word##*/}: bash strips ## by trying every prefix length,
+    # which is quadratic on a long word.
+    case "${SEG_WORDS[i]}" in
+      grep | */grep | egrep | */egrep | fgrep | */fgrep | rg | */rg)
+        # The program's arguments without redirections: the shell takes a
+        # redirection and its target out of the argument list wherever it
+        # stands, so grep -r KEY . > --include=*.ts has no --include.
+        ARG_WORDS=()
+        ARG_STARTS=()
+        ARG_ENDS=()
+        j=$((i + 1))
+        while ((j < n)); do
+          if ((SEG_REDIR[j])); then
+            j=$((j + SEG_REDIR[j]))
+            continue
+          fi
+          ARG_WORDS[${#ARG_WORDS[@]}]=${SEG_WORDS[j]}
+          ARG_STARTS[${#ARG_STARTS[@]}]=${SEG_STARTS[j]}
+          ARG_ENDS[${#ARG_ENDS[@]}]=${SEG_ENDS[j]}
+          j=$((j + 1))
+        done
+        case "${SEG_WORDS[i]}" in
+          rg | */rg) check_rg ;;
+          *) check_grep ;;
+        esac
+        ;;
+    esac
+  fi
+  # Drop this segment's words; the words of an enclosing command stay below
+  # SEG_BASE. unset, not a slice: an empty slice is unbound under set -u in 3.2.
+  if ((SEG_BASE == 0)); then
+    SEG_WORDS=()
+    SEG_STARTS=()
+    SEG_ENDS=()
+    SEG_REDIR=()
+    return 0
+  fi
+  while ((n > SEG_BASE)); do
+    n=$((n - 1))
+    unset "SEG_WORDS[n]" "SEG_STARTS[n]" "SEG_ENDS[n]" "SEG_REDIR[n]"
+  done
+  return 0
+}
+
+# Record a heredoc of this line: $1 is 1 for <<-, $2 the delimiter, $3 its
+# source text. Only a quoted delimiter keeps the shell from expanding the body.
+add_heredoc() {
+  HD_DASH[${#HD_DASH[@]}]=$1
+  HD_DELIMS[${#HD_DELIMS[@]}]=$2
+  case "$3" in
+    *[\'\"\\]*) ;;
+    *) hd_quoted=0 ;;
+  esac
+  return 0
+}
+
+# Record the finished word with its byte span in COMMAND and its redirection
+# kind, and note a shell program or a heredoc operator on this line.
+# SEG_REDIR is read from the source text, so a quoted '>' is a plain word:
+# 0 a plain word, 1 a redirection with its target attached (2>/dev/null),
+# 2 a bare operator whose target is the next word (2> out).
+push_word() {
+  local rest redir=0 lead=0
+  if [[ "$raw" == *[\<\>]* && "$raw" =~ $P_REDIR ]]; then
+    redir=1
+    [[ -n "${BASH_REMATCH[3]}" ]] || redir=2
+    # The fd number or {name} before the operator, so 3<<'EOF' is a heredoc.
+    # It is plain text, so it has the same length in word and raw.
+    lead=${#BASH_REMATCH[1]}
+  fi
+  SEG_WORDS[${#SEG_WORDS[@]}]=$word
+  SEG_STARTS[${#SEG_STARTS[@]}]=$word_start
+  SEG_ENDS[${#SEG_ENDS[@]}]=$pos
+  SEG_REDIR[${#SEG_REDIR[@]}]=$redir
+  case "$word" in
+    sh | */sh | bash | */bash | zsh | */zsh | dash | */dash | ksh | */ksh | ssh | */ssh) line_shell=1 ;;
+  esac
+  if [[ -n "$hd_next" ]]; then
+    add_heredoc "$hd_next" "$word" "$raw"
+    hd_next=''
+  elif [[ "${raw:lead:3}" == '<<-' ]]; then
+    rest=${raw:lead+3}
+    if [[ -n "$rest" ]]; then
+      add_heredoc 1 "${word:lead+3}" "$rest"
+    else
+      hd_next=1
+    fi
+  elif [[ "${raw:lead:2}" == '<<' && "${raw:lead:3}" != '<<<' ]]; then
+    rest=${raw:lead+2}
+    if [[ -n "$rest" ]]; then
+      add_heredoc 0 "${word:lead+2}" "$rest"
+    else
+      hd_next=0
+    fi
+  fi
+  return 0
+}
+
+# Open a $(...), <(...), >(...) or backtick substitution ($1 is ( or `): save
+# the enclosing word, and read the inner command as segments of its own.
+# A bash 3.2 array is a list that each indexed read or unset walks, so past 16
+# levels or 256 substitutions the tokenizer stops, as at the pass budget.
+open_subst() {
+  substs=$((substs + 1))
+  if ((depth >= 16 || substs > 256)); then
+    passes=20000
+    return 0
+  fi
+  depth=$((depth + 1))
+  D_WORD[depth]=$word
+  D_RAW[depth]=$raw
+  D_START[depth]=$word_start
+  D_OPEN[depth]=$1
+  D_PAREN[depth]=0
+  D_BASE[depth]=$SEG_BASE
+  SEG_BASE=${#SEG_WORDS[@]}
+  word=''
+  raw=''
+  in_word=0
+  return 0
+}
+
+# Close the innermost substitution: check its last segment, then resume the
+# enclosing word, whose value the shell would only know at run time.
+close_subst() {
+  if ((in_word)); then
+    push_word
+  fi
+  check_segment
+  SEG_BASE=${D_BASE[depth]}
+  word="${D_WORD[depth]}()"
+  raw=${D_RAW[depth]}
+  word_start=${D_START[depth]}
+  in_word=1
+  depth=$((depth - 1))
+  return 0
+}
+
+# Decode the body of a $'...' word in ANSI_C as the shell does, so $'-r' is -r.
+# Each step copies the rest of the body, so a body over 256 bytes stays as
+# written; an option or exclusion value is shorter.
+# A NUL ends the argument, as it does in the argv the program receives; a
+# \u or \U escape past ASCII, and an unknown escape, stay as written.
+ansi_c_decode() {
+  local s=$ANSI_C out='' rest c e n
+  ((${#s} <= 256)) || return 0
+  while [[ "$s" =~ ^([^\\]*)\\(.*)$ ]]; do
+    out+=${BASH_REMATCH[1]}
+    s=${BASH_REMATCH[2]}
+    # Dispatch on the escape letter so each escape runs at most one more regex.
+    e=${s:0:1}
+    rest=${s:1}
+    n=-1
+    case "$e" in
+      '')
+        # A trailing backslash stays as written.
+        out+="\\"
+        break
+        ;;
+      [0-7xuU])
+        if [[ "$s" =~ ^([0-7]{1,3}|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8})(.*)$ ]]; then
+          rest=${BASH_REMATCH[2]}
+          case "$e" in
+            [0-7]) n=$((8#${BASH_REMATCH[1]})) ;;
+            *) n=$((16#${BASH_REMATCH[1]:1})) ;;
+          esac
+        else
+          out+="\\$e"
+        fi
+        ;;
+      c)
+        if [[ -n "$rest" ]]; then
+          printf -v n '%d' "'${rest:0:1}"
+          n=$((n & 31))
+          rest=${rest:1}
+        else
+          out+="\\$e"
+        fi
+        ;;
+      a) n=7 ;;
+      b) n=8 ;;
+      e | E) n=27 ;;
+      f) n=12 ;;
+      n) n=10 ;;
+      r) n=13 ;;
+      t) n=9 ;;
+      v) n=11 ;;
+      \\ | \' | \" | \?) out+=$e ;;
+      *) out+="\\$e" ;;
+    esac
+    if ((n == 0)); then
+      s=''
+      break
+    elif ((n > 0 && n < 128)); then
+      printf -v c '%03o' "$n"
+      printf -v c '%b' "\\0$c"
+      out+=$c
+    elif ((n >= 128)); then
+      out+="\\${s:0:${#s}-${#rest}}"
+    fi
+    s=$rest
+  done
+  ANSI_C=$out$s
+  return 0
+}
+
+# Spans of grep --exclude values of exactly .env*, which the .env token check
+# below skips. Every other .env token in the command is still inspected.
+STRIP_START=()
+STRIP_END=()
+ENV_COMMAND=$COMMAND
+
+# Quote-aware split into words and segments: quoted text stays inside its word,
+# so a separator or a grep inside a quoted string is not read as a command.
+# Each pass consumes one token from a rolling window of 1-2 KB in the C
+# locale. Bash measures the whole string on every ${COMMAND:pos:len}, so the
+# command is sliced only to refill the window, not once per token.
+# The body of a heredoc with a quoted delimiter is data, so it is skipped,
+# unless a shell program on the same line may run it.
+# A pass costs tens of microseconds in bash 3.2 and the hook times out (fails
+# open) at 5 s, so a command over 64 KiB skips this check and one that needs
+# more than 20000 passes stops it there; the .env token check below still
+# reads all of either, with no exclusion value cut out.
+if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])([ef]?grep|rg)([^A-Za-z0-9_-]|$) ]]; then
+  shopt -u nocasematch
+  SAVED_LC_ALL=${LC_ALL-}
+  SAVED_LC_ALL_SET=${LC_ALL+1}
+  LC_ALL=C
+  P_PLAIN='^[^"'\''\\;&|()`<>[:blank:]'$'\n\r'']+'
+  P_SQ_END="^[^']*'"
+  P_DQ_END='^([^"\\]|\\.)*"'
+  P_DQ_PART='^([^"\\]|\\.)+'
+  P_AQ_END="^([^'\\\\]|\\\\.)*'"
+  P_AQ_PART="^([^'\\\\]|\\\\.)+"
+  ANSI_C=''
+  P_ESC='^\\(.|$)'
+  P_BLANK='^[[:blank:]]+'
+  P_SEP='^(&&|\|\||[;&|()`'$'\n\r''])'
+  P_LINE='^[^'$'\n'']*'$'\n'
+  P_COMMENT='^[^'$'\n'']*'
+  # A redirection word: optional fd, operator, and the target if attached.
+  P_REDIR='^([0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?(<<<|<<-|<<|<>|<&|>&|>>|>\||&>>|&>|<|>)(.*)$'
+  # A redirection operator at the window start, and the source text before it
+  # that keeps it in the same word: only an fd number or {name} (2>, {fd}>).
+  P_OP='^(<<<|<<-|<<|<>|<&|>&|>>|>\||&>>|&>|<|>)'
+  P_FD_PREFIX='^([0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?[<>&|]*$'
+  SEG_WORDS=()
+  SEG_STARTS=()
+  SEG_ENDS=()
+  SEG_REDIR=()
+  # Words of the commands that enclose an open $(...), <(...) or backtick sit
+  # below SEG_BASE; D_* save the enclosing word at each depth.
+  SEG_BASE=0
+  depth=0
+  substs=0
+  D_WORD=()
+  D_RAW=()
+  D_START=()
+  D_OPEN=()
+  D_PAREN=()
+  D_BASE=()
+  in_comment=0
+  HD_DELIMS=()
+  HD_DASH=()
+  hd_quoted=1
+  hd_next=''
+  hd_skip=0
+  hd_i=0
+  hd_part=''
+  line_shell=0
+  pos=0
+  len=${#COMMAND}
+  win=''
+  fill=0
+  word=''
+  raw=''
+  word_start=0
+  in_word=0
+  quote=''
+  passes=0
+  while ((pos < len && passes < 20000)); do
+    passes=$((passes + 1))
+    if ((${#win} < 1024 && fill < len)); then
+      win+=${COMMAND:fill:1024}
+      fill=$((fill + 1024))
+    fi
+    if ((hd_skip)); then
+      # One body line per pass; a line longer than the window takes several.
+      if [[ "$win" =~ $P_LINE ]]; then
+        m=${BASH_REMATCH[0]}
+        line=$hd_part${m%?}
+        hd_part=''
+        line_done=1
+      else
+        m=$win
+        hd_part+=$m
+        line_done=0
+        if ((pos + ${#m} >= len)); then
+          line=$hd_part
+          line_done=1
+        fi
+      fi
+      if ((line_done)); then
+        if ((HD_DASH[hd_i])); then
+          while [[ "$line" == $'\t'* ]]; do line=${line#$'\t'}; done
+        fi
+        if [[ "$line" == "${HD_DELIMS[hd_i]}" ]]; then
+          hd_i=$((hd_i + 1))
+          if ((hd_i >= ${#HD_DELIMS[@]})); then
+            hd_skip=0
+            HD_DELIMS=()
+            HD_DASH=()
+          fi
+        fi
+      fi
+    else
+      ((in_word)) || word_start=$pos
+      if ((!in_word)) && [[ "$win" == '#'* ]]; then
+        in_comment=1
+      fi
+      if ((in_comment)); then
+        # A # that starts a word starts a comment, up to the newline. A comment
+        # longer than the window takes several passes.
+        [[ "$win" =~ $P_COMMENT ]]
+        m=${BASH_REMATCH[0]}
+        if ((${#m} < ${#win} || pos + ${#m} >= len)); then
+          in_comment=0
+        fi
+      elif [[ "$quote" == "'" ]]; then
+        if [[ "$win" =~ $P_SQ_END ]]; then
+          m=${BASH_REMATCH[0]}
+          word+=${m%?}
+          quote=''
+        else
+          m=$win
+          word+=$m
+        fi
+      elif [[ "$quote" == '$' ]]; then
+        # The body of $'...' is decoded once it ends; \' does not end it.
+        if [[ "$win" =~ $P_AQ_END ]]; then
+          m=${BASH_REMATCH[0]}
+          ANSI_C+=${m%?}
+          ansi_c_decode
+          word+=$ANSI_C
+          ANSI_C=''
+          quote=''
+        elif [[ "$win" =~ $P_AQ_PART ]]; then
+          m=${BASH_REMATCH[0]}
+          ANSI_C+=$m
+        else
+          m=$win
+          ANSI_C+=$m
+        fi
+      elif [[ -n "$quote" ]]; then
+        if [[ "$win" =~ $P_DQ_END ]]; then
+          m=${BASH_REMATCH[0]}
+          word+=${m%?}
+          quote=''
+        elif [[ "$win" =~ $P_DQ_PART ]]; then
+          m=${BASH_REMATCH[0]}
+          word+=$m
+        else
+          # A lone backslash ends an unterminated double-quoted word.
+          m=$win
+          word+=$m
+        fi
+      elif [[ "$win" =~ $P_PLAIN ]]; then
+        m=${BASH_REMATCH[0]}
+        if [[ "$m" == *\$ && "${win:${#m}:1}" == [\'\"] ]]; then
+          if [[ "$m" == '$' ]]; then
+            # $'...' is ANSI-C quoting and $"..." a translated string: the
+            # shell drops the $, so $'-r' and $"-r" are the word -r.
+            m=${win:0:2}
+            quote=${m:1}
+            [[ "$quote" == '"' ]] || quote='$'
+          else
+            # Leave the $ to the next pass, which opens the quote.
+            m=${m%?}
+            word+=$m
+          fi
+        else
+          word+=$m
+        fi
+        in_word=1
+      elif [[ "$win" == [\<\>]* || "$win" == '&>'* ]]; then
+        # The shell ends a word at an unquoted < or > (or &>), so grep</dev/null
+        # is grep and a redirection. Only an fd number or {name} before the
+        # operator belongs to the redirection word.
+        if ((in_word)) && { [[ "$win" == '&'* ]] || ! [[ "$raw" =~ $P_FD_PREFIX ]]; }; then
+          push_word
+          word=''
+          raw=''
+          word_start=$pos
+        fi
+        [[ "$win" =~ $P_OP ]]
+        m=${BASH_REMATCH[0]}
+        word+=$m
+        in_word=1
+      elif [[ "$win" == [\'\"]* ]]; then
+        m=${win:0:1}
+        quote=$m
+        in_word=1
+      elif [[ "$win" =~ $P_ESC ]]; then
+        m=${BASH_REMATCH[0]}
+        [[ "$m" == \\$'\n' ]] || word+=${m:1}
+        in_word=1
+      elif [[ "$win" =~ $P_BLANK || "$win" =~ $P_SEP ]]; then
+        m=${BASH_REMATCH[0]}
+        sep=1
+        if [[ "$m" == [\&\|\(\)\`] ]]; then
+          sep=0
+          if ((in_word)) && [[ ("$m" == '&' && "$raw" == *[\<\>]) || ("$m" == '|' && "$raw" == *'>') ]]; then
+            # 2>&1, <&0 and >| are one redirection word, not a separator.
+            word+=$m
+          elif ((in_word)) && [[ "$m" == '(' && "$raw" == *[\$\<\>] ]]; then
+            open_subst '('
+          elif [[ "$m" == '`' && "${D_OPEN[depth]-}" != '`' ]]; then
+            open_subst '`'
+          elif [[ ("$m" == ')' && "${D_OPEN[depth]-}" == '(' && "${D_PAREN[depth]-}" == 0) || "$m" == '`' ]]; then
+            close_subst
+          else
+            sep=1
+          fi
+        fi
+        if ((sep)); then
+          if ((in_word)); then
+            push_word
+          fi
+          word=''
+          raw=''
+          in_word=0
+          # A plain parenthesis inside $(...) opens or closes a subshell, so the
+          # ) that matches it does not end the substitution.
+          if ((depth > 0)); then
+            case "$m" in
+              '(') D_PAREN[depth]=$((D_PAREN[depth] + 1)) ;;
+              ')') D_PAREN[depth]=$((D_PAREN[depth] - 1)) ;;
+            esac
+          fi
+          [[ "$m" =~ $P_BLANK ]] || check_segment
+        fi
+        if [[ "$m" == $'\n' ]]; then
+          if ((${#HD_DELIMS[@]} > 0 && hd_quoted && !line_shell)); then
+            hd_skip=1
+            hd_i=0
+            hd_part=''
+          else
+            HD_DELIMS=()
+            HD_DASH=()
+          fi
+          hd_quoted=1
+          hd_next=''
+          line_shell=0
+        fi
+      else
+        m=${win:0:1}
+        word+=$m
+        in_word=1
+      fi
+      if ((in_word)); then
+        raw+=$m
+      fi
+    fi
+    win=${win:${#m}}
+    pos=$((pos + ${#m}))
+  done
+  if ((pos >= len)); then
+    # An unterminated $'...' keeps its body as written.
+    if [[ "$quote" == '$' ]]; then
+      word+=$ANSI_C
+    fi
+    # An unterminated substitution ends with the command.
+    while ((depth > 0)); do
+      close_subst
+    done
+    if ((in_word)); then
+      push_word
+    fi
+    check_segment
+  fi
+  # Cut each recorded exclusion value, by byte offset, from the copy that the
+  # .env token check reads. The spans arrive in command order.
+  if ((pos >= len && ${#STRIP_START[@]} > 0)); then
+    ENV_COMMAND=''
+    pos=0
+    k=0
+    while ((k < ${#STRIP_START[@]})); do
+      ENV_COMMAND+="${COMMAND:pos:STRIP_START[k]-pos} "
+      pos=${STRIP_END[k]}
+      k=$((k + 1))
+    done
+    ENV_COMMAND+=${COMMAND:pos}
+  fi
+  if [[ -n "$SAVED_LC_ALL_SET" ]]; then
+    LC_ALL=$SAVED_LC_ALL
+  else
+    unset LC_ALL
+  fi
+  shopt -s nocasematch
+fi
+
 # .env files hold live secrets; exact template variants (.env.example etc.) do not.
 # The .env token must start a path component (start/space/slash/quote/=) so
 # code like process.env.HOME is not caught. Inspect every token independently
 # so a template token cannot exempt a separate live dotenv token.
 ENV_RE='(^|[/[:space:]"'\''=])(\.env(\.[A-Za-z0-9-]+)*)([^A-Za-z0-9_.-]|$)'
-for s in "$FILE_PATH" "$COMMAND" "$SEARCH_PATH"; do
+for s in "$FILE_PATH" "$ENV_COMMAND" "$SEARCH_PATH"; do
   remaining="$s"
   while [[ -n "$remaining" && "$remaining" =~ $ENV_RE ]]; do
     env_token="${BASH_REMATCH[2]}"
