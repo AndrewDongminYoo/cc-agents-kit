@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-12
+
+`repo-gate`'s `semantic-commit` no longer stops on its own staged work as if another writer had made it, and it now says which parallel edits it cannot detect.
+`repo-gate` moves from 0.2.5 to 0.2.6; `guard-hooks` (0.4.0), `context-handoff` (0.2.1), `context-meter` (0.1.0) and `quick-look` (0.1.0) are unchanged.
+
 ### Fixed
 
 - `repo-gate` 0.2.6 `semantic-commit` counts the index as found at Step 1 as planned work.
