@@ -39,9 +39,15 @@ Read each changed file if the diff alone is insufficient to determine intent.
 Treat the existing index as owned work.
 Do not reset, unstage, or replace it without explicit approval.
 
-Record a baseline that Step 4 compares against: the `git status --porcelain` output, `git hash-object -- <path>` for every changed or untracked path that still exists, and `git diff --raw` for the tracked ones.
-A deleted path, including the old side of a rename, has no file to hash; its porcelain line is its baseline.
-The porcelain line alone cannot show that a file which was already modified changed again, because it stays ` M <path>`; the content hash shows a content change, and the raw diff shows a mode change such as a new executable bit, which leaves the hash unchanged.
+Save the change you are about to split as one patch, so Step 4 can tell your hunks from anyone else's:
+
+```bash
+git diff HEAD --binary > <scratch>/planned.patch
+git status --porcelain --untracked-files=all                               # lists every untracked file, also inside new directories
+git diff --no-index --binary /dev/null <untracked-file> >> <scratch>/planned.patch   # once per untracked file; exits 1 by design
+```
+
+`git diff HEAD` leaves untracked files out, and plain `git status --porcelain` shows a new directory as one `?? dir/` line; the `--no-index` form records each untracked file with its content and mode.
 
 ### 2. Group by Concern
 
@@ -95,10 +101,6 @@ For each group in order:
 
 1. Inspect the full index with `git diff --cached --name-only` and `git diff --cached`.
    If it contains a file or hunk outside this group, stop and ask for direction.
-   Re-run `git status --porcelain`, and `git hash-object` and `git diff --raw` on the paths this group stages, and compare them with the Step 1 baseline.
-   From the raw diff compare only the two mode fields: its object IDs change when one of your own earlier commits takes a hunk of the same file.
-   A new path, or a hash or mode that changed on a path you did not edit, belongs to a parallel writer, such as the user in another editor or another agent session.
-   Stop and ask; do not stage, stash, or restore it.
 2. Stage only the files in this group: `git add <files>`.
    For a file split across groups, stage only its hunks (see Hunk-Level Splitting).
 3. Verify the complete candidate index before every commit:
@@ -110,6 +112,10 @@ For each group in order:
    ```
 
    Confirm that the full index contains only the planned group and intended hunks.
+   Compare it with `planned.patch` from Step 1: every hunk, mode line, and path in `git diff --cached` must appear there.
+   Anything else, such as new content, an executable bit, or a new or deleted file, was written by a parallel writer: the user in another editor, another agent session, or a tool.
+   The index is the only way such an edit reaches a commit, so this one comparison covers it however it got there; stop and ask, and do not stage, stash, or restore it.
+   Then record the reviewed tree: `reviewed=$(git write-tree)`.
 4. Run the project's verification commands against the isolated candidate (see Verification below).
 5. Fix any issues before committing.
    Re-run the full-index verification after each fix.
@@ -129,6 +135,10 @@ For each group in order:
    EOF
    )"
    ```
+
+7. Compare what was committed with what you reviewed: `git diff --stat "$reviewed" HEAD`.
+   A pre-commit hook that formats and re-stages this group's own files produces a difference there, which is expected.
+   Any other path, or a withheld hunk, means a hook or a parallel writer changed the index during the commit; stop and report it, and do not amend.
 
 No `Co-authored-by: Claude` or similar AI trailer.
 
