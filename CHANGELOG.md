@@ -5,6 +5,14 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Fixed
+
+- `guard-hooks` 0.4.1 `secrets-path-guard` blocks a recursive search that can print dotenv contents without naming a `.env` file (#44).
+  A recursive `grep`, `egrep` or `fgrep` (`-r`, `-R`, `--recursive`, `-d recurse`, bundled forms included) passes only when `--exclude='.env*'` or `*.<ext>` includes for extensions off a fixed list of dotenv suffixes keep dotenv files out under grep's last-match-wins order, and an `rg` that can read a hidden dotenv file (`--hidden`, `-.` or `-uu` with no later `--no-hidden`, a positive glob such as `-g '*'`, or a selected type such as `-t sh`; a `--type-add` alone selects nothing) passes only with `-g '!.env*'` and no later glob that re-includes them; plain `rg` skips hidden files and still passes.
+  An unambiguous prefix of a grep long option counts as that option (`--recurs`, `--dir=recurse`, `--incl='*'`), as getopt_long reads it.
+  In a recursive grep, the `.env*` value of an accepted `--exclude` is no longer refused as a dotenv path; every other dotenv token, and the same value in a non-recursive grep, still is.
+  The check reads `Bash` commands segment by segment, finds the program past a leading redirection such as `2>/dev/null` and before one attached to it (`grep</dev/null`, `grep&>out`), drops a redirection and its target from the options it reads wherever they stand, reads an unquoted `$(…)` or backtick substitution as its own segments while the options around it still count for the enclosing command, does not treat a quoted string, a comment or a quoted-delimiter heredoc body as a command, decodes `$'…'` ANSI-C quoting and `$"…"` as the shell does, reads a backslash in an `rg` glob as an escape, stops at 64 KiB, 20,000 tokenizer passes, 16 nested or 256 substitutions so the hook stays inside its timeout, and leaves the development-path abstention unchanged; README §Known limits lists what it does not recognise.
+
 ## [0.7.1] — 2026-10-12
 
 `repo-gate`'s `semantic-commit` no longer stops on its own staged work as if another writer had made it, and it now says which parallel edits it cannot detect.
