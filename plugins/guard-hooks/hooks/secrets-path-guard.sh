@@ -486,10 +486,10 @@ check_rg() {
   return 0
 }
 
-# Find the program word of SEG_WORDS, past NAME=value assignments and plain
-# prefixes, and inspect a grep or rg invocation.
+# Find the program word of SEG_WORDS, past NAME=value assignments and runner
+# prefixes with their option values, and inspect a grep or rg invocation.
 check_segment() {
-  local n=${#SEG_WORDS[@]} i=$SEG_BASE j w prefixed=0
+  local n=${#SEG_WORDS[@]} i=$SEG_BASE j w prefixed=0 runner='' duration=0
   while ((i < n)); do
     w=${SEG_WORDS[i]}
     if [[ "$w" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
@@ -503,11 +503,37 @@ check_segment() {
       continue
     fi
     case "$w" in
-      command | builtin | env | exec | nohup | time | xargs | sudo | '!' | '{' | if | then | elif | else | while | until | do)
+      command | builtin | env | exec | nohup | time | xargs | sudo | nice | timeout)
         prefixed=1
+        runner=$w
+        # timeout's first operand is a duration, not the command.
+        [[ "$w" != timeout ]] || duration=1
         ;;
-      -*) ((prefixed)) || break ;;
-      *) break ;;
+      '!' | '{' | if | then | elif | else | while | until | do)
+        prefixed=1
+        runner=''
+        ;;
+      -*)
+        ((prefixed)) || break
+        # A runner option that takes the next word as its value; the same
+        # arity table as staged-secret-guard's parse_runner.
+        case "$runner:$w" in
+          nice:-n | nice:--adjustment | timeout:-s | timeout:--signal | timeout:-k | timeout:--kill-after \
+            | sudo:-u | sudo:--user | sudo:-g | sudo:--group | sudo:-h | sudo:--host \
+            | sudo:-p | sudo:--prompt | sudo:-C | sudo:--close-from | sudo:-T | sudo:--command-timeout \
+            | sudo:-R | sudo:--chroot | sudo:-D | sudo:--chdir | sudo:-r | sudo:--role | sudo:-t | sudo:--type \
+            | env:-u | env:--unset | env:-C | env:--chdir \
+            | xargs:-a | xargs:--arg-file | xargs:-d | xargs:--delimiter | xargs:-E | xargs:-I \
+            | xargs:-L | xargs:--max-lines | xargs:-n | xargs:--max-args | xargs:-P | xargs:--max-procs \
+            | xargs:-s | xargs:--max-chars | xargs:--process-slot-var)
+            i=$((i + 1))
+            ;;
+        esac
+        ;;
+      *)
+        ((duration)) || break
+        duration=0
+        ;;
     esac
     i=$((i + 1))
   done
