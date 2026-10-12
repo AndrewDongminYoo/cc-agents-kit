@@ -7,6 +7,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Fixed
 
+- `repo-gate` 0.2.5 `semantic-commit` isolates a partially staged commit candidate in a detached worktree built from `HEAD` plus the staged diff, instead of `git stash push --keep-index --include-untracked` on the shared tree.
+  The stash reset files that the user was still editing: the next save landed on the reverted copy, `git stash apply` then refused to overwrite it, and the stash was dropped by another actor before it could be applied.
+  A throwaway-repository probe confirms that the worktree receives only the staged hunks, staged new and binary files, and none of a later group's untracked files, while the original tree stays untouched.
+  Each group now also re-reads `git status --porcelain` before staging and stops on a file that changed without the agent's edit.
 - `guard-hooks` 0.3.6 `staged-secret-guard` reads its command through a small byte buffer and appends ordinary character runs together, keeping large executable heredocs and quoted words below the hook's 10 s timeout in the regression fixtures.
   Quotes, escapes, operators, expansions and heredoc safety decisions keep their existing parsing; buffer-edge and UTF-8 regressions verify that a real commit following large input still scans the staged credentials.
   This addresses the remaining tokenizer cost in #26; function-name lookup optimization remains separate.
