@@ -39,6 +39,9 @@ Read each changed file if the diff alone is insufficient to determine intent.
 Treat the existing index as owned work.
 Do not reset, unstage, or replace it without explicit approval.
 
+Record a baseline that Step 4 compares against: the `git status --porcelain` output, and `git hash-object -- <path>` for every changed or untracked path.
+The porcelain line alone cannot show that a file which was already modified changed again, because it stays ` M <path>`; the content hash can.
+
 ### 2. Group by Concern
 
 Assign each changed file to a group:
@@ -91,8 +94,8 @@ For each group in order:
 
 1. Inspect the full index with `git diff --cached --name-only` and `git diff --cached`.
    If it contains a file or hunk outside this group, stop and ask for direction.
-   Re-run `git status --porcelain` and compare it with the plan.
-   A file that appeared or changed since Step 1 without your edit belongs to a parallel writer, such as the user in another editor or another agent session.
+   Re-run `git status --porcelain` and `git hash-object` on the paths this group stages, and compare them with the Step 1 baseline.
+   A new path, or a hash that changed on a path you did not edit, belongs to a parallel writer, such as the user in another editor or another agent session.
    Stop and ask; do not stage, stash, or restore it.
 2. Stage only the files in this group: `git add <files>`.
    For a file split across groups, stage only its hunks (see Hunk-Level Splitting).
@@ -164,7 +167,10 @@ Rules:
   git -C <scratch>/candidate apply --index <scratch>/candidate.patch
   ```
 
-  Run verification inside `<scratch>/candidate`, installing dependencies there first when the checks need them, then commit from the main checkout as usual and `git worktree remove <scratch>/candidate`.
+  Run verification inside `<scratch>/candidate`, installing dependencies there first when the checks need them, and prefer each tool's check-only mode.
+  Before committing, `git -C <scratch>/candidate diff --quiet` must exit `0`.
+  A non-zero exit means a verifier rewrote files in the candidate only, so the main index no longer matches what passed: carry the fix into the main checkout, stage it, rebuild the candidate, and verify again.
+  Then commit from the main checkout as usual and run `git worktree remove --force <scratch>/candidate`; `--force` is required because `apply --index` always leaves the candidate with staged changes.
   The worktree holds `HEAD` plus the staged diff and nothing else, so an untracked file that belongs to a later group stays out of test discovery and out of the compiler.
   Before building the patch, confirm that the index contains only the planned group.
   A stash resets the files in the shared tree, which other writers are still using.
