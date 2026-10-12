@@ -39,9 +39,157 @@ if [[ "$SCRIPT_PATH" == /* && -x /usr/bin/python3 ]] &&
   fi
 fi
 
-# A recursive grep, or an rg that reads hidden files, prints dotenv contents
+# Stage 1, before the tokenizer: the whole-command .env token check. It reads
+# every byte of every command, so a tokenizer that stops at its budget or is
+# killed at the 5 s timeout can cost only the recursive-search check below.
+# .env files hold live secrets; exact template variants (.env.example etc.) do not.
+# The .env token must start a path component (space/slash/quote/= before it)
+# so code like process.env.HOME is not caught. Inspect every token
+# independently so a template token cannot exempt a separate live dotenv token.
+ENV_RE='[/[:space:]"'\''=](\.env(\.[A-Za-z0-9-]+)*)([^A-Za-z0-9_.-]|$)'
+# An attached grep exclusion value of exactly .env* names no file to read, in
+# any command: --exclude=.env*, --exclude='.env*' and --exclude=".env*", each
+# ending at a shell word boundary. The value stays glued to --exclude=, so no
+# later parse (eval, sh -c, a -- before it) can make it a dotenv file operand.
+EXCLUDE_RE='[[:space:]]--exclude(=\.env\*|='\''\.env\*'\''|="\.env\*")([[:space:];&|()<>`]|$)'
+EXCLUDE_MSG="Blocked: an unquoted two-word --exclude .env* lets the shell expand .env* into dotenv file operands. Write --exclude='.env*', --exclude=.env*, --exclude=\".env*\", --exclude '.env*' or --exclude \".env*\". Do not request secret values in chat or copy them to another file."
+# Byte semantics: a multibyte locale makes bash 3.2 convert the whole string on
+# every regex and pattern operation.
+LC_ALL=C
+CMD_RE=$ENV_RE
+SCAN=$COMMAND
+if [[ "$COMMAND" == *--exclude* ]]; then
+  if [[ "$COMMAND" =~ (^|[[:space:]])--exclude[[:space:]]+\.env\* ]]; then
+    echo "$EXCLUDE_MSG" >&2
+    exit 2
+  fi
+  # Leftmost match: an exclusion starts before the .env token inside it, so the
+  # scan below meets the exclusion first and steps past its value.
+  # Over 64 KiB the window grows with the input, and stepping past each
+  # exclusion rescans a window, so the cost grows with the square of the size.
+  # There the exclusion value is refused as a dotenv token, as in 0.4.0.
+  ((${#COMMAND} > 65536)) || CMD_RE="$ENV_RE|$EXCLUDE_RE"
+  # A two-word --exclude '.env*' or --exclude ".env*" loses its quotes to any
+  # second parse (eval, sh -c, unquoted $(...) output), which then expands .env*
+  # into dotenv operands, and after -- the value is an operand. So it is exempt
+  # only in a grep, egrep or fgrep command read from the start of the command:
+  # plain words, complete '...' strings and "..." strings without $, ` or \,
+  # so every quote is known; the program word is grep; no -- word before it.
+  # Each grep command found is blanked out of SCAN, the text the scan reads.
+  # Each match reads the rest of the command again, so only a command of up to
+  # 4 KiB is read; a longer one refuses the two-word value as a dotenv token.
+  if ((${#COMMAND} <= 4096)) && [[ "$COMMAND" =~ --exclude[[:blank:]]+[\'\"]\.env\*[\'\"] ]]; then
+    shopt -u nocasematch
+    any='[^'\''"\\$`<>(){}#]'
+    sq="'[^']*'"
+    dq='"[^"\\$`]*"'
+    c='[^[:space:]'\''"\\$`;&|<>(){}#]'
+    c1='[^-[:space:]'\''"\\$`;&|<>(){}#]'
+    # A word that is not --, a quoted word that cannot start an option, or an
+    # attached NAME=value word.
+    w="(-|-?$c1$c*|--$c+|'[^'-][^']*'|\"[^\"\\\\\$\`-][^\"\\\\\$\`]*\"|$c*=($c|$sq|$dq)*)"
+    two='--exclude[[:blank:]]+('\''\.env\*'\''|"\.env\*")'
+    # Groups: 1 the commands before, 2 a unit of them, 3 the grep command,
+    # 4 its program path, 5 a word, 6-7 inside it, 8 the value, 9 the end.
+    TWO_RE="^(($any|$sq|$dq)*[;&|"$'\n'"])?([[:blank:]]*($c*/)?[ef]?grep([[:blank:]]+$w)*[[:blank:]]+$two)([[:blank:];&|"$'\n'"]|$)"
+    head=$COMMAND
+    tail=''
+    while [[ "$head" =~ $TWO_RE ]]; do
+      before=${BASH_REMATCH[1]}
+      seg=${BASH_REMATCH[3]}
+      tail=${head:${#before}+${#seg}}$tail
+      while [[ "$seg" =~ ^(.*[[:blank:]])$two(.*)$ ]]; do
+        seg=${BASH_REMATCH[1]}${BASH_REMATCH[3]}
+      done
+      tail=$seg$tail
+      head=$before
+    done
+    # shellcheck disable=SC2034 # read as ${!field} by the scan below
+    SCAN=$head$tail
+    shopt -s nocasematch
+  fi
+fi
+# Each step reads a window of the input, not the whole of it, so a command of
+# up to 64 KiB is read in 1 KiB steps however many tokens it skips. Bash 3.2
+# measures the whole string on every slice, so a longer input is read in 64
+# steps of a larger window. A leading space makes the start of the input, and
+# the point after each match, a word boundary.
+# A window without a match keeps its last 256 bytes, which hold the start of
+# any token or exclusion cut at its end; a match that reaches the end of the
+# window may continue past it, so the window grows before the match is used.
+for field in FILE_PATH SCAN SEARCH_PATH; do
+  re=$ENV_RE
+  [[ "$field" == SCAN ]] && re=$CMD_RE
+  src=" ${!field}"
+  len=${#src}
+  chunk=$((len / 64))
+  ((chunk >= 1024)) || chunk=1024
+  win=''
+  fill=0
+  while :; do
+    if ((${#win} < chunk && fill < len)); then
+      win+=${src:fill:chunk}
+      fill=$((fill + chunk))
+    fi
+    if ! [[ "$win" =~ $re ]]; then
+      ((fill < len)) || break
+      ((${#win} <= 256)) || win=${win:${#win}-256}
+      continue
+    fi
+    matched=${BASH_REMATCH[0]}
+    env_token=${BASH_REMATCH[1]}
+    # The terminator group (3 for a token, 5 for an exclusion) is empty only when
+    # the match ends at the window end, by $. The same text can appear earlier in
+    # the window (.env inside .envrc), so the match end is read from the group,
+    # not from where that text first appears.
+    if [[ -n "$env_token" ]]; then
+      term=${BASH_REMATCH[3]}
+    else
+      term=${BASH_REMATCH[5]-}
+    fi
+    if [[ -z "$term" ]]; then
+      if ((fill < len)); then
+        n=${#win}
+        ((n >= chunk)) || n=$chunk
+        win+=${src:fill:n}
+        fill=$((fill + n))
+        continue
+      fi
+      # The match ends the input, so nothing after it is left to read.
+      rest=''
+    else
+      # A match with a terminator is the first place its text appears: an earlier
+      # copy would itself match, and the regex returns the leftmost match.
+      rest=${win#*"$matched"}
+    fi
+    win=" $rest"
+    if [[ -z "$env_token" ]]; then
+      # The exclusion matches case-sensitively, as grep compares its glob.
+      shopt -u nocasematch
+      if [[ "$matched" == *--exclude* && "$matched" == *'.env*'* ]]; then
+        shopt -s nocasematch
+        continue
+      fi
+      shopt -s nocasematch
+      env_token=$matched
+    fi
+    case "$env_token" in
+      .env.example | .env.sample | .env.template | .env.dist | .env.default | .env.defaults)
+        continue
+        ;;
+    esac
+    echo "Blocked: dotenv path is not designated for development access in auto mode. Consult the template schema or ask the operator to review this exact path. Do not request secret values in chat or copy them to another file. See docs/environment-access.md." >&2
+    if [[ "$field" == SCAN && "$matched" == [\'\"].env\* && "$COMMAND" == *--exclude* ]]; then
+      echo "A two-word --exclude '.env*' is accepted only in a grep, egrep or fgrep command of up to 4 KiB, read from the start of the command with no eval, sh -c, \$(...), quoting the hook cannot read, or -- before it. Write --exclude='.env*'." >&2
+    fi
+    exit 2
+  done
+done
+
+# Stage 2: a recursive grep, or an rg that reads hidden files, prints dotenv contents
 # without naming a .env token. Block it unless it excludes dotenv files.
 RECURSIVE_MSG="Blocked: a recursive search can print dotenv contents. Exclude dotenv files: grep -r ... --exclude='.env*' (or limit every --include to *.<ext>), and rg with --hidden, -. or -uu, or with a glob or type that can match a dotenv name (-g '*', -t sh) ... -g '!.env*'. Do not request secret values in chat or copy them to another file."
+IGNORE_FILE_MSG="Blocked: an rg --ignore-file can whitelist dotenv files (!.env), and this hook does not read it. Add -g '!.env*' as the last glob. Do not request secret values in chat or copy them to another file."
 # Dotenv suffixes that an --include='*.<ext>' glob would match (.env.local etc.).
 dotenv_ext() {
   shopt -s nocasematch
@@ -62,10 +210,8 @@ dotenv_glob() {
 
 # grep-family segment: ARG_WORDS are the words after the program word.
 check_grep() {
-  local n=${#ARG_WORDS[@]} j=0 a v vi c k cluster eq
+  local n=${#ARG_WORDS[@]} j=0 a v c k cluster eq
   local recursive=0 opt=0 includes=0 last_exclude=0 last_include=0
-  CAND_START=()
-  CAND_END=()
   while ((j < n)); do
     a=${ARG_WORDS[j]}
     j=$((j + 1))
@@ -74,11 +220,9 @@ check_grep() {
       --) break ;;
       --recursive | --dereference-recursive | --directories=recurse) recursive=1 ;;
       --exclude=* | --include=* | --exclude | --include | --directories)
-        vi=$((j - 1))
         if [[ "$a" == *=* ]]; then
           v=${a#*=}
         elif ((j < n)); then
-          vi=$j
           v=${ARG_WORDS[j]}
           j=$((j + 1))
         fi
@@ -87,8 +231,6 @@ check_grep() {
             opt=$((opt + 1))
             if [[ "$v" == '.env*' ]]; then
               last_exclude=$opt
-              CAND_START[${#CAND_START[@]}]=${ARG_STARTS[vi]}
-              CAND_END[${#CAND_END[@]}]=${ARG_ENDS[vi]}
             fi
             ;;
           --directories) [[ "$v" == recurse ]] && recursive=1 ;;
@@ -168,24 +310,6 @@ check_grep() {
     echo "$RECURSIVE_MSG" >&2
     exit 2
   fi
-  # The accepted exclusion value names no file to read; the .env token check
-  # skips it. A non-recursive grep keeps the plain .env token check.
-  # A grep inside $(...) is checked before the command around it, so each span
-  # is inserted in command order for the cut below.
-  k=0
-  while ((k < ${#CAND_START[@]})); do
-    j=${#STRIP_START[@]}
-    # Two tests: bash 3.2 checks the [j - 1] subscript even when j is 0.
-    while ((j > 0)); do
-      ((STRIP_START[j - 1] > CAND_START[k])) || break
-      STRIP_START[j]=${STRIP_START[j - 1]}
-      STRIP_END[j]=${STRIP_END[j - 1]}
-      j=$((j - 1))
-    done
-    STRIP_START[j]=${CAND_START[k]}
-    STRIP_END[j]=${CAND_END[k]}
-    k=$((k + 1))
-  done
   return 0
 }
 
@@ -219,8 +343,10 @@ rg_dotenv_glob() {
 # ripgrep lets a later glob override an earlier one, so a later glob that can
 # match a dotenv name re-includes what !.env* excluded.
 rg_glob() {
+  last_glob_excludes=0
   if [[ "$1" == '!.env*' ]]; then
     excluded=1
+    last_glob_excludes=1
   elif [[ "$1" != '!'* ]] && rg_dotenv_glob "$1"; then
     listed=1
     excluded=0
@@ -266,7 +392,7 @@ rg_type_add() {
 # second -u and --no-hidden wins; a third -u leaves it (ripgrep 15.2.0).
 check_rg() {
   local n=${#ARG_WORDS[@]} j=0 a v c k cluster
-  local hidden=0 unrestricted=0 excluded=0 listed=0 selected='' dotenv_types=' sh all ' t
+  local hidden=0 unrestricted=0 excluded=0 listed=0 ignore_file=0 last_glob_excludes=0 selected='' dotenv_types=' sh all ' t
   while ((j < n)); do
     a=${ARG_WORDS[j]}
     j=$((j + 1))
@@ -288,6 +414,13 @@ check_rg() {
         ;;
       --type=*) rg_type "${a#*=}" ;;
       --type-add=*) rg_type_add "${a#*=}" ;;
+      # An ignore file can whitelist dotenv names (!.env), and the hook does
+      # not read it, so any --ignore-file needs the exclusion.
+      --ignore-file=*) ignore_file=1 ;;
+      --ignore-file)
+        ignore_file=1
+        j=$((j + 1))
+        ;;
       --type | --type-add)
         if ((j < n)); then
           if [[ "$a" == --type ]]; then
@@ -298,7 +431,7 @@ check_rg() {
           j=$((j + 1))
         fi
         ;;
-      --regexp | --file | --type-not | --type-clear | --max-count | --after-context | --before-context | --context | --max-columns | --max-depth | --max-filesize | --encoding | --engine | --threads | --replace | --ignore-file | --pre | --pre-glob | --sort | --sortr | --color | --colors | --path-separator | --context-separator | --field-match-separator | --field-context-separator)
+      --regexp | --file | --type-not | --type-clear | --max-count | --after-context | --before-context | --context | --max-columns | --max-depth | --max-filesize | --encoding | --engine | --threads | --replace | --pre | --pre-glob | --sort | --sortr | --color | --colors | --path-separator | --context-separator | --field-match-separator | --field-context-separator)
         j=$((j + 1))
         ;;
       --*) ;;
@@ -344,6 +477,12 @@ check_rg() {
     echo "$RECURSIVE_MSG" >&2
     exit 2
   fi
+  # The hook cannot see which names the ignore file whitelists, so -g '!.env*'
+  # must be the last glob: a later one, even *.ts, can match a dotenv name.
+  if ((ignore_file && !last_glob_excludes)); then
+    echo "$IGNORE_FILE_MSG" >&2
+    exit 2
+  fi
   return 0
 }
 
@@ -381,8 +520,6 @@ check_segment() {
         # redirection and its target out of the argument list wherever it
         # stands, so grep -r KEY . > --include=*.ts has no --include.
         ARG_WORDS=()
-        ARG_STARTS=()
-        ARG_ENDS=()
         j=$((i + 1))
         while ((j < n)); do
           if ((SEG_REDIR[j])); then
@@ -390,8 +527,6 @@ check_segment() {
             continue
           fi
           ARG_WORDS[${#ARG_WORDS[@]}]=${SEG_WORDS[j]}
-          ARG_STARTS[${#ARG_STARTS[@]}]=${SEG_STARTS[j]}
-          ARG_ENDS[${#ARG_ENDS[@]}]=${SEG_ENDS[j]}
           j=$((j + 1))
         done
         case "${SEG_WORDS[i]}" in
@@ -405,14 +540,12 @@ check_segment() {
   # SEG_BASE. unset, not a slice: an empty slice is unbound under set -u in 3.2.
   if ((SEG_BASE == 0)); then
     SEG_WORDS=()
-    SEG_STARTS=()
-    SEG_ENDS=()
     SEG_REDIR=()
     return 0
   fi
   while ((n > SEG_BASE)); do
     n=$((n - 1))
-    unset "SEG_WORDS[n]" "SEG_STARTS[n]" "SEG_ENDS[n]" "SEG_REDIR[n]"
+    unset "SEG_WORDS[n]" "SEG_REDIR[n]"
   done
   return 0
 }
@@ -429,8 +562,7 @@ add_heredoc() {
   return 0
 }
 
-# Record the finished word with its byte span in COMMAND and its redirection
-# kind, and note a shell program or a heredoc operator on this line.
+# Record the finished word with its redirection kind, and note a shell program or a heredoc operator on this line.
 # SEG_REDIR is read from the source text, so a quoted '>' is a plain word:
 # 0 a plain word, 1 a redirection with its target attached (2>/dev/null),
 # 2 a bare operator whose target is the next word (2> out).
@@ -444,8 +576,6 @@ push_word() {
     lead=${#BASH_REMATCH[1]}
   fi
   SEG_WORDS[${#SEG_WORDS[@]}]=$word
-  SEG_STARTS[${#SEG_STARTS[@]}]=$word_start
-  SEG_ENDS[${#SEG_ENDS[@]}]=$pos
   SEG_REDIR[${#SEG_REDIR[@]}]=$redir
   case "$word" in
     sh | */sh | bash | */bash | zsh | */zsh | dash | */dash | ksh | */ksh | ssh | */ssh) line_shell=1 ;;
@@ -478,13 +608,12 @@ push_word() {
 open_subst() {
   substs=$((substs + 1))
   if ((depth >= 16 || substs > 256)); then
-    passes=20000
+    passes=$PASS_BUDGET
     return 0
   fi
   depth=$((depth + 1))
   D_WORD[depth]=$word
   D_RAW[depth]=$raw
-  D_START[depth]=$word_start
   D_OPEN[depth]=$1
   D_PAREN[depth]=0
   D_BASE[depth]=$SEG_BASE
@@ -505,7 +634,6 @@ close_subst() {
   SEG_BASE=${D_BASE[depth]}
   word="${D_WORD[depth]}()"
   raw=${D_RAW[depth]}
-  word_start=${D_START[depth]}
   in_word=1
   depth=$((depth - 1))
   return 0
@@ -579,12 +707,6 @@ ansi_c_decode() {
   return 0
 }
 
-# Spans of grep --exclude values of exactly .env*, which the .env token check
-# below skips. Every other .env token in the command is still inspected.
-STRIP_START=()
-STRIP_END=()
-ENV_COMMAND=$COMMAND
-
 # Quote-aware split into words and segments: quoted text stays inside its word,
 # so a separator or a grep inside a quoted string is not read as a command.
 # Each pass consumes one token from a rolling window of 1-2 KB in the C
@@ -594,12 +716,13 @@ ENV_COMMAND=$COMMAND
 # unless a shell program on the same line may run it.
 # A pass costs tens of microseconds in bash 3.2 and the hook times out (fails
 # open) at 5 s, so a command over 64 KiB skips this check and one that needs
-# more than 20000 passes stops it there; the .env token check below still
-# reads all of either, with no exclusion value cut out.
+# more than PASS_BUDGET passes stops it there. 20,000 passes took 3.3-4.3 s
+# on the CI runners, so 8,000 is scaled to about 2 s (an estimate, not a CI
+# measurement); the .env token check above has already read all of
+# either, so a stop or a timeout here costs only the recursive-search check.
+PASS_BUDGET=8000
 if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])([ef]?grep|rg)([^A-Za-z0-9_-]|$) ]]; then
   shopt -u nocasematch
-  SAVED_LC_ALL=${LC_ALL-}
-  SAVED_LC_ALL_SET=${LC_ALL+1}
   LC_ALL=C
   P_PLAIN='^[^"'\''\\;&|()`<>[:blank:]'$'\n\r'']+'
   P_SQ_END="^[^']*'"
@@ -620,8 +743,6 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
   P_OP='^(<<<|<<-|<<|<>|<&|>&|>>|>\||&>>|&>|<|>)'
   P_FD_PREFIX='^([0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?[<>&|]*$'
   SEG_WORDS=()
-  SEG_STARTS=()
-  SEG_ENDS=()
   SEG_REDIR=()
   # Words of the commands that enclose an open $(...), <(...) or backtick sit
   # below SEG_BASE; D_* save the enclosing word at each depth.
@@ -630,7 +751,6 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
   substs=0
   D_WORD=()
   D_RAW=()
-  D_START=()
   D_OPEN=()
   D_PAREN=()
   D_BASE=()
@@ -649,11 +769,10 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
   fill=0
   word=''
   raw=''
-  word_start=0
   in_word=0
   quote=''
   passes=0
-  while ((pos < len && passes < 20000)); do
+  while ((pos < len && passes < PASS_BUDGET)); do
     passes=$((passes + 1))
     if ((${#win} < 1024 && fill < len)); then
       win+=${COMMAND:fill:1024}
@@ -689,7 +808,6 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
         fi
       fi
     else
-      ((in_word)) || word_start=$pos
       if ((!in_word)) && [[ "$win" == '#'* ]]; then
         in_comment=1
       fi
@@ -765,7 +883,6 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
           push_word
           word=''
           raw=''
-          word_start=$pos
         fi
         [[ "$win" =~ $P_OP ]]
         m=${BASH_REMATCH[0]}
@@ -853,46 +970,6 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
     fi
     check_segment
   fi
-  # Cut each recorded exclusion value, by byte offset, from the copy that the
-  # .env token check reads. The spans arrive in command order.
-  if ((pos >= len && ${#STRIP_START[@]} > 0)); then
-    ENV_COMMAND=''
-    pos=0
-    k=0
-    while ((k < ${#STRIP_START[@]})); do
-      ENV_COMMAND+="${COMMAND:pos:STRIP_START[k]-pos} "
-      pos=${STRIP_END[k]}
-      k=$((k + 1))
-    done
-    ENV_COMMAND+=${COMMAND:pos}
-  fi
-  if [[ -n "$SAVED_LC_ALL_SET" ]]; then
-    LC_ALL=$SAVED_LC_ALL
-  else
-    unset LC_ALL
-  fi
-  shopt -s nocasematch
 fi
-
-# .env files hold live secrets; exact template variants (.env.example etc.) do not.
-# The .env token must start a path component (start/space/slash/quote/=) so
-# code like process.env.HOME is not caught. Inspect every token independently
-# so a template token cannot exempt a separate live dotenv token.
-ENV_RE='(^|[/[:space:]"'\''=])(\.env(\.[A-Za-z0-9-]+)*)([^A-Za-z0-9_.-]|$)'
-for s in "$FILE_PATH" "$ENV_COMMAND" "$SEARCH_PATH"; do
-  remaining="$s"
-  while [[ -n "$remaining" && "$remaining" =~ $ENV_RE ]]; do
-    env_token="${BASH_REMATCH[2]}"
-    matched="${BASH_REMATCH[0]}"
-    case "$env_token" in
-      .env.example | .env.sample | .env.template | .env.dist | .env.default | .env.defaults)
-        remaining="${remaining#*"$matched"}"
-        continue
-        ;;
-    esac
-    echo "Blocked: dotenv path is not designated for development access in auto mode. Consult the template schema or ask the operator to review this exact path. Do not request secret values in chat or copy them to another file. See docs/environment-access.md." >&2
-    exit 2
-  done
-done
 
 exit 0

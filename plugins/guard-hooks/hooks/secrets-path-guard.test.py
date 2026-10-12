@@ -97,7 +97,16 @@ RECURSIVE = [
     (0, '--exclude=".env*"', 'grep -rn API_KEY . --exclude=".env*"'),
     (0, "--exclude=.env* unquoted", "grep -rn API_KEY . --exclude=.env*"),
     (0, "--exclude '.env*' as two words", "grep -rn API_KEY . --exclude '.env*'"),
-    (0, "--exclude .env* as two words", "grep -rn API_KEY . --exclude .env*"),
+    (0, '--exclude ".env*" as two words', 'grep -rn API_KEY . --exclude ".env*"'),
+    # Unquoted as two words, the shell expands .env* into dotenv file operands.
+    (2, "--exclude .env* as two unquoted words", "grep -rn API_KEY . --exclude .env*"),
+    (2, "--exclude .env* as two unquoted words, before the pattern", "grep --exclude .env* -rn KEY ."),
+    (2, "an accepted exclusion leaves a separate .env operand", "grep -rn KEY . --exclude '.env*' .env"),
+    (2, "an attached exclusion leaves a separate .env.local operand", "grep -rn KEY . --exclude=.env* .env.local"),
+    (2, "the accepted exclusion is case-sensitive", "grep -rn KEY . --exclude='.ENV*'"),
+    (2, "a live dotenv token in another case", "cat .ENV"),
+    (0, "an exclusion value names no file in any command", "tar czf out.tgz --exclude='.env*' src"),
+    (0, "an exclusion at the very start of the command", "--exclude='.env*'"),
     (0, "--include=*.ts", "grep -rn foo src --include=*.ts"),
     (0, "several safe includes", "grep -rn foo src --include='*.ts' --include '*.tsx'"),
     (0, "exclusion before the pattern", "grep --exclude='.env*' -rn foo src"),
@@ -116,11 +125,35 @@ RECURSIVE = [
     (2, "exclusion plus cat .env", "grep -rn KEY . --exclude='.env*' && cat .env"),
     (2, "exclusion value with a suffix stays a token", "grep -n KEY . --exclude=.env.local"),
     (2, "exclusion glued to more text stays a token", "grep -rn KEY . --exclude='.env*'x"),
-    # A non-recursive grep reads only its operands, so its exclusion value stays a
-    # token: unquoted, the shell expands .env* into dotenv file operands.
+    # The exemption is a plain pattern over the command, so it holds in a
+    # non-recursive grep too; the unquoted two-word form stays refused there.
     (2, "non-recursive grep, unquoted two-word exclude", "grep API_KEY --exclude .env*"),
     (2, "non-recursive grep, two-word exclude and a file", "grep -n API_KEY --exclude .env* config.txt"),
-    (2, "non-recursive grep, quoted exclude", "grep -n KEY a.txt --exclude='.env*'"),
+    (0, "non-recursive grep, quoted exclude", "grep -n KEY a.txt --exclude='.env*'"),
+    (0, "non-recursive grep, quoted two-word exclude", "grep -n KEY a.txt --exclude '.env*'"),
+    # A quoted two-word value loses its quotes to a second parse, which expands
+    # .env* into dotenv operands, and after -- it is an operand. It is exempt only
+    # in a grep command read from the start of the command.
+    (2, "two-word exclusion after -- in a grep", "grep KEY -- --exclude '.env*'"),
+    (2, "two-word exclusion after a quoted --", "grep -rn KEY '--' --exclude '.env*'"),
+    (2, "two-word exclusion in a non-grep command", "cat -- --exclude '.env*'"),
+    (2, "two-word exclusion under eval", "eval cat -- --exclude '.env*'"),
+    (2, "two-word exclusion in a grep under eval", "eval grep -r KEY . --exclude '.env*'"),
+    (2, "two-word exclusion in unquoted $(...) output", "grep KEY $(echo --exclude '.env*')"),
+    (2, "two-word exclusion piped into a shell", "echo grep KEY --exclude '.env*' | sh"),
+    (2, "two-word exclusion inside nested sh -c quotes", "sh -c 'x; grep -r --exclude '.env*' .'"),
+    (2, "two-word exclusion as an echo argument", "echo grep -n KEY a.txt --exclude '.env*' x"),
+    (2, "two-word exclusion after a $ the hook cannot read", "grep -r \"$K\" --exclude '.env*' ."),
+    (0, "two-word exclusion after a quoted pattern", "grep -rn \"API KEY\" --exclude '.env*' ."),
+    (0, "two-word exclusion in a later command", "cd src && grep -rn KEY --exclude '.env*' . | head"),
+    (0, "two-word exclusions in two grep commands", "grep -r A --exclude '.env*' .; grep -r B --exclude \".env*\" ."),
+    (0, "two-word exclusion beside an attached one", "/usr/bin/grep -r --exclude '.env*' --exclude=\"*.md\" KEY ."),
+    (2, "a two-word exclusion leaves a quoted .env operand", "grep -rn KEY . --exclude '.env*'; cat '.env'"),
+    (2, "a .env operand before a two-word exclusion in the same grep", "grep -rn KEY .env --exclude '.env*'"),
+    (2, "a .env.local operand between two-word exclusions", "grep -r --exclude '.env*' .env.local --exclude \".env*\" ."),
+    # The attached value keeps its --exclude= prefix through any parse, so it
+    # never globs into a dotenv operand.
+    (0, "attached exclusion under eval after --", "eval cat -- --exclude='.env*'"),
     # --- rg: skips hidden files unless told to read them ---
     (0, "plain rg", "rg -n API_KEY /tmp/some-repo"),
     (0, "rg -u (gitignored, still not hidden)", "rg -u KEY ."),
@@ -187,7 +220,8 @@ RECURSIVE = [
     (2, "grep $'\\x2dr' (hex escape)", "grep $'\\x2dr' KEY ."),
     (2, "grep $'\\055r' (octal escape)", "grep $'\\055r' KEY ."),
     (2, "rg $'-\\x2e' (hex escape in the cluster)", "rg $'-\\x2e' KEY ."),
-    (0, "an ANSI-C quoted exclusion", "grep -r KEY . --exclude=$'.env*'"),
+    # $'...' is not one of the accepted exclusion shapes, so its value stays a token.
+    (2, "an ANSI-C quoted exclusion", "grep -r KEY . --exclude=$'.env*'"),
     (2, "an ANSI-C quoted exclusion still leaves cat .env", "grep -r KEY . --exclude=$'.env*' && cat .env"),
     (0, "\\' does not end $'...'", "grep -n $'it\\'s -r' a.txt"),
     (0, "a NUL ends the decoded argument", "grep -e $'a\\0-r' -n x"),
@@ -257,7 +291,8 @@ RECURSIVE = [
     (2, "a quoted '>' is a pattern, not a redirection", "grep '>' -r ."),
     (0, "a quoted '>' keeps the next option", "grep -r '>' --include=*.ts ."),
     (0, "an excluding grep with a redirection after it", "grep -rn KEY . --exclude='.env*' > out.txt"),
-    (0, "a redirection between --exclude and its value", "grep -rn KEY . --exclude > /dev/null '.env*'"),
+    # The plain exclusion pattern does not read past a redirection.
+    (2, "a redirection between --exclude and its value", "grep -rn KEY . --exclude > /dev/null '.env*'"),
     (0, "an excluding rg with 2>/dev/null after it", "rg --hidden -g '!.env*' KEY . 2>/dev/null"),
     (2, "rg: a process substitution is a path, not a redirect target", "rg -e KEY <(true) --hidden ."),
     (2, "grep: a process substitution is a path, not a redirect target", "grep -e KEY <(true) -r ."),
@@ -297,6 +332,18 @@ RECURSIVE = [
     (0, "rg --type-add of a dotenv glob, another type selected", "rg --type-add 'x:*' -t ts KEY ."),
     (2, "rg -t before its --type-add", "rg -t x --type-add 'x:*' KEY ."),
     (2, "rg --type-add then --type", "rg --type-add 'x:*' --type x KEY ."),
+    # --- rg --ignore-file: the hook cannot see whether the file whitelists !.env ---
+    (2, "rg --ignore-file", "rg --ignore-file x KEY ."),
+    (2, "rg --ignore-file=", "rg --ignore-file=x KEY ."),
+    (0, "rg --ignore-file with the exclusion last", "rg --ignore-file x KEY . -g '!.env*'"),
+    (0, "rg --ignore-file= with --glob= exclusion", "rg --ignore-file=x --glob='!.env*' KEY ."),
+    (2, "rg --ignore-file with a later dotenv-capable glob", "rg --ignore-file x -g '!.env*' -g '*' KEY ."),
+    # The exclusion must be the last glob: the ignore file is unseen, and *.ts reads .env.production.ts.
+    (2, "rg --ignore-file with any later glob", "rg --ignore-file x -g '!.env*' -g '*.ts' KEY ."),
+    (0, "rg --ignore-file with a type after the last-glob exclusion", "rg --ignore-file x -g '!.env*' -t ts KEY ."),
+    (2, "rg --ignore-file with a later negative glob", "rg --ignore-file x -g '!.env*' -g '!*.md' KEY ."),
+    (0, "plain rg still passes", "rg KEY ."),
+    (0, "rg --ignore-file-case-insensitive is a flag", "rg --ignore-file-case-insensitive KEY ."),
 ]
 
 fails = 0
@@ -320,8 +367,123 @@ ok = proc.returncode == 2 and "--exclude='.env*'" in proc.stderr and "-g '!.env*
 fails += not ok
 print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  recursive refusal names both exclusion forms")
 
-# hooks.json gives the hook 5 s; past that the harness drops it and a .env read
-# passes. Lines that quote the word grep make every line a tokenizer case.
+DOTENV_MSG = "Blocked: dotenv path"
+
+# The two-word refusal names every accepted exclusion form.
+proc = subprocess.run(
+    ["/bin/bash", HOOK],
+    input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "grep -rn KEY . --exclude .env*"}}),
+    capture_output=True,
+    text=True,
+)
+ok = proc.returncode == 2 and all(
+    form in proc.stderr
+    for form in ("--exclude='.env*'", "--exclude=.env*", '--exclude=".env*"', "--exclude '.env*'", '--exclude ".env*"')
+)
+fails += not ok
+print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  two-word refusal names every accepted exclusion form")
+
+# A quoted two-word value refused outside a grep command points at the attached form.
+proc = subprocess.run(
+    ["/bin/bash", HOOK],
+    input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "eval grep -r KEY . --exclude '.env*'"}}),
+    capture_output=True,
+    text=True,
+)
+ok = proc.returncode == 2 and "Blocked: dotenv path" in proc.stderr and "Write --exclude='.env*'" in proc.stderr
+fails += not ok
+print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  a refused two-word value points at the attached form")
+
+# The dotenv token check runs before the recursive-search check: a command with
+# both is refused for its dotenv token, so a tokenizer timeout cannot reach it.
+proc = subprocess.run(
+    ["/bin/bash", HOOK],
+    input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "grep -rn KEY .; cat .env"}}),
+    capture_output=True,
+    text=True,
+)
+ok = proc.returncode == 2 and DOTENV_MSG in proc.stderr and "recursive search" not in proc.stderr
+fails += not ok
+print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  the dotenv token check runs before the tokenizer")
+
+# rg --ignore-file has its own refusal.
+proc = subprocess.run(
+    ["/bin/bash", HOOK],
+    input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "rg --ignore-file x KEY ."}}),
+    capture_output=True,
+    text=True,
+)
+ok = proc.returncode == 2 and "--ignore-file" in proc.stderr and "-g '!.env*'" in proc.stderr
+fails += not ok
+print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  --ignore-file refusal names the exclusion")
+
+# The dotenv token check reads the command in windows; a token, a template or a
+# word that only contains .env must be read the same wherever a window cuts it.
+DOT = ".env"
+cut_fails = 0
+for pad in range(990, 1040):
+    for expected, tail in (
+        (2, f" cat {DOT} x"),
+        (2, f" cat {DOT}.local"),
+        (0, f" cat {DOT}.example x"),
+        (0, " node -e process.env.HOME"),
+        (0, f" grep -n KEY a.txt --exclude='{DOT}*' x"),
+        (0, f"; grep -n KEY a.txt --exclude '{DOT}*' x"),
+        (2, f" grep -n KEY a.txt --exclude '{DOT}*' x"),
+    ):
+        command = "echo " + "a" * pad + tail
+        proc = subprocess.run(
+            ["/bin/bash", HOOK],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != expected:
+            cut_fails += 1
+            print(f"FAIL exit={proc.returncode} (want {expected})  window cut at pad {pad}: {tail!r}")
+fails += cut_fails
+print(f"{'ok  ' if not cut_fails else 'FAIL'} window cuts at pads 990-1039")
+# A cut token's text can appear earlier in the window (.env inside .envrc); the
+# cut is read at the match, not at that earlier copy.
+cut_fails = 0
+for pad in range(990, 1040):
+    for expected, tail in (
+        (0, f" {DOT}.example"),
+        (0, f" {DOT}.example x"),
+        (2, f" {DOT}"),
+        (2, f" {DOT} x"),
+        (2, f" {DOT}.local"),
+    ):
+        command = f"cat {DOT}rc " + "a" * pad + tail
+        proc = subprocess.run(
+            ["/bin/bash", HOOK],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != expected:
+            cut_fails += 1
+            print(f"FAIL exit={proc.returncode} (want {expected})  window cut after {DOT}rc at pad {pad}: {tail!r}")
+fails += cut_fails
+print(f"{'ok  ' if not cut_fails else 'FAIL'} window cuts after an earlier {DOT}rc at pads 990-1039")
+for expected, label, command in (
+    (2, "a 3 KiB dotenv suffix crosses windows", f"cat {DOT}." + "a" * 3000),
+    (0, "a 3 KiB word ending in a template name", "echo " + "a" * 3000 + f"/{DOT}.example"),
+    (2, "a dotenv token after 300 KiB", "echo " + "a " * (150 * 1024) + f"; cat {DOT}"),
+):
+    proc = subprocess.run(
+        ["/bin/bash", HOOK],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+        capture_output=True,
+        text=True,
+    )
+    ok = proc.returncode == expected
+    fails += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want {expected})  {label}")
+
+
+# hooks.json gives the hook 5 s; past that the harness drops it and fails open.
+# Lines that quote the word grep make every line a tokenizer case.
 def long_command(size, tail):
     lines, total = [], 0
     while total < size:
@@ -331,31 +493,68 @@ def long_command(size, tail):
     return "".join(lines) + tail
 
 
+AT_CAP = long_command(64 * 1024 - 64, "cat .env")
+OVER_CAP = long_command(64 * 1024 + 64, "cat .env")
+assert len(AT_CAP) <= 65536 < len(OVER_CAP)
 # One pass per byte: every token is a word or a separator.
 dense = "x;" * (31 * 1024)
-for command, limit, label in (
-    (long_command(63 * 1024, "grep -rn KEY ."), 2.5, "63 KiB command is tokenized inside the timeout"),
-    (long_command(300 * 1024, "cat .env"), 2.5, "300 KiB command skips the tokenizer, keeps the .env check"),
-    # Few passes, but each window refill measures the whole command.
-    ("echo 'grep " + "a" * (2 * 1024 * 1024) + "'\ncat .env", 2.5, "2 MiB quoted word skips the tokenizer"),
-    ("echo grep\n" + dense + "\ncat .env", 2.5, "dense 62 KiB command stops at the pass budget"),
-    ("echo grep $(" + dense + ")\ncat .env", 2.5, "dense 62 KiB command inside $(...) stops at the pass budget"),
+EXCLUSIONS = "--exclude='.env*' " * 3600
+# Over the 64 KiB cap an exclusion value is refused as a dotenv token, so these
+# are refused at the first exclusion, however large.
+EXCLUSIONS_OVER_CAP = "--exclude='.env*' " * (65536 // 18 + 1)
+EXCLUSIONS_1MIB = "--exclude='.env*' " * (1024 * 1024 // 18)
+assert len(EXCLUSIONS) < 65536 < len(EXCLUSIONS_OVER_CAP)
+# Quoted two-word exclusions are read from the start of the command, which each
+# grep command found reads again, so only a command of up to 4 KiB is read.
+TWO_WORD = "grep KEY --exclude '.env*'; " * 140
+TWO_WORD_OVER_CAP = "grep KEY --exclude '.env*'; " * 147
+assert len(TWO_WORD + "cat .env") <= 4096 < len(TWO_WORD_OVER_CAP)
+# Two passes per x;, so the recursive grep after it is reached under an 8,000
+# pass budget only after the shorter fixture, and under 20,000 after both.
+UNDER_BUDGET = "x;" * 3500
+OVER_BUDGET = "x;" * 5000
+for command, expected, limit, label in (
+    # --- the dotenv token check runs first and reads any command in well under the timeout ---
+    (AT_CAP, 2, 0.5, "64 KiB command ending in cat .env is refused by the first stage"),
+    (OVER_CAP, 2, 0.5, "command just over the 64 KiB cap ending in cat .env is refused"),
+    ("echo grep\n" + dense + "\ncat .env", 2, 0.5, "dense command past the pass budget, then cat .env"),
+    ("echo grep $(" + dense + ")\ncat .env", 2, 0.5, "dense command inside $(...), then cat .env"),
+    ("echo grep " + "$(" * 9999 + "\ncat .env", 2, 0.5, "10,000 nested $(, then cat .env"),
+    # Each skipped token costs a regex in a small window, so the cost stays linear.
+    (EXCLUSIONS + "cat .env", 2, 1.5, "3,600 accepted exclusions, then cat .env"),
+    (EXCLUSIONS + "ls", 0, 1.5, "3,600 accepted exclusions are stepped over"),
+    (EXCLUSIONS_OVER_CAP + "; cat .env", 2, 0.5, "exclusions just over 64 KiB, then cat .env"),
+    (EXCLUSIONS_1MIB + "; cat .env", 2, 2.5, "1 MiB of exclusions, then cat .env"),
+    (EXCLUSIONS_OVER_CAP + "; ls", 2, 0.5, "exclusions over 64 KiB are refused as dotenv tokens"),
+    (TWO_WORD + "cat .env", 2, 1.5, "140 grep commands with two-word exclusions, then cat .env"),
+    (TWO_WORD + "ls", 0, 1.5, "140 grep commands with two-word exclusions are stepped over"),
+    (TWO_WORD_OVER_CAP + "ls", 2, 0.5, "two-word exclusions over 4 KiB are refused as dotenv tokens"),
+    ("cat .env.example " * 3600 + "cat .env", 2, 1.5, "3,600 template names, then cat .env"),
+    (long_command(300 * 1024, "cat .env"), 2, 2.5, "300 KiB command skips the tokenizer, keeps the .env check"),
+    ("echo 'grep " + "a" * (2 * 1024 * 1024) + "'\ncat .env", 2, 2.5, "2 MiB quoted word skips the tokenizer"),
+    # --- the tokenizer stays inside the timeout; past a budget only its own check is lost ---
+    (long_command(24 * 1024, "grep -rn KEY ."), 2, 2.5, "24 KiB command is tokenized to its end"),
+    ("echo grep\n" + dense + "\nls", 0, 2.5, "dense 62 KiB command stays inside the timeout"),
+    ("echo grep $(" + dense + ")\nls", 0, 2.5, "dense 62 KiB command inside $(...) stays inside the timeout"),
     # Each substitution walks bash 3.2's list arrays, so their number and depth are capped.
-    ("echo grep " + "$(" * 9999 + "\ncat .env", 2.5, "10,000 nested $( stop at the depth cap"),
-    ("grep " + "$(x) " * 6000 + "\ncat .env", 2.5, "6,000 substitutions stop at the count cap"),
-    ("echo grep " + "$(x) " * 300 + "\ngrep -rn KEY . --exclude='.env*'", 2.5,
-     "past the substitution cap the exclusion value stays a token"),
-    # Past the budget no exclusion value is cut, so the .env check reads it.
-    ("grep -rn KEY . --exclude='.env*'\n" + dense, 2.5, "past the pass budget the exclusion value stays a token"),
+    ("echo grep " + "$(" * 9999 + "\nls", 0, 2.5, "10,000 nested $( stop at the depth cap"),
+    ("grep " + "$(x) " * 6000 + "\nls", 0, 2.5, "6,000 substitutions stop at the count cap"),
+    ("echo grep " + "$(x) " * 300 + "\ngrep -rn KEY . --exclude='.env*'", 0, 2.5,
+     "past the substitution cap only the recursive check is lost"),
+    # The budget is 8,000 passes: a recursive grep after 7,000 passes is checked,
+    # one after 10,000 is not, and a .env token after either is still refused.
+    ("echo grep\n" + UNDER_BUDGET + "\ngrep -rn KEY .", 2, 2.5, "a recursive grep inside the pass budget is checked"),
+    ("echo grep\n" + OVER_BUDGET + "\ngrep -rn KEY .", 0, 2.5, "past the pass budget only the recursive check is lost"),
+    ("echo grep\n" + OVER_BUDGET + "\ngrep -rn KEY .; cat .env", 2, 2.5, "past the pass budget a .env token is still refused"),
     # Splitting an rg glob or --type-add value is quadratic; over 1 KiB it counts as dotenv-capable.
-    ("rg -g '*.{" + "ts," * 20000 + "ts}' KEY .", 2.5, "60 KiB rg brace glob is refused inside the timeout"),
+    ("rg -g '*.{" + "ts," * 20000 + "ts}' KEY .", 2, 2.5, "60 KiB rg brace glob is refused inside the timeout"),
     # Decoding a $'...' body copies the rest at each escape, and a two-byte escape
     # tries every escape form; over 256 bytes the body is kept as written.
-    ("grep " + ("$'" + "\\\\" * 128 + "' ") * 240 + "\ncat .env", 2.5, "240 decoded 256-byte $'...' words stay inside the timeout"),
-    ("grep " + ("$'" + "\\a" * 512 + "' ") * 63 + "\ncat .env", 2.5, "63 escape-dense 1 KiB $'...' words stay inside the timeout"),
-    ("grep $'" + "\\x41" * 15000 + "'\ncat .env", 2.5, "a 60 KiB $'...' word stays inside the timeout"),
+    ("grep " + ("$'" + "\\\\" * 128 + "' ") * 240 + "\nls", 0, 2.5, "240 decoded 256-byte $'...' words stay inside the timeout"),
+    ("grep " + ("$'" + "\\a" * 512 + "' ") * 63 + "\nls", 0, 2.5, "63 escape-dense 1 KiB $'...' words stay inside the timeout"),
+    ("grep $'" + "\\x41" * 15000 + "'\nls", 0, 2.5, "a 60 KiB $'...' word stays inside the timeout"),
     ("rg --hidden " + " ".join("--type-add 'x:" + "*.ts," * 203 + "'" for _ in range(55)) + " KEY .",
-     2.5, "many 1 KiB --type-add values are split inside the timeout"),
+     2, 2.5, "many 1 KiB --type-add values are split inside the timeout"),
 ):
     started = time.monotonic()
     proc = subprocess.run(
@@ -365,9 +564,12 @@ for command, limit, label in (
         text=True,
     )
     elapsed = time.monotonic() - started
-    ok = proc.returncode == 2 and elapsed < limit
+    ok = proc.returncode == expected and elapsed < limit
+    # A first-stage refusal names the dotenv token, not the recursive search.
+    if command.endswith("cat .env"):
+        ok = ok and DOTENV_MSG in proc.stderr
     fails += not ok
-    print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2) {elapsed:.2f}s (limit {limit}s)  {label}")
+    print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want {expected}) {elapsed:.2f}s (limit {limit}s)  {label}")
 
 for expected, label, tool_input in CASES:
     payload = json.dumps({"tool_name": "Read", "tool_input": tool_input})
