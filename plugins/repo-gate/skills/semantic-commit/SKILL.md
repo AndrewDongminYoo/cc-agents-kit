@@ -39,6 +39,17 @@ Read each changed file if the diff alone is insufficient to determine intent.
 Treat the existing index as owned work.
 Do not reset, unstage, or replace it without explicit approval.
 
+Save the change you are about to split as one patch, so Step 4 can tell your hunks from anyone else's:
+
+```bash
+git diff HEAD --binary --no-textconv > <scratch>/planned.patch
+git status --porcelain --untracked-files=all                               # lists every untracked file, also inside new directories
+git diff --no-index --binary --no-textconv /dev/null <untracked-file> >> <scratch>/planned.patch   # once per untracked file; exits 1 by design
+```
+
+`git diff HEAD` leaves untracked files out, and plain `git status --porcelain` shows a new directory as one `?? dir/` line; the `--no-index` form records each untracked file with its content and mode.
+Every patch in this skill is built with `--binary --no-textconv`: without `--binary` a changed binary file reads only `Binary files differ`, and a repository's `textconv` driver replaces the real bytes with converted text that `git apply` rejects.
+
 ### 2. Group by Concern
 
 Assign each changed file to a group:
@@ -102,6 +113,12 @@ For each group in order:
    ```
 
    Confirm that the full index contains only the planned group and intended hunks.
+   Compare it with `planned.patch` from Step 1 by content, not by hunk shape: every added or removed line, mode change, and path in `git diff --cached --binary --no-textconv` must come from the planned change, or from a fix you made yourself during verification (Step 4.5).
+   The comparison runs both ways: every change the plan assigns to this group must also still be there, because a parallel edit can revert one of your hunks while another planned hunk keeps the file dirty.
+   Hunk boundaries, context lines, and line numbers will differ, because a split hunk and each earlier commit of this run change the base the diff is taken against.
+   Anything else, such as new content, an executable bit, or a new or deleted file, was written by a parallel writer: the user in another editor, another agent session, or a tool.
+   The index is the only way such an edit reaches a commit, so this one comparison covers it however it got there; stop and ask, and do not stage, stash, or restore it.
+   Then record the reviewed tree: `reviewed=$(git write-tree)`.
 4. Run the project's verification commands against the isolated candidate (see Verification below).
 5. Fix any issues before committing.
    Re-run the full-index verification after each fix.
@@ -121,6 +138,10 @@ For each group in order:
    EOF
    )"
    ```
+
+7. Compare what was committed with what you reviewed, and read the full diff rather than its `--stat`: `git diff "$reviewed" HEAD`.
+   A pre-commit hook that formats and re-stages this group's own files produces formatting-only lines there, which is expected.
+   Any other path, or any content that is not formatting, such as a hunk you withheld for a later group that a hook's `git add` pulled into the same file, means a hook or a parallel writer changed the index during the commit; stop and report it, and do not amend.
 
 No `Co-authored-by: Claude` or similar AI trailer.
 
@@ -153,10 +174,31 @@ Rules:
   Fall back to patch editing: `git diff -- <file> > /tmp/part.patch`, delete the unwanted hunks/lines from the patch, then `git apply --cached --recount /tmp/part.patch`.
   `--recount` is not optional once lines are deleted from inside a hunk: the `@@` counts go stale and `git apply` rejects the whole file with `corrupt patch` rather than applying what is left. It is harmless when whole hunks were dropped instead.
 - After partial staging, the working tree and the index differ, so checks run on the working tree would test code that is not being committed.
-  Isolate the commit candidate: `git stash push --keep-index --include-untracked`, run verification, commit, then `git stash apply` → confirm the remaining hunks are back → `git stash drop` (prefer apply-then-drop over `pop`).
-  `--include-untracked` is load-bearing: `--keep-index` alone leaves untracked files in the tree, so a new file belonging to a later group stays visible to test discovery and to the compiler, and verification is not running against the commit candidate after all.
-  Before stashing, confirm that the index contains only the planned group.
-  Do not stash another person's staged files to make the candidate appear isolated.
+  Isolate the commit candidate in a detached worktree, never by stashing the shared working tree:
+
+  ```bash
+  git worktree add --detach <scratch>/candidate HEAD
+  git diff --cached --binary --no-textconv > <scratch>/candidate.patch
+  git -C <scratch>/candidate apply --index <scratch>/candidate.patch
+  ```
+
+  Run verification inside `<scratch>/candidate`, installing dependencies there first when the checks need them, and prefer each tool's check-only mode.
+  Before committing, confirm that the candidate still is what you staged:
+  - `git -C <scratch>/candidate diff --quiet` exits `0` (no unstaged rewrite),
+  - `git -C <scratch>/candidate write-tree` equals `$reviewed` from Step 4.3 (no rewrite the verifier staged itself), and
+  - `git -C <scratch>/candidate ls-files --others --exclude-standard` lists nothing (no new non-ignored file that the commit would lack).
+    Ignored outputs are out of scope: the candidate holds only `HEAD` plus the staged diff, so anything a verifier writes to an ignored path is derived from the candidate, and the repository has declared that path as never committed.
+  Also confirm that `git write-tree` in the main checkout still equals `$reviewed`; if it does not, a parallel writer changed the main index during verification, so stop and ask as Step 4.3 requires, whatever the candidate shows.
+  Otherwise, any candidate mismatch means a verifier changed the candidate only, so the main index no longer matches what passed: carry the change into the main checkout, stage it, and verify again.
+  Then commit from the main checkout as usual.
+  Run `git worktree remove --force <scratch>/candidate` whenever a verification attempt ends, whether it passed, failed, or found a mismatch, and build a fresh candidate for the next attempt: a second `git worktree add` on the existing path fails with `already exists`, and `--force` is required because `apply --index` always leaves the candidate with staged changes.
+  The worktree holds `HEAD` plus the staged diff and nothing else, so an untracked file that belongs to a later group stays out of test discovery and out of the compiler.
+  Before building the patch, confirm that the index contains only the planned group.
+  A stash resets the files in the shared tree, which other writers are still using.
+  If the user saves a file there while it is reset, the save lands on the reverted copy, `git stash apply` refuses to overwrite it, and another session can drop the stash before you apply it (observed 2026-10-12).
+  When a check truly cannot run outside this checkout and a stash is unavoidable, push it with a unique message (`git stash push -m semantic-commit-<timestamp> ...`) and find its commit by that message in `git stash list --format='%H %gs'`, not by position.
+  Another session can push a stash between your push and your lookup, and then `stash@{0}` names its entry instead of yours; the message still names yours.
+  Recover through that SHA.
 - Do not blindly re-`git add` a partially staged file after a formatter runs — that would pull the withheld hunks back in.
   Use the formatter's `--check` mode as the gate for such files, or re-split from scratch.
 

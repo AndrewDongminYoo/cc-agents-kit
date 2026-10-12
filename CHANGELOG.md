@@ -7,6 +7,15 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Fixed
 
+- `repo-gate` 0.2.5 `semantic-commit` isolates a partially staged commit candidate in a detached worktree built from `HEAD` plus the staged diff, instead of `git stash push --keep-index --include-untracked` on the shared tree.
+  The stash reset files that the user was still editing: the next save landed on the reverted copy, `git stash apply` then refused to overwrite it, and the stash was dropped by another actor before it could be applied.
+  A throwaway-repository probe confirms that the worktree receives only the staged hunks, staged new and binary files, and none of a later group's untracked files, while the original tree stays untouched.
+  A stash kept as a last resort is identified by a unique message rather than by `stash@{0}`, which another session's stash can take over between the push and the lookup.
+  Verification in the worktree must leave it unchanged (no unstaged diff, the same `write-tree` as the reviewed index, and no new non-ignored untracked file), so a formatter, a self-staging script, or a generator that wrote a non-ignored file into the candidate cannot pass while different content is committed; output under an ignored path is out of scope, since the candidate holds only `HEAD` plus the staged diff.
+  A main index that no longer matches the reviewed tree after verification stops the run as a parallel edit instead of being read as a verifier rewrite.
+  The worktree is removed with `--force` after every verification attempt, whether it passed or failed, because it always holds staged changes and `git worktree add` refuses a path that already exists.
+  Parallel edits are now caught where they enter a commit, the index: Step 1 saves the planned change as one patch (including each untracked file through `git diff --no-index`), each group's `git diff --cached` must contain no content outside that patch (compared by content, since hunk shapes change as the run splits and commits), and after the commit the full `git diff "$reviewed" HEAD` must show at most a hook's formatting of the group's own files.
+  Probes confirmed that this catches a rewritten or newly executable file inside a new directory, a parallel `git add -p` on an already modified path, and a pre-commit hook that re-stages another path, each of which a working-tree probe of status, content hash, or mode had missed.
 - `guard-hooks` 0.3.6 `staged-secret-guard` reads its command through a small byte buffer and appends ordinary character runs together, keeping large executable heredocs and quoted words below the hook's 10 s timeout in the regression fixtures.
   Quotes, escapes, operators, expansions and heredoc safety decisions keep their existing parsing; buffer-edge and UTF-8 regressions verify that a real commit following large input still scans the staged credentials.
   This addresses the remaining tokenizer cost in #26; function-name lookup optimization remains separate.
