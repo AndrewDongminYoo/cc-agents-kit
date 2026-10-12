@@ -175,7 +175,9 @@ Rules:
   Before building the patch, confirm that the index contains only the planned group.
   A stash resets the files in the shared tree, which other writers are still using.
   If the user saves a file there while it is reset, the save lands on the reverted copy, `git stash apply` refuses to overwrite it, and another session can drop the stash before you apply it (observed 2026-10-12).
-  When a check truly cannot run outside this checkout and a stash is unavoidable, record its commit with `git rev-parse stash@{0}` at once, and recover through that SHA rather than through `stash@{0}`.
+  When a check truly cannot run outside this checkout and a stash is unavoidable, push it with a unique message (`git stash push -m semantic-commit-<timestamp> ...`) and find its commit by that message in `git stash list --format='%H %gs'`, not by position.
+  Another session can push a stash between your push and your lookup, and then `stash@{0}` names its entry instead of yours; the message still names yours.
+  Recover through that SHA.
 - Do not blindly re-`git add` a partially staged file after a formatter runs — that would pull the withheld hunks back in.
   Use the formatter's `--check` mode as the gate for such files, or re-split from scratch.
 
