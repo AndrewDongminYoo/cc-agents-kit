@@ -144,6 +144,9 @@ For each group in order:
 7. Compare what was committed with what you reviewed, and read the full diff rather than its `--stat`: `git diff "$reviewed" HEAD`.
    A pre-commit hook that formats and re-stages this group's own files produces formatting-only lines there, which is expected.
    Any other path, or any content that is not formatting, such as a hunk you withheld for a later group that a hook's `git add` pulled into the same file, means a hook or a parallel writer changed the index during the commit; stop and report it, and do not amend.
+   This detection is best-effort.
+   It covers what reaches the index, and in the candidate a formatter, a self-staging script, or a new non-ignored file.
+   It does not detect a hook that rewrites files without staging them (for example `gofmt -w .` with no `git add`): the hook runs in the main checkout, so it can change withheld hunks and later-group files there while this diff stays empty.
 
 No `Co-authored-by: Claude` or similar AI trailer.
 
