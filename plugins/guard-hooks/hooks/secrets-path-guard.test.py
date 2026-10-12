@@ -104,6 +104,32 @@ RECURSIVE = [
     (0, "abbreviated safe include", "grep -rn KEY . --inc='*.ts'"),
     (0, "abbreviated --dir=skip", "grep -n KEY a.txt --dir=skip"),
     (0, "two-letter --re is not read as --recursive", "grep --re KEY a.txt"),
+    # A value-taking long option, or a prefix of one, takes the next word as
+    # its value, so an exclusion there is not an exclusion.
+    (2, "--group-separator takes the exclusion", "grep -r -e KEY --group-separator --exclude='.env*' ."),
+    (2, "abbreviated --group-sep takes the exclusion", "grep -r --group-sep --exclude='.env*' KEY ."),
+    (2, "one-letter --g is --group-separator", "grep -r --g --exclude='.env*' KEY ."),
+    (2, "one-letter --a is --after-context", "grep -r --a --exclude='.env*' KEY ."),
+    (2, "one-letter --m is --max-count", "grep -r --m --exclude='.env*' KEY ."),
+    (2, "two-letter --la is --label", "grep -r --la --exclude='.env*' KEY ."),
+    (2, "two-letter --be is --before-context", "grep -r --be --exclude='.env*' KEY ."),
+    (2, "abbreviated --reg takes the exclusion", "grep -r --reg --exclude='.env*' ."),
+    (2, "abbreviated --dev takes the exclusion", "grep -r --dev --exclude='.env*' KEY ."),
+    (2, "abbreviated --binary- is --binary-files", "grep -r --binary- --exclude='.env*' KEY ."),
+    (2, "--exclude- is --exclude-dir on macOS", "grep -r --exclude- --exclude='.env*' KEY ."),
+    (2, "abbreviated --exclude-f takes the exclusion", "grep -r --exclude-f --exclude='.env*' KEY ."),
+    (2, "abbreviated --include- is --include-dir", "grep -r --include- --exclude='.env*' KEY ."),
+    (2, "two-letter --di recurse", "grep --di recurse KEY ."),
+    (2, "two-letter --di=recurse", "grep --di=recurse KEY ."),
+    # macOS grep reads a --context value only when attached with =.
+    (2, "--context does not hide a later -r", "grep --context -r KEY ."),
+    (2, "abbreviated --con does not hide a later -r", "grep --con -r KEY ."),
+    (0, "--context leaves the exclusion", "grep -r --context --exclude='.env*' KEY ."),
+    # --binary is its own option, not a prefix of --binary-files.
+    (2, "--binary does not hide a later -r", "grep --binary -r KEY ."),
+    (0, "--binary leaves the exclusion", "grep -r --binary --exclude='.env*' KEY ."),
+    (0, "an attached --group-separator value takes no word", "grep -r --group-separator=x --exclude='.env*' KEY ."),
+    (0, "an attached --la value takes no word", "grep -r --la=x --exclude='.env*' KEY ."),
     # --- grep: accepted exclusions ---
     (0, "--exclude='.env*'", "grep -rn API_KEY /tmp/some-repo --exclude='.env*'"),
     (0, '--exclude=".env*"', 'grep -rn API_KEY . --exclude=".env*"'),
@@ -357,6 +383,24 @@ RECURSIVE = [
     (0, "plain rg still passes", "rg KEY ."),
     (0, "rg --ignore-file-case-insensitive is a flag", "rg --ignore-file-case-insensitive KEY ."),
 ]
+
+# Every option that ripgrep 15.2.0's --help gives a value, except the glob,
+# type and ignore-file options that have cases of their own. A fixed list,
+# because the installed rg version can differ at test time. A separate value
+# word takes a following -g, so the exclusion after it is a path to rg.
+RG_VALUE_LONG = (
+    "regexp file type-not type-clear max-count after-context before-context context max-columns max-depth "
+    "max-filesize encoding engine threads replace pre pre-glob sort sortr color colors path-separator "
+    "context-separator field-match-separator field-context-separator dfa-size-limit regex-size-limit "
+    "hostname-bin hyperlink-format generate"
+).split()
+RG_VALUE_SHORT = "e f E m j d T A B C M r".split()
+for name in RG_VALUE_LONG:
+    RECURSIVE.append((2, f"rg --{name} takes the -g", f"rg --hidden -e KEY --{name} -g '!.env*' ."))
+    RECURSIVE.append((0, f"rg --{name} value then the exclusion", f"rg --hidden -e KEY --{name} x -g '!.env*' ."))
+for name in RG_VALUE_SHORT:
+    RECURSIVE.append((2, f"rg -{name} takes the -g", f"rg --hidden -e KEY -{name} -g '!.env*' ."))
+    RECURSIVE.append((0, f"rg -{name} value then the exclusion", f"rg --hidden -e KEY -{name} x -g '!.env*' ."))
 
 fails = 0
 for expected, label, command in RECURSIVE:

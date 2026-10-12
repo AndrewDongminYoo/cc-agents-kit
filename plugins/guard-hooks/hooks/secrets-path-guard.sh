@@ -210,7 +210,7 @@ dotenv_glob() {
 
 # grep-family segment: ARG_WORDS are the words after the program word.
 check_grep() {
-  local n=${#ARG_WORDS[@]} j=0 a v c k cluster eq
+  local n=${#ARG_WORDS[@]} j=0 a v c k cluster eq l
   local recursive=0 opt=0 includes=0 last_exclude=0 last_include=0
   while ((j < n)); do
     a=${ARG_WORDS[j]}
@@ -243,14 +243,17 @@ check_grep() {
             ;;
         esac
         ;;
-      --regexp | --file | --exclude-dir | --exclude-from | --include-dir | --max-count | --after-context | --before-context | --context | --label | --devices | --binary-files)
-        j=$((j + 1))
-        ;;
       --*)
-        # getopt_long takes any unambiguous prefix of a long option, so --recurs
-        # is --recursive, --dir=recurse recurses, and GNU grep reads --incl as
-        # --include. An abbreviated --exclude is never accepted as an exclusion:
-        # it is ambiguous with --exclude-dir and --exclude-from.
+        # getopt_long takes an exact name, or else any unambiguous prefix of a
+        # long option, so --recurs is --recursive, --dir=recurse recurses, GNU
+        # grep reads --incl as --include, and --la or --g takes the next word as
+        # its value. Each minimum length below is the shortest prefix that GNU
+        # grep 3.11 or macOS grep 2.6.0 resolves to that option; a shorter one is
+        # ambiguous or another option in both. An abbreviated --exclude is never
+        # accepted as an exclusion: it is ambiguous with --exclude-dir and
+        # --exclude-from. --context takes no separate word: macOS grep reads its
+        # value only when attached with =, and GNU grep refuses a value that is
+        # not a number. --binary is an option of its own, not --binary-files.
         a=${a#--}
         eq=0
         if [[ "$a" == *=* ]]; then
@@ -258,24 +261,30 @@ check_grep() {
           a=${a%%=*}
           eq=1
         fi
-        if ((${#a} >= 3)); then
-          if [[ recursive == "$a"* || dereference-recursive == "$a"* ]]; then
-            recursive=1
-          elif [[ directories == "$a"* || include == "$a"* ]]; then
-            if ((!eq && j < n)); then
-              v=${ARG_WORDS[j]}
-              j=$((j + 1))
-            fi
-            if [[ directories == "$a"* ]]; then
-              [[ "$v" == recurse ]] && recursive=1
-            else
-              opt=$((opt + 1))
-              includes=$((includes + 1))
-              if dotenv_glob "$v"; then
-                last_include=$opt
-              fi
+        l=${#a}
+        if [[ $l -ge 3 && (recursive == "$a"* || dereference-recursive == "$a"*) ]]; then
+          recursive=1
+        elif [[ $l -ge 2 && directories == "$a"* || $l -ge 3 && include == "$a"* ]]; then
+          if ((!eq && j < n)); then
+            v=${ARG_WORDS[j]}
+            j=$((j + 1))
+          fi
+          if [[ directories == "$a"* ]]; then
+            [[ "$v" == recurse ]] && recursive=1
+          else
+            opt=$((opt + 1))
+            includes=$((includes + 1))
+            if dotenv_glob "$v"; then
+              last_include=$opt
             fi
           fi
+        elif ((!eq)) && [[ $l -ge 1 && (after-context == "$a"* || max-count == "$a"* || group-separator == "$a"*) ||
+          $l -ge 2 && (before-context == "$a"* || label == "$a"*) ||
+          $l -ge 3 && (devices == "$a"* || regexp == "$a"*) ||
+          "$a" == file ||
+          $l -ge 7 && binary-files == "$a"* ||
+          $l -ge 8 && (exclude-dir == "$a"* || exclude-from == "$a"* || include-dir == "$a"*) ]]; then
+          j=$((j + 1))
         fi
         ;;
       -?*)
@@ -431,7 +440,8 @@ check_rg() {
           j=$((j + 1))
         fi
         ;;
-      --regexp | --file | --type-not | --type-clear | --max-count | --after-context | --before-context | --context | --max-columns | --max-depth | --max-filesize | --encoding | --engine | --threads | --replace | --pre | --pre-glob | --sort | --sortr | --color | --colors | --path-separator | --context-separator | --field-match-separator | --field-context-separator)
+      # Every other long option that ripgrep 15.2.0's --help gives a value.
+      --regexp | --file | --type-not | --type-clear | --max-count | --after-context | --before-context | --context | --max-columns | --max-depth | --max-filesize | --encoding | --engine | --threads | --replace | --pre | --pre-glob | --sort | --sortr | --color | --colors | --path-separator | --context-separator | --field-match-separator | --field-context-separator | --dfa-size-limit | --regex-size-limit | --hostname-bin | --hyperlink-format | --generate)
         j=$((j + 1))
         ;;
       --*) ;;
