@@ -91,6 +91,9 @@ For each group in order:
 
 1. Inspect the full index with `git diff --cached --name-only` and `git diff --cached`.
    If it contains a file or hunk outside this group, stop and ask for direction.
+   Re-run `git status --porcelain` and compare it with the plan.
+   A file that appeared or changed since Step 1 without your edit belongs to a parallel writer, such as the user in another editor or another agent session.
+   Stop and ask; do not stage, stash, or restore it.
 2. Stage only the files in this group: `git add <files>`.
    For a file split across groups, stage only its hunks (see Hunk-Level Splitting).
 3. Verify the complete candidate index before every commit:
@@ -153,10 +156,20 @@ Rules:
   Fall back to patch editing: `git diff -- <file> > /tmp/part.patch`, delete the unwanted hunks/lines from the patch, then `git apply --cached --recount /tmp/part.patch`.
   `--recount` is not optional once lines are deleted from inside a hunk: the `@@` counts go stale and `git apply` rejects the whole file with `corrupt patch` rather than applying what is left. It is harmless when whole hunks were dropped instead.
 - After partial staging, the working tree and the index differ, so checks run on the working tree would test code that is not being committed.
-  Isolate the commit candidate: `git stash push --keep-index --include-untracked`, run verification, commit, then `git stash apply` → confirm the remaining hunks are back → `git stash drop` (prefer apply-then-drop over `pop`).
-  `--include-untracked` is load-bearing: `--keep-index` alone leaves untracked files in the tree, so a new file belonging to a later group stays visible to test discovery and to the compiler, and verification is not running against the commit candidate after all.
-  Before stashing, confirm that the index contains only the planned group.
-  Do not stash another person's staged files to make the candidate appear isolated.
+  Isolate the commit candidate in a detached worktree, never by stashing the shared working tree:
+
+  ```bash
+  git worktree add --detach <scratch>/candidate HEAD
+  git diff --cached --binary > <scratch>/candidate.patch
+  git -C <scratch>/candidate apply --index <scratch>/candidate.patch
+  ```
+
+  Run verification inside `<scratch>/candidate`, installing dependencies there first when the checks need them, then commit from the main checkout as usual and `git worktree remove <scratch>/candidate`.
+  The worktree holds `HEAD` plus the staged diff and nothing else, so an untracked file that belongs to a later group stays out of test discovery and out of the compiler.
+  Before building the patch, confirm that the index contains only the planned group.
+  A stash resets the files in the shared tree, which other writers are still using.
+  If the user saves a file there while it is reset, the save lands on the reverted copy, `git stash apply` refuses to overwrite it, and another session can drop the stash before you apply it (observed 2026-10-12).
+  When a check truly cannot run outside this checkout and a stash is unavoidable, record its commit with `git rev-parse stash@{0}` at once, and recover through that SHA rather than through `stash@{0}`.
 - Do not blindly re-`git add` a partially staged file after a formatter runs — that would pull the withheld hunks back in.
   Use the formatter's `--check` mode as the gate for such files, or re-split from scratch.
 
