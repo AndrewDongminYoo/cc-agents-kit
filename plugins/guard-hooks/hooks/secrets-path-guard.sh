@@ -918,11 +918,12 @@ ansi_c_decode() {
 # unless a shell program on the same line may run it.
 # A pass costs tens of microseconds in bash 3.2 and the hook times out (fails
 # open) at 5 s, so a command over 64 KiB skips this check and one that needs
-# more than PASS_BUDGET passes stops it there. 20,000 passes took 3.3-4.3 s
-# on the CI runners, so 8,000 is scaled to about 2 s (an estimate, not a CI
-# measurement); the .env token check above has already read all of
-# either, so a stop or a timeout here costs only the recursive-search check.
-PASS_BUDGET=8000
+# more than PASS_BUDGET passes stops it there. On the macOS CI runner 8,000
+# passes took 3.2-3.4 s and 7,000 took 2.6 s (2026-10-13), about 0.4 ms each,
+# so 4,000 keeps the densest command near 1.6 s; the .env token check above
+# has already read all of either, so a stop or a timeout here costs only the
+# recursive-search check.
+PASS_BUDGET=4000
 if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])([ef]?grep|rg)([^A-Za-z0-9_-]|$) ]]; then
   shopt -u nocasematch
   LC_ALL=C
