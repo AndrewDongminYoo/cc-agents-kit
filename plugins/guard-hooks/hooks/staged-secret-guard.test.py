@@ -584,6 +584,12 @@ env_refused = (
     "env -S '-S' 'git -c alias.ci=commit ci -m fixture #c'",
     # A # after a quote is not read as a comment, as in the -S string itself.
     "env -S '-S' \"'a' # git commit -m fixture\"",
+    # After an option-leading string GNU env keeps reading options from the
+    # words after it, so a later -S splits its string although '-i' leaves no
+    # value unresolved; its string may also be glued to the option.
+    "env -S '-i' -S 'git commit -m fixture'", "env -S '-i' --split-string='git commit -m fixture'",
+    "env -S '-i' --sp='git commit -m fixture'", "env -S '-i' -S'git commit -m fixture'",
+    "env -S '-i' -iS'git commit -m fixture'",
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):
@@ -676,6 +682,7 @@ for command in (
     "env -S '-i' python3 legit.py", "env -S '-S' 'python3 -u' legit.py", "env -S '-S' legit.py",
     "env -S '-S' 'echo # git commit -m fixture'", "env -S '-S' \"$X\"",
     "env -S '-i' echo 'fix commit'", "env -S >/tmp/out 'echo commit'",
+    "env -S '-i' -u FOO python3 legit.py", "env -S '-i' --unset=FOO python3 legit.py",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)

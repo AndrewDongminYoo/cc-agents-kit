@@ -1181,6 +1181,13 @@ refuse_env_strings_ahead() {
       "$BOUNDARY_PREFIX"*) continue ;;
     esac
     probe=${TOKENS[ahead]}
+    # A later -S can carry its string glued to it (`--split-string=git ...`,
+    # `-Sgit ...`, `-iSgit ...`), so a word also starts after an option's first
+    # = or, in a short cluster, its first S. That can only refuse more.
+    case "$probe" in
+      --*) probe=${probe/=/ } ;;
+      -*) probe=${probe/S/ } ;;
+    esac
     head=" $probe"
     head=${head%%[$' \t\n']\#*}
     if [[ "$head" != " $probe" && "$head" != *[\'\"\\\$\`]* ]]; then
