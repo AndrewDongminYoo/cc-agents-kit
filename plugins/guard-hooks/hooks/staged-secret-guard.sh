@@ -98,6 +98,17 @@ refuse_git_ahead() {
   done
 }
 
+# Whether a runner's value word is a redirection that the shell removes whole:
+# one that starts with < or >, or whose text before the first < or > is &, a
+# file descriptor number or a {name} (`5>out`, `{fd}>out`). After any other
+# text (`KILL>out`), that text stays as the word and only the rest is removed.
+runner_redirection() {
+  local prefix
+  [[ "$1" == *[\<\>]* ]] || return 1
+  prefix=${1%%[<>]*}
+  [[ "$prefix" == "&" || "$prefix" != *[!0-9]* || "$prefix" =~ $FD_VARNAME ]]
+}
+
 # Read only the option grammars whose arity is known. Unknown syntax never
 # clears a visible git command. These runners execute external programs, so
 # their command operand must bypass same-named shell functions.
@@ -160,7 +171,13 @@ parse_runner() {
         ;;
     esac
     value_index=$((runner_next + take))
-    if ((take)) && [[ -n "${TOKEN_EXPANSION[value_index]-}" || "${TOKENS[value_index]-}" == "$BOUNDARY_PREFIX"* ]]; then
+    # A redirection where the value should be is removed by the shell, and the
+    # runner takes its value from a later word (`nice -n >out 5 git commit`).
+    # Which word is not followed: a git later in the command is refused. A
+    # value glued before a redirection (`-s KILL>out`) is kept as the value,
+    # and a quoted < or > is marked literal, which the expansion test refuses.
+    if ((take)) && { [[ -n "${TOKEN_EXPANSION[value_index]-}" || "${TOKENS[value_index]-}" == "$BOUNDARY_PREFIX"* ]] \
+      || runner_redirection "${TOKENS[value_index]-}"; }; then
       refuse_git_ahead "$runner_next"
       runner_next=-1
       return
@@ -168,9 +185,11 @@ parse_runner() {
     runner_next=$((value_index + 1))
   done
   # timeout's first operand is a duration, even after --. A quoted expansion
-  # still cannot be trusted here because the tokenizer may split a substitution.
+  # still cannot be trusted here because the tokenizer may split a substitution,
+  # and a redirection there (`timeout -- >out 5`) leaves the duration unplaced.
   if [[ -n "$duration" ]]; then
-    if [[ -n "${TOKEN_EXPANSION[runner_next]-}" || "${TOKENS[runner_next]-}" == "$BOUNDARY_PREFIX"* ]]; then
+    if [[ -n "${TOKEN_EXPANSION[runner_next]-}" || "${TOKENS[runner_next]-}" == "$BOUNDARY_PREFIX"* ]] \
+      || runner_redirection "${TOKENS[runner_next]-}"; then
       refuse_git_ahead "$runner_next"
       runner_next=-1
       return

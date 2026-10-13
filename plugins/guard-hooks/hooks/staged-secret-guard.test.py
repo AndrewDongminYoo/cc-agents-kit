@@ -430,6 +430,52 @@ for command in (
 ):
     rc, err = check_hook(command, runner_repo)
     check(f"{command} reads the option value", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+# A redirection where a runner option's value should be is removed by the
+# shell, so the runner takes a later word as its value (#64): read as the
+# value, the redirection left the real value to be taken as the program, and
+# the commit ran unscanned. A git later in the command is refused, before the
+# index is read, so a clean index is refused too.
+for command in (
+    "nice -n >/tmp/out 5 git commit -m fixture", "nice -n > /tmp/out 5 git commit -m fixture",
+    "nice --adjustment 2>/tmp/out 5 git commit -m fixture",
+    "nice -n >/tmp/out 5 git -c alias.ci=commit ci -m fixture",
+    "sudo -u >/tmp/out root git commit -m fixture", "sudo -g &>/tmp/out wheel git commit -m fixture",
+    "timeout -s >/tmp/out KILL 5 git commit -m fixture", "timeout -k </dev/null 1 5 git commit -m fixture",
+    "xargs -n >/tmp/out 1 git commit -m fixture", "xargs -I <<<x {} git commit -m fixture",
+    # timeout's duration slot after -- is a value slot as well.
+    "timeout -- >/tmp/out 5 git commit -m fixture", "timeout -- > /tmp/out 5 git commit -m fixture",
+    # A file descriptor number or a {name} before the < or > is part of the
+    # redirection, which the shell removes whole.
+    "nice -n 5>/dev/null git status", "nice -n {fd}>/tmp/out 5 git commit -m fixture",
+    "timeout -- 5>/tmp/out 5 git commit -m fixture",
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is refused", rc == 2 and "could not safely parse" in err,
+              f"exit={rc} stderr={err.strip()[:160]}")
+# A redirection after the program, or a git only in the next command, is still
+# read: the commit is scanned, and a read-only git passes.
+for command in (
+    "nice -n 5 git >/tmp/out commit -m fixture", "timeout -s KILL 5 git >/tmp/out commit -m fixture",
+    "nice -n >/tmp/out 5 python3 x; git commit -m fixture",
+    # A value glued before a redirection keeps that value (`-s KILL>out` is
+    # `-s KILL`), so the program after it is read.
+    "timeout -s KILL>/dev/null 5 git commit -m fixture",
+):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is scanned (expect {expected})",
+              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
+              f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    "nice -n 5 git status >/tmp/out", "sudo -u root git status >/tmp/out", "xargs -n 1 git log >/tmp/out",
+    "timeout 5 git status 2>/tmp/out", "nice -n >/tmp/out 5 python3 x",
+    "sudo -u root>/dev/null git status", "xargs -I {}>/dev/null git log {}", "nice -n -5>/dev/null git status",
+    "timeout -- 5s>/dev/null git log",
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
 # env -C (--chdir) and -P take a value, as the next word or attached, so the
 # word after the value is the program. Read as the program, -C hid the git
 # after it. -C runs git in another directory, whose index this hook does not
