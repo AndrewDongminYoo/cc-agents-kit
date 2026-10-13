@@ -471,7 +471,7 @@ env_refused = (
     # A cluster ending in C takes the next word, and -C refuses a visible commit.
     "env -iC /tmp git commit -m fixture",
     # An option this hook does not know may take the next word.
-    "env -x git commit -m fixture", "env --foo git status", "env -L x git status",
+    "env -x git commit -m fixture", "env --foo git status", "env --bogus git status", "env -L x git status",
     # Run under a name starting git-, git takes the rest as its subcommand.
     "env -a git-commit git status", "env -agit-commit git status", "env --argv0=git-commit git status",
     "env --argv0 git-commit git status", "env -va git-commit git status", "env -a /x/git-commit git status",
@@ -511,6 +511,8 @@ env_scanned = (
     'env -P "$(pwd)" git commit -m fixture', 'env -P "`pwd`" git commit -m fixture',
     # The substitution in a -C value is still read as a command of its own.
     'env -C "$(git commit -m fixture)" ls',
+    # --help ends only its own command: the next one is read.
+    "env --help; git commit -m fixture",
 )
 for command in env_scanned:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
@@ -528,6 +530,9 @@ for command in (
     'env -S "echo $HOME"', 'env -S "echo $HOME" | grep x', "env -S 'FOO=1' \"$X\"",
     "env -a foo git status", "env --env0-from /tmp/f git status", "env -x echo hi",
     'env -C "$(pwd)" git status', 'env -C "$(a)$(b)" git status',
+    # --help and --version print and exit: the git after them never runs.
+    "env --help git status", "env --version git commit -m fixture",
+    "env --he git status", "env --vers git commit -m fixture",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)

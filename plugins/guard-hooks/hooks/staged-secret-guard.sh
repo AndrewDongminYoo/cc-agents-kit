@@ -1439,6 +1439,14 @@ while :; do
       --s*) env_letter=S ;;
       --argv0 | --argv0=*) env_letter=a ;;
       --env0-from | --env0-from=*) env_letter=F ;;
+      --h* | --v*)
+        # --help and --version, under any prefix getopt_long accepts (no other
+        # GNU env long option starts with h or v), print and exit, or fail on
+        # an =value: the words after them never run, as after `nohup --help`.
+        at_command_start=0
+        token_index=$((token_index + 1))
+        continue
+        ;;
       --*) ;;
       *)
         env_opts=${current#-}
