@@ -1106,6 +1106,25 @@ note_env_value_subst() {
   [[ -z "$runner_appends" ]] || env_value_subst=A
   return 0
 }
+# Split an env -S string into ENV_WORDS as env does. An unquoted # that starts a
+# word begins a comment to the end of the string, so the string is cut there,
+# but only when nothing before that # is quoted, escaped or expanded (an
+# expansion can supply a \ that hides the #): otherwise every word is kept.
+# Quote characters are dropped, and \_ and \c (which ends the string) are read
+# as spaces, which can only add words.
+split_env_string() {
+  local env_string=$1 env_head
+  env_head=" $env_string"
+  env_head=${env_head%%[$' \t\n']\#*}
+  if [[ "$env_head" != " $env_string" && "$env_head" != *[\'\"\\\$\`]* ]]; then
+    env_string=$env_head
+  fi
+  env_string=${env_string//\\_/ }
+  env_string=${env_string//\\c/ }
+  env_string=${env_string//[\'\"]/}
+  ENV_WORDS=()
+  IFS=$' \t\n' read -r -d '' -a ENV_WORDS <<<"$env_string" || true
+}
 # `command` runs a builtin or a program, never a shell function, so a name behind
 # it is not looked up among the functions defined below.
 function_lookup=1
@@ -1460,6 +1479,17 @@ while :; do
             token_index=$((token_index + 1))
             continue
             ;;
+          *:)
+            # An =value on an option that takes none (all but the
+            # *-signal[=SIG] ones) makes GNU env exit 125, and macOS env has
+            # no long options: the words after it never run.
+            if [[ "$current" == --*=* && "$env_match" != *-signal: ]]; then
+              at_command_start=0
+              token_index=$((token_index + 1))
+              continue
+            fi
+            env_letter=""
+            ;;
           *) env_letter=${env_match#*:} ;;
         esac
         ;;
@@ -1533,11 +1563,7 @@ while :; do
                 ;;
               "$BOUNDARY_PREFIX"*) continue ;;
             esac
-            env_split=${TOKENS[env_ahead]//\\_/ }
-            env_split=${env_split//\\c/ }
-            env_split=${env_split//[\'\"]/}
-            ENV_WORDS=()
-            IFS=$' \t\n' read -r -d '' -a ENV_WORDS <<<"$env_split" || true
+            split_env_string "${TOKENS[env_ahead]}"
             for env_word in ${ENV_WORDS[@]+"${ENV_WORDS[@]}"}; do
               [[ "$env_word" != git && "$env_word" != */git ]] || block_unparsed
             done
@@ -1570,14 +1596,8 @@ while :; do
         S)
           # -S splits its value into words and runs them, with the words after
           # it as arguments. A git among them is refused. Only whole words
-          # count: `legit.py` names no git. Quote characters are dropped, and
-          # \_ and \c (which ends the string) are read as spaces, which can
-          # only add words.
-          env_split=${env_value//\\_/ }
-          env_split=${env_split//\\c/ }
-          env_split=${env_split//[\'\"]/}
-          ENV_WORDS=()
-          IFS=$' \t\n' read -r -d '' -a ENV_WORDS <<<"$env_split" || true
+          # count: `legit.py` names no git, and a git in a comment is not run.
+          split_env_string "$env_value"
           for env_word in ${ENV_WORDS[@]+"${ENV_WORDS[@]}"}; do
             [[ "$env_word" != git && "$env_word" != */git ]] || block_unparsed
           done

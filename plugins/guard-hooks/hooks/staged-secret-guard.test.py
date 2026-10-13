@@ -466,6 +466,12 @@ env_refused = (
     "env --spl 'git commit -m fixture'", "env -iS 'git commit -m fixture'",
     "env -S '/usr/bin/git commit -m fixture'", "env -S \"'git' commit -m fixture\"",
     "env -S 'git\\_commit -m fixture'", "env -S 'git\\c' commit -m fixture",
+    # A # inside a word starts no comment, and the string is not cut at a #
+    # after quoted, escaped or expanded text.
+    "env -S 'echo a#b git commit -m fixture'", "env -S 'echo \"#\" git commit -m fixture'",
+    "env -S 'echo \\# git commit -m fixture'", "env -S \"'a' # git commit -m fixture\"",
+    "env -S 'FOO=\"a # b\" git commit -m fixture'", 'env -S "$X # git commit -m fixture"',
+    "env -S '${X} # git commit -m fixture'",
     # A string that leaves the program to later words: a git after it.
     "env -S '-i' git commit -m fixture", "env -S 'FOO=1' git commit -m fixture", 'env -S "$X" git status',
     # A cluster ending in C takes the next word, and -C refuses a visible commit.
@@ -529,9 +535,13 @@ env_scanned = (
     "env --deb git commit -m fixture", "env --un=FOO git commit -m fixture", "env --un FOO git commit -m fixture",
     "env --lis git commit -m fixture", "env --b git commit -m fixture", "env --ignore-e git commit -m fixture",
     "env --ignore-s=PIPE git commit -m fixture",
+    # The *-signal options take an =SIG: env runs the git after it.
+    "env --default-signal=INT git commit -m fixture", "env --block-signal=INT git commit -m fixture",
     "env -iv git commit -m fixture",
     "env -iu NAME git commit -m fixture", "env -uNAME git commit -m fixture",
     "env -iP /usr/bin git commit -m fixture", "env -S '' git commit -m fixture",
+    # A string that is all comment adds no words: the git after it is env's.
+    "env -S '# x' git commit -m fixture",
     "env -a foo git commit -m fixture", "env -afoo git commit -m fixture", "env --argv0=foo git commit -m fixture",
     'env -P "$(pwd)" git commit -m fixture', 'env -P "`pwd`" git commit -m fixture',
     # The substitution in a -C value is still read as a command of its own.
@@ -551,6 +561,9 @@ for command in (
     # A word that only contains git names no git.
     "env -S 'python3 -u' legit.py", "env -S 'node' digit.js", "env -S 'printf %s' $HOME",
     "env -S 'python3 legit.py'", "env -S 'node /src/digit.js'", "env -S 'git-lfs version'",
+    # An unquoted # that starts a word begins a comment: env runs only echo.
+    "env -S 'echo # git commit -m fixture'", "env -S '# git commit -m fixture'",
+    "env -S 'echo\t# git commit -m fixture'", "env -S >/tmp/out 'echo # git commit -m fixture'",
     # A -S string this hook cannot read, with no git or commit near it.
     'env -S "$CMD" ls', 'env -S "$PY" script.py', 'env -S "${PY:-python3}" script.py',
     'env -S "python3 $FLAGS" legit.py', 'env -S "$(command -v python3) -u" legit.py',
@@ -564,6 +577,11 @@ for command in (
     # without running it, wherever -0 stands among the options.
     "env -0 git commit -m fixture", "env --null git commit -m fixture", "env --n git commit -m fixture",
     "env -i0v FOO=1 git commit -m fixture", "env -iu NAME -0 git commit -m fixture",
+    # An =value on a long option that takes none makes GNU env exit 125, and
+    # macOS env has no long options: the git after it never runs.
+    "env --debug=x git commit -m fixture", "env --ignore-environment=x git commit -m fixture",
+    "env --list-signal-handling=x git commit -m fixture", "env --deb=x git commit -m fixture",
+    "env --ignore-e=x git commit -m fixture",
     # A unique long-option prefix is that option.
     "env --deb git status", "env --un=FOO git status", "env --lis git status", "env --block git status",
     "env --a foo git status",
