@@ -817,10 +817,10 @@ assert len(EXCLUSIONS) < 65536 < len(EXCLUSIONS_OVER_CAP)
 TWO_WORD = "grep KEY --exclude '.env*'; " * 140
 TWO_WORD_OVER_CAP = "grep KEY --exclude '.env*'; " * 147
 assert len(TWO_WORD + "cat .env") <= 4096 < len(TWO_WORD_OVER_CAP)
-# Two passes per x;, so the recursive grep after it is reached under an 8,000
-# pass budget only after the shorter fixture, and under 20,000 after both.
-UNDER_BUDGET = "x;" * 3500
-OVER_BUDGET = "x;" * 5000
+# Two passes per x;, so the recursive grep after it is reached under the 4,000
+# pass budget only after the shorter fixture.
+UNDER_BUDGET = "x;" * 1500
+OVER_BUDGET = "x;" * 2500
 for command, expected, limit, label in (
     # --- the dotenv token check runs first and reads any command in well under the timeout ---
     (AT_CAP, 2, 0.5, "64 KiB command ending in cat .env is refused by the first stage"),
@@ -841,7 +841,7 @@ for command, expected, limit, label in (
     (long_command(300 * 1024, "cat .env"), 2, 2.5, "300 KiB command skips the tokenizer, keeps the .env check"),
     ("echo 'grep " + "a" * (2 * 1024 * 1024) + "'\ncat .env", 2, 2.5, "2 MiB quoted word skips the tokenizer"),
     # --- the tokenizer stays inside the timeout; past a budget only its own check is lost ---
-    (long_command(24 * 1024, "grep -rn KEY ."), 2, 2.5, "24 KiB command is tokenized to its end"),
+    (long_command(16 * 1024, "grep -rn KEY ."), 2, 2.5, "16 KiB command is tokenized to its end"),
     ("echo grep\n" + dense + "\nls", 0, 2.5, "dense 62 KiB command stays inside the timeout"),
     ("echo grep $(" + dense + ")\nls", 0, 2.5, "dense 62 KiB command inside $(...) stays inside the timeout"),
     # Each substitution walks bash 3.2's list arrays, so their number and depth are capped.
@@ -849,8 +849,8 @@ for command, expected, limit, label in (
     ("grep " + "$(x) " * 6000 + "\nls", 0, 2.5, "6,000 substitutions stop at the count cap"),
     ("echo grep " + "$(x) " * 300 + "\ngrep -rn KEY . --exclude='.env*'", 0, 2.5,
      "past the substitution cap only the recursive check is lost"),
-    # The budget is 8,000 passes: a recursive grep after 7,000 passes is checked,
-    # one after 10,000 is not, and a .env token after either is still refused.
+    # The budget is 4,000 passes: a recursive grep after 3,000 passes is checked,
+    # one after 5,000 is not, and a .env token after either is still refused.
     ("echo grep\n" + UNDER_BUDGET + "\ngrep -rn KEY .", 2, 2.5, "a recursive grep inside the pass budget is checked"),
     ("echo grep\n" + OVER_BUDGET + "\ngrep -rn KEY .", 0, 2.5, "past the pass budget only the recursive check is lost"),
     ("echo grep\n" + OVER_BUDGET + "\ngrep -rn KEY .; cat .env", 2, 2.5, "past the pass budget a .env token is still refused"),
@@ -864,9 +864,9 @@ for command, expected, limit, label in (
     ("rg --hidden " + " ".join("--type-add 'x:" + "*.ts," * 203 + "'" for _ in range(55)) + " KEY .",
      2, 2.5, "many 1 KiB --type-add values are split inside the timeout"),
     # Runner options are read word by word, each cluster or long name in one match.
-    # 700 x 4 words and 4 blanks stays under the 8,000-pass budget.
-    ("sudo " + "-nu root --us root " * 700 + "grep -r SECRET .", 2, 2.5,
-     "1,400 runner options with values are read inside the timeout"),
+    # 400 x 4 words and 4 blanks stays under the 4,000-pass budget.
+    ("sudo " + "-nu root --us root " * 400 + "grep -r SECRET .", 2, 2.5,
+     "800 runner options with values are read inside the timeout"),
     ("sudo -" + "n" * 60000 + "u root grep -r SECRET .", 2, 2.5, "a 60 KiB runner option cluster is read inside the timeout"),
     ("sudo --user=" + "u" * 60000 + " grep -r SECRET .", 2, 2.5, "a 60 KiB attached runner value is read inside the timeout"),
     ("env -S '" + "x " * 30000 + "' grep -n KEY a.txt", 2, 2.5, "a 60 KiB env -S value is refused inside the timeout"),
