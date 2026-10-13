@@ -594,6 +594,9 @@ env_refused = (
     "env -S '-i' -S 'git commit -m fixture'", "env -S '-i' --split-string='git commit -m fixture'",
     "env -S '-i' --sp='git commit -m fixture'", "env -S '-i' -S'git commit -m fixture'",
     "env -S '-i' -iS'git commit -m fixture'",
+    # env splits each glued layer again, short or long.
+    "env -S '-S' '-S-Sgit commit -m fixture'", "env -S '-i' '-S--split-string=git commit -m fixture'",
+    "env -S '-i' '--split-string=-Sgit commit -m fixture'", "env -S '-i' '--sp=--sp=git commit -m fixture'",
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):

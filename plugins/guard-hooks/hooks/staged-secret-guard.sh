@@ -1186,12 +1186,13 @@ refuse_env_strings_ahead() {
     esac
     probe=${TOKENS[ahead]}
     # A later -S can carry its string glued to it (`--split-string=git ...`,
-    # `-Sgit ...`, `-iSgit ...`), so a word also starts after an option's first
-    # = or, in a short cluster, its first S. That can only refuse more.
-    case "$probe" in
-      --*) probe=${probe/=/ } ;;
-      -*) probe=${probe/S/ } ;;
-    esac
+    # `-Sgit ...`, `-iSgit ...`), and env splits each glued layer again
+    # (`-S-Sgit`, `-S--split-string=git`), so in a word that starts with - a
+    # word also starts after every = and every S. That can only refuse more.
+    if [[ "$probe" == -* ]]; then
+      probe=${probe//=/ }
+      probe=${probe//S/ }
+    fi
     head=" $probe"
     head=${head%%[$' \t\n']\#*}
     if [[ "$head" != " $probe" && "$head" != *[\'\"\\\$\`]* ]]; then
