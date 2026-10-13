@@ -405,6 +405,57 @@ for command in (
     check("runner function uncertainty retains external fallback", rc == 2,
           f"exit={rc} stderr={err.strip()[:160]}")
 
+# Runner option arities (#57). GNU xargs --max-lines, --eof and --replace take
+# an optional value that binds only when attached, so the bare word takes
+# nothing: the git after it is the program, and its commit is refused as any
+# xargs commit is, before the index is scanned, so a clean index is refused
+# too. Read as taking a value, `git` was consumed and `commit` ran unscanned. The read-only form shows the option is known rather than refused.
+for option in ("--max-lines", "--eof", "--replace", "--max-lines=2", "-L 2"):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(f"echo x | xargs {option} git commit -m fixture", directory)
+        check(f"xargs {option} git commit is refused", rc == 2 and "could not safely parse" in err,
+              f"exit={rc} stderr={err.strip()[:160]}")
+    rc, err = check_hook(f"echo x | xargs {option} git log --grep commit", runner_repo)
+    check(f"xargs {option} is parsed before a read-only git", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+# Options that take the next word, from macOS xargs(1) (-J, -R, -S) and sudo
+# 1.9's parse_args.c (-a, -c, -U): `git` is their value and `commit` the
+# program. Read as taking nothing, or not known at all, git commit is refused.
+for command in (
+    "xargs -J git commit -m fixture", "xargs -R git commit -m fixture", "xargs -S git commit -m fixture",
+    "xargs -J% git log --grep commit",
+    "sudo -a git commit -m fixture", "sudo --auth-type git commit -m fixture",
+    "sudo -c git commit -m fixture", "sudo --login-class git commit -m fixture",
+    "sudo -U git commit -m fixture", "sudo --other-user git commit -m fixture",
+    "sudo -cstaff git status",
+):
+    rc, err = check_hook(command, runner_repo)
+    check(f"{command} reads the option value", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+# env -C (--chdir) and -P take a value, as the next word or attached, so the
+# word after the value is the program. Read as the program, -C hid the git
+# after it. -C runs git in another directory, whose index this hook does not
+# scan, so a visible commit is refused as through sudo; -P only picks where
+# git is found, so the commit is scanned.
+for option in ("-C /tmp", "-C/tmp", "--chdir /tmp", "--chdir=/tmp", "--ch /tmp", "-u FOO -C /tmp", '-C "$dir"'):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(f"env {option} git commit -m fixture", directory)
+        check(f"env {option} git commit is refused", rc == 2 and "could not safely parse" in err,
+              f"exit={rc} stderr={err.strip()[:160]}")
+for option in ("-P /usr/bin", "-P/usr/bin"):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(f"env {option} git commit -m fixture", directory)
+        check(f"env {option} git commit is scanned (expect {expected})",
+              rc == expected and "could not safely parse" not in err, f"exit={rc} stderr={err.strip()[:160]}")
+# Past the -C value, a program this hook cannot read is judged on its commit.
+for directory in (runner_repo, runner_clean):
+    rc, err = check_hook('env -C /tmp "$G" commit -m fixture', directory)
+    check("env -C /tmp $G commit is refused", rc == 2, f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    "env -C /tmp git log --grep commit", "env -C /tmp/github echo hi", 'env -C "$dir" ls',
+    'env -v printenv "$HOME"', "env -S 'python3 -u' legit.py",
+):
+    rc, err = check_hook(command, runner_repo)
+    check(f"{command} without a commit is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
 # A substitution executes even when its output is a quoted argument or an
 # assignment. Its quoting must be independent of the surrounding word.
 substitution_commits = (
