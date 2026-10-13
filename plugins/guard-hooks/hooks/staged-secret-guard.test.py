@@ -430,6 +430,68 @@ for command in (
 ):
     rc, err = check_hook(command, runner_repo)
     check(f"{command} reads the option value", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+# A redirection where a runner option's value should be is removed by the
+# shell, so the runner takes a later word as its value (#64): read as the
+# value, the redirection left the real value to be taken as the program, and
+# the commit ran unscanned. A git later in the command is refused, before the
+# index is read, so a clean index is refused too.
+for command in (
+    "nice -n >/tmp/out 5 git commit -m fixture", "nice -n > /tmp/out 5 git commit -m fixture",
+    "nice --adjustment 2>/tmp/out 5 git commit -m fixture",
+    "nice -n >/tmp/out 5 git -c alias.ci=commit ci -m fixture",
+    "sudo -u >/tmp/out root git commit -m fixture", "sudo -g &>/tmp/out wheel git commit -m fixture",
+    "timeout -s >/tmp/out KILL 5 git commit -m fixture", "timeout -k </dev/null 1 5 git commit -m fixture",
+    "xargs -n >/tmp/out 1 git commit -m fixture", "xargs -I <<<x {} git commit -m fixture",
+    # timeout's duration slot after -- is a value slot as well.
+    "timeout -- >/tmp/out 5 git commit -m fixture", "timeout -- > /tmp/out 5 git commit -m fixture",
+    # A file descriptor number or a {name} before the < or > is part of the
+    # redirection, which the shell removes whole.
+    "nice -n 5>/dev/null git status", "nice -n {fd}>/tmp/out 5 git commit -m fixture",
+    "timeout -- 5>/tmp/out 5 git commit -m fixture",
+    # A quoted target leaves the number before it a descriptor, and so does
+    # one before a second redirection glued after it.
+    "nice -n 5>'/tmp/out' 5 git commit -m fixture", "timeout -- 5>'/tmp/out' 5 git commit -m fixture",
+    "f() { nice -n 5>'/tmp/out' 5 git commit -m fixture; }; f",
+    "nice -n 5>'/tmp/out'>/dev/null 5 git commit -m fixture",
+    # A backslash-newline is removed before the word is read and quotes
+    # nothing: the number joined across it is still a descriptor.
+    "nice -n 5\\\n>/tmp/out 6 git commit -m fixture", "nice -n \\\n5>/tmp/out 6 git commit -m fixture",
+    "timeout -- 5\\\n>/tmp/out 6 git commit -m fixture", "nice -n 5\\\n6>/tmp/out 7 git commit -m fixture",
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is refused", rc == 2 and "could not safely parse" in err,
+              f"exit={rc} stderr={err.strip()[:160]}")
+# A redirection after the program, or a git only in the next command, is still
+# read: the commit is scanned, and a read-only git passes.
+for command in (
+    "nice -n 5 git >/tmp/out commit -m fixture", "timeout -s KILL 5 git >/tmp/out commit -m fixture",
+    "nice -n >/tmp/out 5 python3 x; git commit -m fixture",
+    # A value glued before a redirection keeps that value (`-s KILL>out` is
+    # `-s KILL`), so the program after it is read.
+    "timeout -s KILL>/dev/null 5 git commit -m fixture",
+    # A quoted or escaped number is a word, not a descriptor (`'5'>out` is the
+    # value 5), in a function body too.
+    "nice -n '5'>/dev/null git commit -m fixture", "timeout -- '5'>/dev/null git commit -m fixture",
+    "f() { nice -n '5'>/dev/null git commit -m fixture; }; f",
+):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is scanned (expect {expected})",
+              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
+              f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    "nice -n 5 git status >/tmp/out", "sudo -u root git status >/tmp/out", "xargs -n 1 git log >/tmp/out",
+    "timeout 5 git status 2>/tmp/out", "nice -n >/tmp/out 5 python3 x",
+    "sudo -u root>/dev/null git status", "xargs -I {}>/dev/null git log {}", "nice -n -5>/dev/null git status",
+    "timeout -- 5s>/dev/null git log",
+    "nice -n '5'>/dev/null git status", 'nice -n "5">/dev/null git status', "nice -n '{fd}'>/dev/null git status",
+    "nice -n \\5>/dev/null git status", "timeout -- '5'>/dev/null git status",
+    "f() { nice -n '5'>/dev/null git status; }; f",
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
 # env -C (--chdir) and -P take a value, as the next word or attached, so the
 # word after the value is the program. Read as the program, -C hid the git
 # after it. -C runs git in another directory, whose index this hook does not
@@ -512,6 +574,34 @@ env_refused = (
     # Glued to the option, or between options, the redirection is stripped
     # before the option is read.
     "env -S>/tmp/out 'git commit -m fixture'", "env -i >/tmp/out -S 'git commit -m fixture'",
+    # GNU env re-parses the options an -S string supplies (#66), so a string
+    # that starts with an option can supply another -S, which splits a later
+    # word: a git word in any later string is refused.
+    "env -S '-S' 'git commit -m fixture'", "env -S'-S' 'git commit -m fixture'",
+    "env --split-string=-S 'git commit -m fixture'", "env --sp=-S 'git commit -m fixture'",
+    "env -iS '-S' 'git commit -m fixture'", "env -S '-S' -S 'git commit -m fixture'",
+    "env -S '-i -S' 'git commit -m fixture'", "env -S '-S' '/usr/bin/git commit -m fixture'",
+    # Quote removal and \_ come before the word is read.
+    "env -S '-S' 'g\"i\"t commit -m fixture'", "env -S '-S' 'git\\_commit -m fixture'",
+    # A # in the word does not hide a git before it: env reads the rest as a
+    # comment and still runs the alias commit.
+    "env -S '-S' 'git -c alias.ci=commit ci -m fixture #c'",
+    # A # after a quote is not read as a comment, as in the -S string itself.
+    "env -S '-S' \"'a' # git commit -m fixture\"",
+    # After an option-leading string GNU env keeps reading options from the
+    # words after it, so a later -S splits its string although '-i' leaves no
+    # value unresolved; its string may also be glued to the option.
+    "env -S '-i' -S 'git commit -m fixture'", "env -S '-i' --split-string='git commit -m fixture'",
+    "env -S '-i' --sp='git commit -m fixture'", "env -S '-i' -S'git commit -m fixture'",
+    "env -S '-i' -iS'git commit -m fixture'",
+    # env splits each glued layer again, short or long.
+    "env -S '-S' '-S-Sgit commit -m fixture'", "env -S '-i' '-S--split-string=git commit -m fixture'",
+    "env -S '-i' '--split-string=-Sgit commit -m fixture'", "env -S '-i' '--sp=--sp=git commit -m fixture'",
+    # The glued layer can sit in the option-leading string itself, after any
+    # word break, and no commit word need be visible.
+    "env -S '-Sgit -c alias.ci=commit ci -m fixture'", "env -S '-i -Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S '-S' ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit ci'",
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):
@@ -552,6 +642,9 @@ env_scanned = (
     "env -u 'A>B' git commit -m fixture",
     "env -a 'worker>log' git commit -m fixture", "env -a\"worker<log\" git commit -m fixture",
     "env --argv0='worker>log' git commit -m fixture",
+    # The later strings an option-leading -S string can split end with the
+    # command: the next one is read.
+    "env -S '-S' 'python3 -u' legit.py; git commit -m fixture",
 )
 for command in env_scanned:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
@@ -595,6 +688,14 @@ for command in (
     "env -S >/tmp/out 'python3 -u' legit.py", "env -u >/tmp/out FOO python3 legit.py",
     # A quoted < or > in a value is part of the value, not a redirection.
     "env -u 'A>B' git status", 'env -u "A<B" git status',
+    # An option-leading -S string with no git word after it (#66), a word that
+    # only contains git, or one in a comment. A commit word in a later string
+    # is not read as a git one.
+    "env -S '-i' python3 legit.py", "env -S '-S' 'python3 -u' legit.py", "env -S '-S' legit.py",
+    "env -S '-S' 'echo # git commit -m fixture'", "env -S '-S' \"$X\"",
+    "env -S '-i' echo 'fix commit'", "env -S >/tmp/out 'echo commit'",
+    "env -S '-i' -u FOO python3 legit.py", "env -S '-i' --unset=FOO python3 legit.py",
+    "env -S '-Spython3 legit.py'", "env -S '-i -Spython3 legit.py'",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)

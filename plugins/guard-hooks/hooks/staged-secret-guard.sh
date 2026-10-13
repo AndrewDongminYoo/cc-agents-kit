@@ -98,6 +98,19 @@ refuse_git_ahead() {
   done
 }
 
+# Whether a runner's value word is a redirection that the shell removes whole:
+# one that starts with < or >, or whose text before the first < or > is &, a
+# file descriptor number or a {name} (`5>out`, `{fd}>out`). After any other
+# text (`KILL>out`), that text stays as the word and only the rest is removed.
+# A quoted or escaped prefix is such text too (`'5'>out` is the word 5), so it
+# takes the token's index rather than its text, whose quotes are gone.
+runner_redirection() {
+  local prefix word=${TOKENS[$1]-}
+  [[ "$word" == *[\<\>]* && -z "${TOKEN_PREFIX_QUOTED[$1]-}" ]] || return 1
+  prefix=${word%%[<>]*}
+  [[ "$prefix" == "&" || "$prefix" != *[!0-9]* || "$prefix" =~ $FD_VARNAME ]]
+}
+
 # Read only the option grammars whose arity is known. Unknown syntax never
 # clears a visible git command. These runners execute external programs, so
 # their command operand must bypass same-named shell functions.
@@ -160,7 +173,13 @@ parse_runner() {
         ;;
     esac
     value_index=$((runner_next + take))
-    if ((take)) && [[ -n "${TOKEN_EXPANSION[value_index]-}" || "${TOKENS[value_index]-}" == "$BOUNDARY_PREFIX"* ]]; then
+    # A redirection where the value should be is removed by the shell, and the
+    # runner takes its value from a later word (`nice -n >out 5 git commit`).
+    # Which word is not followed: a git later in the command is refused. A
+    # value glued before a redirection (`-s KILL>out`) is kept as the value,
+    # and a quoted < or > is marked literal, which the expansion test refuses.
+    if ((take)) && { [[ -n "${TOKEN_EXPANSION[value_index]-}" || "${TOKENS[value_index]-}" == "$BOUNDARY_PREFIX"* ]] \
+      || runner_redirection "$value_index"; }; then
       refuse_git_ahead "$runner_next"
       runner_next=-1
       return
@@ -168,9 +187,11 @@ parse_runner() {
     runner_next=$((value_index + 1))
   done
   # timeout's first operand is a duration, even after --. A quoted expansion
-  # still cannot be trusted here because the tokenizer may split a substitution.
+  # still cannot be trusted here because the tokenizer may split a substitution,
+  # and a redirection there (`timeout -- >out 5`) leaves the duration unplaced.
   if [[ -n "$duration" ]]; then
-    if [[ -n "${TOKEN_EXPANSION[runner_next]-}" || "${TOKENS[runner_next]-}" == "$BOUNDARY_PREFIX"* ]]; then
+    if [[ -n "${TOKEN_EXPANSION[runner_next]-}" || "${TOKENS[runner_next]-}" == "$BOUNDARY_PREFIX"* ]] \
+      || runner_redirection "$runner_next"; then
       refuse_git_ahead "$runner_next"
       runner_next=-1
       return
@@ -256,6 +277,14 @@ last_unquoted_redirect=""
 # Quote removal loses which < or > was quoted, so only a token with none is
 # trusted to be a redirection where git's subcommand is looked for.
 TOKEN_QUOTED=()
+# Set, the same way, at the index of each token that had a quoted or escaped
+# part before its first unquoted < or >. That part is a word, never a file
+# descriptor or {name}, where a quoted target after it (`5>'out'`) is not. A
+# backslash-newline is removed before the word is read and quotes nothing, so
+# `5\<newline>>out` is still descriptor 5: unlike token_quoted, this is set
+# only where a quote opens or an escape keeps a character.
+token_prefix_quoted=""
+TOKEN_PREFIX_QUOTED=()
 # An unquoted # at the start of a word opens a comment that runs to the end of
 # the line. Read as words, `git commit -m x # note` passed # and note as
 # pathspecs, scanned a candidate git never commits, and let the commit through.
@@ -386,6 +415,7 @@ flush_token() {
       esac
     fi
     [[ -z "$token_quoted" ]] || TOKEN_QUOTED[${#TOKENS[@]}]=1
+    [[ -z "$token_prefix_quoted" ]] || TOKEN_PREFIX_QUOTED[${#TOKENS[@]}]=1
     TOKENS+=("$token")
     TOKEN_EXPANSION+=("$token_expansion")
     token=""
@@ -393,6 +423,7 @@ flush_token() {
     token_expansion=""
     token_quoted=""
     token_redirect=""
+    token_prefix_quoted=""
   fi
 }
 
@@ -766,6 +797,7 @@ while ((command_pos < command_len)); do
     elif [[ "$char" != $'\n' ]]; then
       token="$token$char"
       token_started=1
+      [[ -n "$token_redirect" ]] || token_prefix_quoted=1
     fi
     escaped=""
   elif [[ "$quote" == "'" ]]; then
@@ -795,6 +827,7 @@ while ((command_pos < command_len)); do
         quote="$char"
         token_started=1
         token_quoted=1
+        [[ -n "$token_redirect" ]] || token_prefix_quoted=1
         # $'…' honours \' where plain single quotes do not, so the quote state
         # can drift from bash's after it. No case was found where that drift
         # hides a body the shell runs; this is hardening, not a known leak.
@@ -1124,6 +1157,57 @@ split_env_string() {
   env_string=${env_string//[\'\"]/}
   ENV_WORDS=()
   IFS=$' \t\n' read -r -d '' -a ENV_WORDS <<<"$env_string" || true
+}
+# Where env may read an -S string from a word this parse does not place (after
+# a redirection in the value slot, or after an -S string that starts with an
+# option, which GNU env re-parses so it can supply another -S), every later
+# word of the same command is read as an -S string, and a git word in one is
+# refused. The search crosses parentheses and stops at the next ;, | or &
+# outside them. Each word is read as split_env_string reads it (the comment cut,
+# then \_ and \c as word breaks and quotes dropped), but by parameter expansion
+# alone: its here-string writes a temporary file on bash 3.2, once per word.
+refuse_env_strings_ahead() {
+  local ahead depth=0 probe head
+  for ((ahead = $1; ahead < token_count; ahead++)); do
+    case "${TOKENS[ahead]}" in
+      "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(")
+        depth=$((depth + 1))
+        continue
+        ;;
+      "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+")
+        ((depth == 0)) || depth=$((depth - 1))
+        continue
+        ;;
+      "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&")
+        ((depth > 0)) || break
+        continue
+        ;;
+      "$BOUNDARY_PREFIX"*) continue ;;
+    esac
+    probe=${TOKENS[ahead]}
+    # A later -S can carry its string glued to it (`--split-string=git ...`,
+    # `-Sgit ...`, `-iSgit ...`), and env splits each glued layer again
+    # (`-S-Sgit`, `-S--split-string=git`), also inside the current string
+    # (`-S '-i -Sgit'`), so where any word of it starts with - a word also
+    # starts after every = and every S. That can only refuse more.
+    head=${probe//\\_/ }
+    head=" ${head//[\'\"]/}"
+    if [[ "$head" == *[$' \t\n']-* ]]; then
+      probe=${probe//=/ }
+      probe=${probe//S/ }
+    fi
+    head=" $probe"
+    head=${head%%[$' \t\n']\#*}
+    if [[ "$head" != " $probe" && "$head" != *[\'\"\\\$\`]* ]]; then
+      probe=$head
+    fi
+    probe=${probe//\\_/ }
+    probe=${probe//\\c/ }
+    probe=" ${probe//[\'\"]/} "
+    case "$probe" in
+      *[$' \t\n']git[$' \t\n']* | */git[$' \t\n']*) block_unparsed ;;
+    esac
+  done
 }
 # `command` runs a builtin or a program, never a shell function, so a name behind
 # it is not looked up among the functions defined below.
@@ -1545,30 +1629,7 @@ while :; do
       # any later string, as -S itself reads it. A quoted < or > is part of
       # the value, not a redirection.
       if [[ "${TOKEN_EXPANSION[env_value_index]-}" != literal && "$env_value" == *[\<\>]* ]]; then
-        if [[ "$env_letter" == S ]]; then
-          env_depth=0
-          for ((env_ahead = env_value_index; env_ahead < token_count; env_ahead++)); do
-            case "${TOKENS[env_ahead]}" in
-              "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(")
-                env_depth=$((env_depth + 1))
-                continue
-                ;;
-              "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+")
-                ((env_depth == 0)) || env_depth=$((env_depth - 1))
-                continue
-                ;;
-              "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&")
-                ((env_depth > 0)) || break
-                continue
-                ;;
-              "$BOUNDARY_PREFIX"*) continue ;;
-            esac
-            split_env_string "${TOKENS[env_ahead]}"
-            for env_word in ${ENV_WORDS[@]+"${ENV_WORDS[@]}"}; do
-              [[ "$env_word" != git && "$env_word" != */git ]] || block_unparsed
-            done
-          done
-        fi
+        [[ "$env_letter" != S ]] || refuse_env_strings_ahead "$env_value_index"
         refuse_git_ahead "$env_value_index"
         token_index=$((token_index + 1))
         continue
@@ -1610,12 +1671,17 @@ while :; do
           # program to the words after it, and one whose first word holds an
           # expansion (the shell's, or env's own ${NAME}) names a program this
           # hook cannot read. As after any such program, a git after the
-          # string, or a commit in or after it, is refused.
+          # string, or a commit in or after it, is refused. GNU env re-parses
+          # the options a string supplies, so one that starts with an option
+          # can supply another -S (`env -S '-S' 'git commit'`, `env -S
+          # '-Sgit commit'`): the string itself and each later word are then
+          # read for glued -S layers too.
           case "${ENV_WORDS[0]}" in
             -* | *=* | *[\$\`]*)
               for env_word in "${ENV_WORDS[@]}"; do
                 [[ "$env_word" != commit ]] || block_indirect_commit
               done
+              [[ "${ENV_WORDS[0]}" != -* ]] || refuse_env_strings_ahead "$env_value_index"
               refuse_git_ahead "$token_index" named
               indirect=1
               refuse_commit_ahead "$token_index"
@@ -1825,6 +1891,9 @@ while :; do
     # runs on into the body.
     INLINE_TOKENS=("$BOUNDARY_PREFIX;")
     INLINE_EXPANSION=("")
+    # Where in INLINE_TOKENS a body token with a quoted redirection prefix
+    # landed, so that its copy keeps the mark the original has.
+    INLINE_PREFIX_QUOTED=()
     for def_index in "${CALL_DEFS[@]}"; do
       body_start=${FUNC_BODY_START[def_index]}
       body_end=${FUNC_BODY_END[def_index]}
@@ -1918,6 +1987,7 @@ while :; do
               ;;
           esac
         fi
+        [[ -z "${TOKEN_PREFIX_QUOTED[body_index]-}" ]] || INLINE_PREFIX_QUOTED+=("${#INLINE_TOKENS[@]}")
         INLINE_TOKENS+=("$body_token")
         INLINE_EXPANSION+=("$body_expansion")
       done
@@ -1948,6 +2018,9 @@ while :; do
       fi
     fi
     if ((${#INLINE_TOKENS[@]} <= inline_room)); then
+      for inline_offset in ${INLINE_PREFIX_QUOTED[@]+"${INLINE_PREFIX_QUOTED[@]}"}; do
+        TOKEN_PREFIX_QUOTED[${#TOKENS[@]} + inline_offset]=1
+      done
       TOKENS+=("${INLINE_TOKENS[@]}")
       TOKEN_EXPANSION+=("${INLINE_EXPANSION[@]}")
       REGION_FUNC[region_depth]=$func_index
