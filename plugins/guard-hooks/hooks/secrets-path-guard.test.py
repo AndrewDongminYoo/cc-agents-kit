@@ -542,6 +542,12 @@ RECURSIVE += [
     (0, "NAME+=value before a non-recursive grep", "X+=x grep -n SECRET a.txt"),
     (0, "NAME[subscript]=value before a non-recursive grep", "A[0]=x grep -n SECRET a.txt"),
     (0, "NAME[subscript]+=value before a non-recursive grep", "A[0]+=x grep -n SECRET a.txt"),
+    # bash reads a subscript with nested brackets as one assignment and runs
+    # the next word; A[x]y=z is not an assignment, so it is the program word.
+    (2, "a nested subscript before grep -r", "A[B[0]]=x grep -r SECRET ."),
+    (2, "a nested subscript with += before grep -r", "A[B[0]]+=x grep -r SECRET ."),
+    (0, "a nested subscript before a non-recursive grep", "A[B[0]]=x grep -n SECRET a.txt"),
+    (0, "text after the subscript makes the word the program", "A[x]y=z grep -r SECRET ."),
     # #59: a case-insensitive volume runs GREP as grep, so program and runner
     # names that bash looks up on PATH match in any case.
     (2, "GREP -r", "GREP -r SECRET ."),

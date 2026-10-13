@@ -945,8 +945,11 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
   P_OP='^(<<<|<<-|<<|<>|<&|>&|>>|>\||&>>|&>|<|>)'
   P_FD_PREFIX='^([0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?[<>&|]*$'
   # An assignment before the program: NAME=value, NAME+=value,
-  # NAME[subscript]=value or NAME[subscript]+=value.
-  P_ASSIGN='^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?='
+  # NAME[subscript]=value or NAME[subscript]+=value. A subscript can hold
+  # brackets (A[B[0]]=x), so it runs to the last ] that = or += follows; a
+  # word bash runs as the program instead (A[x]]=y) only names a missing
+  # command.
+  P_ASSIGN='^[A-Za-z_][A-Za-z0-9_]*(\[.*\])?\+?='
   SEG_WORDS=()
   SEG_REDIR=()
   # SEG_UNQ[i] is 1 when word i holds a * outside quotes, which the shell
