@@ -597,6 +597,11 @@ env_refused = (
     # env splits each glued layer again, short or long.
     "env -S '-S' '-S-Sgit commit -m fixture'", "env -S '-i' '-S--split-string=git commit -m fixture'",
     "env -S '-i' '--split-string=-Sgit commit -m fixture'", "env -S '-i' '--sp=--sp=git commit -m fixture'",
+    # The glued layer can sit in the option-leading string itself, after any
+    # word break, and no commit word need be visible.
+    "env -S '-Sgit -c alias.ci=commit ci -m fixture'", "env -S '-i -Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S '-S' ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit ci'",
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):
@@ -690,6 +695,7 @@ for command in (
     "env -S '-S' 'echo # git commit -m fixture'", "env -S '-S' \"$X\"",
     "env -S '-i' echo 'fix commit'", "env -S >/tmp/out 'echo commit'",
     "env -S '-i' -u FOO python3 legit.py", "env -S '-i' --unset=FOO python3 legit.py",
+    "env -S '-Spython3 legit.py'", "env -S '-i -Spython3 legit.py'",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)

@@ -1187,9 +1187,12 @@ refuse_env_strings_ahead() {
     probe=${TOKENS[ahead]}
     # A later -S can carry its string glued to it (`--split-string=git ...`,
     # `-Sgit ...`, `-iSgit ...`), and env splits each glued layer again
-    # (`-S-Sgit`, `-S--split-string=git`), so in a word that starts with - a
-    # word also starts after every = and every S. That can only refuse more.
-    if [[ "$probe" == -* ]]; then
+    # (`-S-Sgit`, `-S--split-string=git`), also inside the current string
+    # (`-S '-i -Sgit'`), so where any word of it starts with - a word also
+    # starts after every = and every S. That can only refuse more.
+    head=${probe//\\_/ }
+    head=" ${head//[\'\"]/}"
+    if [[ "$head" == *[$' \t\n']-* ]]; then
       probe=${probe//=/ }
       probe=${probe//S/ }
     fi
@@ -1670,14 +1673,15 @@ while :; do
           # hook cannot read. As after any such program, a git after the
           # string, or a commit in or after it, is refused. GNU env re-parses
           # the options a string supplies, so one that starts with an option
-          # can supply another -S (`env -S '-S' 'git commit'`): each later word
-          # is then read as an -S string too.
+          # can supply another -S (`env -S '-S' 'git commit'`, `env -S
+          # '-Sgit commit'`): the string itself and each later word are then
+          # read for glued -S layers too.
           case "${ENV_WORDS[0]}" in
             -* | *=* | *[\$\`]*)
               for env_word in "${ENV_WORDS[@]}"; do
                 [[ "$env_word" != commit ]] || block_indirect_commit
               done
-              [[ "${ENV_WORDS[0]}" != -* ]] || refuse_env_strings_ahead "$token_index"
+              [[ "${ENV_WORDS[0]}" != -* ]] || refuse_env_strings_ahead "$env_value_index"
               refuse_git_ahead "$token_index" named
               indirect=1
               refuse_commit_ahead "$token_index"
