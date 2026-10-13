@@ -279,7 +279,10 @@ last_unquoted_redirect=""
 TOKEN_QUOTED=()
 # Set, the same way, at the index of each token that had a quoted or escaped
 # part before its first unquoted < or >. That part is a word, never a file
-# descriptor or {name}, where a quoted target after it (`5>'out'`) is not.
+# descriptor or {name}, where a quoted target after it (`5>'out'`) is not. A
+# backslash-newline is removed before the word is read and quotes nothing, so
+# `5\<newline>>out` is still descriptor 5: unlike token_quoted, this is set
+# only where a quote opens or an escape keeps a character.
 token_prefix_quoted=""
 TOKEN_PREFIX_QUOTED=()
 # An unquoted # at the start of a word opens a comment that runs to the end of
@@ -794,6 +797,7 @@ while ((command_pos < command_len)); do
     elif [[ "$char" != $'\n' ]]; then
       token="$token$char"
       token_started=1
+      [[ -n "$token_redirect" ]] || token_prefix_quoted=1
     fi
     escaped=""
   elif [[ "$quote" == "'" ]]; then
@@ -823,6 +827,7 @@ while ((command_pos < command_len)); do
         quote="$char"
         token_started=1
         token_quoted=1
+        [[ -n "$token_redirect" ]] || token_prefix_quoted=1
         # $'…' honours \' where plain single quotes do not, so the quote state
         # can drift from bash's after it. No case was found where that drift
         # hides a body the shell runs; this is hardening, not a known leak.
@@ -955,7 +960,6 @@ while ((command_pos < command_len)); do
           fi
         fi
         if [[ "$char" == '<' || "$char" == '>' ]]; then
-          [[ -n "$token_redirect" || -z "$token_quoted" ]] || token_prefix_quoted=1
           token_redirect=1
           last_unquoted_redirect=1
         fi

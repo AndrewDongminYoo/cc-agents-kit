@@ -453,6 +453,10 @@ for command in (
     "nice -n 5>'/tmp/out' 5 git commit -m fixture", "timeout -- 5>'/tmp/out' 5 git commit -m fixture",
     "f() { nice -n 5>'/tmp/out' 5 git commit -m fixture; }; f",
     "nice -n 5>'/tmp/out'>/dev/null 5 git commit -m fixture",
+    # A backslash-newline is removed before the word is read and quotes
+    # nothing: the number joined across it is still a descriptor.
+    "nice -n 5\\\n>/tmp/out 6 git commit -m fixture", "nice -n \\\n5>/tmp/out 6 git commit -m fixture",
+    "timeout -- 5\\\n>/tmp/out 6 git commit -m fixture", "nice -n 5\\\n6>/tmp/out 7 git commit -m fixture",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
