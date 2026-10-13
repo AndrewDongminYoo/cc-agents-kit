@@ -1419,42 +1419,61 @@ while :; do
       continue
     fi
     # Which option this word is, as the letter of its short form: "" for one
-    # that takes no value, ? for one this hook does not know. -i, -0 and -v
-    # (and a lone -, which is -i) take nothing; -u, -C, -P, -S and -a take a
+    # that takes no value, ? for one this hook does not know, h for one that
+    # ends env before any command runs. -i and -v (and a lone -, which is -i)
+    # take nothing; -0 (--null) is h, because both GNU env and macOS env exit
+    # 125 rather than run a command given with it; -u, -C, -P, -S and -a take a
     # value, the rest of a short cluster (`-uNAME`, `-iuNAME`) or after = in a
     # long option, else the next word. F stands for --env0-from, which has no
-    # short form. --chdir and --split-string are read under any prefix
-    # getopt_long accepts: no other GNU env long option starts with c or s.
+    # short form.
     env_letter="?"
     env_value=""
     env_attached=""
     case "$current" in
-      - | --ignore-environment | --null | --debug | --list-signal-handling \
-        | --block-signal | --block-signal=* | --default-signal | --default-signal=* \
-        | --ignore-signal | --ignore-signal=*)
-        env_letter=""
+      -) env_letter="" ;;
+      --*)
+        # GNU env 9.x long options, each with the letter of its class: a value
+        # letter as above, "" for none or a value only after = (the
+        # *-signal[=SIG] options), h for --help, --version and --null. getopt_long
+        # takes an exact name, else a unique prefix (`--deb`, `--un=FOO`); an
+        # ambiguous (`--de`, `--i`) or unknown one stays ?.
+        env_name=${current%%=*}
+        env_name=${env_name#--}
+        env_match=""
+        for env_row in argv0:a block-signal: chdir:C debug: default-signal: env0-from:F help:h \
+          ignore-environment: ignore-signal: list-signal-handling: null:h split-string:S unset:u version:h; do
+          if [[ "${env_row%%:*}" == "$env_name" ]]; then
+            env_match=$env_row
+            break
+          fi
+          if [[ "${env_row%%:*}" == "$env_name"* ]]; then
+            if [[ -z "$env_match" ]]; then env_match=$env_row; else env_match="?"; fi
+          fi
+        done
+        case "$env_match" in
+          "" | "?") ;;
+          *:h)
+            # --help and --version print and exit, or fail on an =value, and
+            # --null refuses a command: the words after them never run, as
+            # after `nohup --help`.
+            at_command_start=0
+            token_index=$((token_index + 1))
+            continue
+            ;;
+          *) env_letter=${env_match#*:} ;;
+        esac
         ;;
-      --unset | --unset=*) env_letter=u ;;
-      --c*) env_letter=C ;;
-      --s*) env_letter=S ;;
-      --argv0 | --argv0=*) env_letter=a ;;
-      --env0-from | --env0-from=*) env_letter=F ;;
-      --h* | --v*)
-        # --help and --version, under any prefix getopt_long accepts (no other
-        # GNU env long option starts with h or v), print and exit, or fail on
-        # an =value: the words after them never run, as after `nohup --help`.
-        at_command_start=0
-        token_index=$((token_index + 1))
-        continue
-        ;;
-      --*) ;;
       *)
         env_opts=${current#-}
         while [[ -n "$env_opts" ]]; do
           env_letter=${env_opts:0:1}
           env_opts=${env_opts#?}
           case "$env_letter" in
-            [iv0]) env_letter="" ;;
+            [iv]) env_letter="" ;;
+            0)
+              env_letter=h
+              break
+              ;;
             [uCPSa]) break ;;
             *)
               env_letter="?"
@@ -1462,6 +1481,12 @@ while :; do
               ;;
           esac
         done
+        if [[ "$env_letter" == h ]]; then
+          # -0 anywhere in a short cluster: env runs no command.
+          at_command_start=0
+          token_index=$((token_index + 1))
+          continue
+        fi
         if [[ -n "$env_opts" ]]; then
           env_value=$env_opts
           env_attached=1

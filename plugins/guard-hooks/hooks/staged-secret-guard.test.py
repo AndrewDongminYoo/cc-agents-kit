@@ -472,6 +472,10 @@ env_refused = (
     "env -iC /tmp git commit -m fixture",
     # An option this hook does not know may take the next word.
     "env -x git commit -m fixture", "env --foo git status", "env --bogus git status", "env -L x git status",
+    # A long-option prefix getopt_long finds ambiguous is not resolved.
+    "env --de git status", "env --i git status", "env --ignore- git status", "env --d=x git status",
+    # A unique prefix is read as its option: --e is --env0-from, --a is --argv0.
+    "env --e /tmp/f git commit -m fixture", "env --a git-commit git status",
     # Run under a name starting git-, git takes the rest as its subcommand.
     "env -a git-commit git status", "env -agit-commit git status", "env --argv0=git-commit git status",
     "env --argv0 git-commit git status", "env -va git-commit git status", "env -a /x/git-commit git status",
@@ -516,10 +520,13 @@ for command in (
         check(f"{command} is refused as an indirect commit",
               rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
 env_scanned = (
-    "env -v git commit -m fixture", "env -0 git commit -m fixture", "env - git commit -m fixture",
-    "env --null git commit -m fixture", "env --debug git commit -m fixture",
+    "env -v git commit -m fixture", "env - git commit -m fixture", "env --debug git commit -m fixture",
     "env --ignore-signal=PIPE git commit -m fixture",
-    "env -iv git commit -m fixture", "env -i0v FOO=1 git commit -m fixture",
+    # A unique long-option prefix is that option.
+    "env --deb git commit -m fixture", "env --un=FOO git commit -m fixture", "env --un FOO git commit -m fixture",
+    "env --lis git commit -m fixture", "env --b git commit -m fixture", "env --ignore-e git commit -m fixture",
+    "env --ignore-s=PIPE git commit -m fixture",
+    "env -iv git commit -m fixture",
     "env -iu NAME git commit -m fixture", "env -uNAME git commit -m fixture",
     "env -iP /usr/bin git commit -m fixture", "env -S '' git commit -m fixture",
     "env -a foo git commit -m fixture", "env -afoo git commit -m fixture", "env --argv0=foo git commit -m fixture",
@@ -548,6 +555,13 @@ for command in (
     # --help and --version print and exit: the git after them never runs.
     "env --help git status", "env --version git commit -m fixture",
     "env --he git status", "env --vers git commit -m fixture",
+    # -0 (--null) with a command makes both GNU env and macOS env exit 125
+    # without running it, wherever -0 stands among the options.
+    "env -0 git commit -m fixture", "env --null git commit -m fixture", "env --n git commit -m fixture",
+    "env -i0v FOO=1 git commit -m fixture", "env -iu NAME -0 git commit -m fixture",
+    # A unique long-option prefix is that option.
+    "env --deb git status", "env --un=FOO git status", "env --lis git status", "env --block git status",
+    "env --a foo git status",
     # A redirection after the program, or one before a value with no git
     # ahead of it, leaves nothing to refuse.
     "env FOO=1 git status >out", "env -u FOO git status >out", "env -S 'python3 -u' legit.py >out",
