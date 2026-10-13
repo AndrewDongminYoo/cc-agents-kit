@@ -48,18 +48,24 @@ fi
 # independently so a template token cannot exempt a separate live dotenv token.
 ENV_RE='[/[:space:]"'\''=](\.env(\.[A-Za-z0-9-]+)*)([^A-Za-z0-9_.-]|$)'
 # An attached grep exclusion value of exactly .env* names no file to read, in
-# any command: --exclude=.env*, --exclude='.env*' and --exclude=".env*", each
-# ending at a shell word boundary. The value stays glued to --exclude=, so no
-# later parse (eval, sh -c, a -- before it) can make it a dotenv file operand.
-EXCLUDE_RE='[[:space:]]--exclude(=\.env\*|='\''\.env\*'\''|="\.env\*")([[:space:];&|()<>`]|$)'
-EXCLUDE_MSG="Blocked: an unquoted two-word --exclude .env* lets the shell expand .env* into dotenv file operands. Write --exclude='.env*', --exclude=.env*, --exclude=\".env*\", --exclude '.env*' or --exclude \".env*\". Do not request secret values in chat or copy them to another file."
+# any command, when its * is quoted: --exclude='.env*', --exclude=".env*",
+# --exclude=.env'*', --exclude=.env"*" and --exclude=.env\*, each ending at a
+# shell word boundary. The value stays glued to --exclude=, so no later parse
+# (eval, sh -c, a -- before it) can make it a dotenv file operand. An unquoted
+# --exclude=.env* is refused: the shell expands it against the file names in
+# the directory, so a file named --exclude=.envjunk replaces the exclusion.
+EXCLUDE_RE='[[:space:]]--exclude(='\''\.env\*'\''|="\.env\*"|=\.env'\''\*'\''|=\.env"\*"|=\.env\\\*)([[:space:];&|()<>`]|$)'
+# The unquoted forms refused with EXCLUDE_MSG: two words, or attached and ending
+# at a word boundary as in EXCLUDE_RE, so --exclude=.env*x stays a .env token.
+UNQ_EXCLUDE_RE='(^|[[:space:]])--exclude([[:space:]]+\.env\*|=\.env\*([[:space:];&|()<>`]|$))'
+EXCLUDE_MSG="Blocked: an unquoted * in a --exclude .env* value lets the shell expand it against file names before grep starts, into dotenv file operands (--exclude .env .env.local) or a planted name such as --exclude=.envjunk. Quote the *: --exclude='.env*', --exclude=\".env*\", --exclude '.env*' or --exclude \".env*\". Do not request secret values in chat or copy them to another file."
 # Byte semantics: a multibyte locale makes bash 3.2 convert the whole string on
 # every regex and pattern operation.
 LC_ALL=C
 CMD_RE=$ENV_RE
 SCAN=$COMMAND
 if [[ "$COMMAND" == *--exclude* ]]; then
-  if [[ "$COMMAND" =~ (^|[[:space:]])--exclude[[:space:]]+\.env\* ]]; then
+  if [[ "$COMMAND" =~ $UNQ_EXCLUDE_RE ]]; then
     echo "$EXCLUDE_MSG" >&2
     exit 2
   fi
@@ -91,7 +97,8 @@ if [[ "$COMMAND" == *--exclude* ]]; then
     two='--exclude[[:blank:]]+('\''\.env\*'\''|"\.env\*")'
     # Groups: 1 the commands before, 2 a unit of them, 3 the grep command,
     # 4 its program path, 5 a word, 6-7 inside it, 8 the value, 9 the end.
-    TWO_RE="^(($any|$sq|$dq)*[;&|"$'\n'"])?([[:blank:]]*($c*/)?[ef]?grep([[:blank:]]+$w)*[[:blank:]]+$two)([[:blank:];&|"$'\n'"]|$)"
+    # The program word in any case, as a case-insensitive volume runs GREP.
+    TWO_RE="^(($any|$sq|$dq)*[;&|"$'\n'"])?([[:blank:]]*($c*/)?[EeFf]?[Gg][Rr][Ee][Pp]([[:blank:]]+$w)*[[:blank:]]+$two)([[:blank:];&|"$'\n'"]|$)"
     head=$COMMAND
     tail=''
     while [[ "$head" =~ $TWO_RE ]]; do
@@ -166,7 +173,7 @@ for field in FILE_PATH SCAN SEARCH_PATH; do
     if [[ -z "$env_token" ]]; then
       # The exclusion matches case-sensitively, as grep compares its glob.
       shopt -u nocasematch
-      if [[ "$matched" == *--exclude* && "$matched" == *'.env*'* ]]; then
+      if [[ "$matched" =~ $EXCLUDE_RE ]]; then
         shopt -s nocasematch
         continue
       fi
@@ -188,7 +195,7 @@ done
 
 # Stage 2: a recursive grep, or an rg that reads hidden files, prints dotenv contents
 # without naming a .env token. Block it unless it excludes dotenv files.
-RECURSIVE_MSG="Blocked: a recursive search can print dotenv contents. Exclude dotenv files: grep -r ... --exclude='.env*' (or limit every --include to *.<ext>), and rg with --hidden, -. or -uu, or with a glob or type that can match a dotenv name (-g '*', -t sh) ... -g '!.env*'. Do not request secret values in chat or copy them to another file."
+RECURSIVE_MSG="Blocked: a recursive search can print dotenv contents. Exclude dotenv files: grep -r ... --exclude='.env*' (or limit every --include to *.<ext>), and rg with --hidden, -. or -uu, or with a glob or type that can match a dotenv name (-g '*', -t sh) ... -g '!.env*'. An exclusion counts only when its * is quoted, because the shell expands an unquoted one against file names. Do not request secret values in chat or copy them to another file."
 IGNORE_FILE_MSG="Blocked: an rg --ignore-file can whitelist dotenv files (!.env), and this hook does not read it. Add -g '!.env*' as the last glob. Do not request secret values in chat or copy them to another file."
 SPLIT_MSG="Blocked: env -S (--split-string) builds the command it runs from a string, so this hook cannot check a grep or rg after it for a recursive search that prints dotenv contents. Run grep or rg without env -S. Do not request secret values in chat or copy them to another file."
 # Dotenv suffixes that an --include='*.<ext>' glob would match (.env.local etc.).
@@ -209,9 +216,10 @@ dotenv_glob() {
   ! [[ "$1" =~ ^\*\.([A-Za-z0-9_-]+)$ ]] || dotenv_ext "${BASH_REMATCH[1]}"
 }
 
-# grep-family segment: ARG_WORDS are the words after the program word.
+# grep-family segment: ARG_WORDS are the words after the program word, and
+# ARG_UNQ[j] is 1 when word j holds a * that the shell would expand.
 check_grep() {
-  local n=${#ARG_WORDS[@]} j=0 a v c k cluster eq l
+  local n=${#ARG_WORDS[@]} j=0 a v u c k cluster eq l
   local recursive=0 opt=0 includes=0 last_exclude=0 last_include=0
   while ((j < n)); do
     a=${ARG_WORDS[j]}
@@ -221,16 +229,20 @@ check_grep() {
       --) break ;;
       --recursive | --dereference-recursive | --directories=recurse) recursive=1 ;;
       --exclude=* | --include=* | --exclude | --include | --directories)
+        u=${ARG_UNQ[j - 1]}
         if [[ "$a" == *=* ]]; then
           v=${a#*=}
         elif ((j < n)); then
           v=${ARG_WORDS[j]}
+          u=${ARG_UNQ[j]}
           j=$((j + 1))
         fi
         case "$a" in
           --exclude*)
             opt=$((opt + 1))
-            if [[ "$v" == '.env*' ]]; then
+            # An unquoted * is expanded before grep starts, so a planted file
+            # name can replace the exclusion: it does not count.
+            if [[ "$v" == '.env*' && "$u" == 0 ]]; then
               last_exclude=$opt
             fi
             ;;
@@ -351,12 +363,17 @@ rg_dotenv_glob() {
 
 # rg glob: a positive glob whitelists the files it matches, hidden ones too, and
 # ripgrep lets a later glob override an earlier one, so a later glob that can
-# match a dotenv name re-includes what !.env* excluded.
+# match a dotenv name re-includes what !.env* excluded. $2 is 0 when the word
+# that holds the glob has no unquoted *: the shell expands an unquoted one
+# against file names, so a planted file can replace it, and then !.env* counts
+# as no exclusion.
 rg_glob() {
   last_glob_excludes=0
   if [[ "$1" == '!.env*' ]]; then
-    excluded=1
-    last_glob_excludes=1
+    if [[ "${2-}" == 0 ]]; then
+      excluded=1
+      last_glob_excludes=1
+    fi
   elif [[ "$1" != '!'* ]] && rg_dotenv_glob "$1"; then
     listed=1
     excluded=0
@@ -401,7 +418,7 @@ rg_type_add() {
 # or a glob or type whitelists a dotenv name. The last of --hidden, -., the
 # second -u and --no-hidden wins; a third -u leaves it (ripgrep 15.2.0).
 check_rg() {
-  local n=${#ARG_WORDS[@]} j=0 a v c k cluster
+  local n=${#ARG_WORDS[@]} j=0 a v u c k cluster
   local hidden=0 unrestricted=0 excluded=0 listed=0 ignore_file=0 last_glob_excludes=0 selected='' dotenv_types=' sh all ' t
   while ((j < n)); do
     a=${ARG_WORDS[j]}
@@ -415,10 +432,10 @@ check_rg() {
         unrestricted=$((unrestricted + 1))
         ((unrestricted != 2)) || hidden=1
         ;;
-      --glob=* | --iglob=*) rg_glob "${a#*=}" ;;
+      --glob=* | --iglob=*) rg_glob "${a#*=}" "${ARG_UNQ[j - 1]}" ;;
       --glob | --iglob)
         if ((j < n)); then
-          rg_glob "${ARG_WORDS[j]}"
+          rg_glob "${ARG_WORDS[j]}" "${ARG_UNQ[j]}"
           j=$((j + 1))
         fi
         ;;
@@ -459,14 +476,16 @@ check_rg() {
               ((unrestricted != 2)) || hidden=1
               ;;
             g | e | f | t | T | m | A | B | C | M | E | j | r | d)
+              u=${ARG_UNQ[j - 1]}
               if ((k < ${#cluster})); then
                 v=${cluster:k}
               elif ((j < n)); then
                 v=${ARG_WORDS[j]}
+                u=${ARG_UNQ[j]}
                 j=$((j + 1))
               fi
               case "$c" in
-                g) rg_glob "$v" ;;
+                g) rg_glob "$v" "$u" ;;
                 t) rg_type "$v" ;;
               esac
               break
@@ -575,29 +594,77 @@ check_split() {
   fi
   s=${s//\\[_tnvfrc]/ }
   s=${s//[\'\"\\]/}
+  shopt -s nocasematch
   if [[ "$s" =~ (^|[[:space:]])([^[:space:]]*/)?([ef]?grep|rg)([[:space:]]|$) ]]; then
     echo "$SPLIT_MSG" >&2
     exit 2
   fi
+  shopt -u nocasematch
   while ((j < n)); do
-    case "${SEG_WORDS[j]}" in
-      grep | */grep | egrep | */egrep | fgrep | */fgrep | rg | */rg)
-        echo "$SPLIT_MSG" >&2
-        exit 2
-        ;;
-    esac
+    program_name "${SEG_WORDS[j]}"
+    if [[ -n "$PN" ]]; then
+      echo "$SPLIT_MSG" >&2
+      exit 2
+    fi
     j=$((j + 1))
   done
   return 0
 }
 
-# Find the program word of SEG_WORDS, past NAME=value assignments and runner
-# prefixes with their option values, and inspect a grep or rg invocation.
+# Bash finds an external program through PATH, and the default APFS volume is
+# case-insensitive, so GREP, /usr/bin/GREP and SUDO run grep and sudo there.
+# Words are matched in any case only where bash looks them up on PATH: exec and
+# builtin are builtins with no executable, so EXEC is not found, and the shell
+# words (if, do, !) are keywords only in lower case. command and time are also
+# /usr/bin/command and /usr/bin/time, so COMMAND and TIME run (macOS bash 3.2).
+# Patterns, not ${word##*/}: bash strips ## by trying every prefix length,
+# which is quadratic on a long word. nocasematch is off again on return, so
+# option parsing stays case-sensitive.
+# PN is grep or rg for a grep-family or rg program word $1, or ''.
+program_name() {
+  PN=''
+  shopt -s nocasematch
+  case "$1" in
+    grep | */grep | egrep | */egrep | fgrep | */fgrep) PN='grep' ;;
+    rg | */rg) PN='rg' ;;
+  esac
+  shopt -u nocasematch
+  return 0
+}
+
+# RN is the runner that word $1 names, in lower case, or ''. Homebrew installs
+# the GNU tools with a g prefix.
+runner_name() {
+  RN=''
+  case "$1" in
+    exec | builtin)
+      RN=$1
+      return 0
+      ;;
+  esac
+  shopt -s nocasematch
+  case "$1" in
+    command | */command) RN='command' ;;
+    env | */env | genv | */genv) RN='env' ;;
+    nohup | */nohup | gnohup | */gnohup) RN='nohup' ;;
+    time | */time | gtime | */gtime) RN='time' ;;
+    xargs | */xargs | gxargs | */gxargs) RN='xargs' ;;
+    sudo | */sudo) RN='sudo' ;;
+    nice | */nice | gnice | */gnice) RN='nice' ;;
+    timeout | */timeout | gtimeout | */gtimeout) RN='timeout' ;;
+  esac
+  shopt -u nocasematch
+  return 0
+}
+
+# Find the program word of SEG_WORDS, past assignments (NAME=value, NAME+=value,
+# NAME[subscript]=value, NAME[subscript]+=value) and runner prefixes with
+# their option values, and inspect a grep or rg invocation.
 check_segment() {
   local n=${#SEG_WORDS[@]} i=$SEG_BASE j w v prefixed=0 runner='' duration=0
   while ((i < n)); do
     w=${SEG_WORDS[i]}
-    if [[ "$w" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+    if [[ "$w" =~ $P_ASSIGN ]]; then
       i=$((i + 1))
       continue
     fi
@@ -608,30 +675,6 @@ check_segment() {
       continue
     fi
     case "$w" in
-      command | builtin | exec | env | nohup | time | xargs | sudo | nice | timeout \
-        | */env | */nohup | */time | */xargs | */sudo | */nice | */timeout \
-        | genv | */genv | gnohup | */gnohup | gtime | */gtime | gxargs | */gxargs \
-        | gnice | */gnice | gtimeout | */gtimeout)
-        prefixed=1
-        # Patterns, not ${w##*/}, as for the program word below. Homebrew
-        # installs the GNU tools with a g prefix.
-        case "$w" in
-          env | */env | genv | */genv) runner='env' ;;
-          nohup | */nohup | gnohup | */gnohup) runner='nohup' ;;
-          time | */time | gtime | */gtime) runner='time' ;;
-          xargs | */xargs | gxargs | */gxargs) runner='xargs' ;;
-          */sudo) runner='sudo' ;;
-          nice | */nice | gnice | */gnice) runner='nice' ;;
-          timeout | */timeout | gtimeout | */gtimeout) runner='timeout' ;;
-          *) runner=$w ;;
-        esac
-        # timeout's first operand is a duration, not the command.
-        [[ "$runner" != timeout ]] || duration=1
-        ;;
-      '!' | '{' | if | then | elif | else | while | until | do)
-        prefixed=1
-        runner=''
-        ;;
       -*)
         ((prefixed)) || break
         runner_option "$runner" "$w" "${SEG_WORDS[i + 1]-}"
@@ -642,48 +685,61 @@ check_segment() {
         fi
         ((!RO_SPLIT)) || check_split "$v" $((i + 1)) "$n"
         ;;
+      '!' | '{' | if | then | elif | else | while | until | do)
+        prefixed=1
+        runner=''
+        ;;
       *)
-        ((duration)) || break
-        duration=0
+        runner_name "$w"
+        if [[ -n "$RN" ]]; then
+          prefixed=1
+          runner=$RN
+          # timeout's first operand is a duration, not the command.
+          [[ "$runner" != timeout ]] || duration=1
+        else
+          ((duration)) || break
+          duration=0
+        fi
         ;;
     esac
     i=$((i + 1))
   done
   if ((i < n)); then
-    # Patterns, not ${word##*/}: bash strips ## by trying every prefix length,
-    # which is quadratic on a long word.
-    case "${SEG_WORDS[i]}" in
-      grep | */grep | egrep | */egrep | fgrep | */fgrep | rg | */rg)
-        # The program's arguments without redirections: the shell takes a
-        # redirection and its target out of the argument list wherever it
-        # stands, so grep -r KEY . > --include=*.ts has no --include.
-        ARG_WORDS=()
-        j=$((i + 1))
-        while ((j < n)); do
-          if ((SEG_REDIR[j])); then
-            j=$((j + SEG_REDIR[j]))
-            continue
-          fi
-          ARG_WORDS[${#ARG_WORDS[@]}]=${SEG_WORDS[j]}
-          j=$((j + 1))
-        done
-        case "${SEG_WORDS[i]}" in
-          rg | */rg) check_rg ;;
-          *) check_grep ;;
-        esac
-        ;;
-    esac
+    program_name "${SEG_WORDS[i]}"
+    if [[ -n "$PN" ]]; then
+      # The program's arguments without redirections: the shell takes a
+      # redirection and its target out of the argument list wherever it
+      # stands, so grep -r KEY . > --include=*.ts has no --include.
+      ARG_WORDS=()
+      ARG_UNQ=()
+      j=$((i + 1))
+      while ((j < n)); do
+        if ((SEG_REDIR[j])); then
+          j=$((j + SEG_REDIR[j]))
+          continue
+        fi
+        ARG_WORDS[${#ARG_WORDS[@]}]=${SEG_WORDS[j]}
+        ARG_UNQ[${#ARG_UNQ[@]}]=${SEG_UNQ[j]}
+        j=$((j + 1))
+      done
+      if [[ "$PN" == rg ]]; then
+        check_rg
+      else
+        check_grep
+      fi
+    fi
   fi
   # Drop this segment's words; the words of an enclosing command stay below
   # SEG_BASE. unset, not a slice: an empty slice is unbound under set -u in 3.2.
   if ((SEG_BASE == 0)); then
     SEG_WORDS=()
     SEG_REDIR=()
+    SEG_UNQ=()
     return 0
   fi
   while ((n > SEG_BASE)); do
     n=$((n - 1))
-    unset "SEG_WORDS[n]" "SEG_REDIR[n]"
+    unset "SEG_WORDS[n]" "SEG_REDIR[n]" "SEG_UNQ[n]"
   done
   return 0
 }
@@ -715,8 +771,13 @@ push_word() {
   fi
   SEG_WORDS[${#SEG_WORDS[@]}]=$word
   SEG_REDIR[${#SEG_REDIR[@]}]=$redir
+  SEG_UNQ[${#SEG_UNQ[@]}]=$unq
+  # In any case, as a case-insensitive volume runs BASH (see program_name).
   case "$word" in
-    sh | */sh | bash | */bash | zsh | */zsh | dash | */dash | ksh | */ksh | ssh | */ssh) line_shell=1 ;;
+    [Ss][Hh] | */[Ss][Hh] | [Bb][Aa][Ss][Hh] | */[Bb][Aa][Ss][Hh] | [Zz][Ss][Hh] | */[Zz][Ss][Hh] \
+      | [Dd][Aa][Ss][Hh] | */[Dd][Aa][Ss][Hh] | [Kk][Ss][Hh] | */[Kk][Ss][Hh] | [Ss][Ss][Hh] | */[Ss][Ss][Hh])
+      line_shell=1
+      ;;
   esac
   if [[ -n "$hd_next" ]]; then
     add_heredoc "$hd_next" "$word" "$raw"
@@ -752,12 +813,14 @@ open_subst() {
   depth=$((depth + 1))
   D_WORD[depth]=$word
   D_RAW[depth]=$raw
+  D_UNQ[depth]=$unq
   D_OPEN[depth]=$1
   D_PAREN[depth]=0
   D_BASE[depth]=$SEG_BASE
   SEG_BASE=${#SEG_WORDS[@]}
   word=''
   raw=''
+  unq=0
   in_word=0
   return 0
 }
@@ -772,6 +835,7 @@ close_subst() {
   SEG_BASE=${D_BASE[depth]}
   word="${D_WORD[depth]}()"
   raw=${D_RAW[depth]}
+  unq=${D_UNQ[depth]}
   in_word=1
   depth=$((depth - 1))
   return 0
@@ -880,8 +944,15 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
   # that keeps it in the same word: only an fd number or {name} (2>, {fd}>).
   P_OP='^(<<<|<<-|<<|<>|<&|>&|>>|>\||&>>|&>|<|>)'
   P_FD_PREFIX='^([0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?[<>&|]*$'
+  # An assignment before the program: NAME=value, NAME+=value,
+  # NAME[subscript]=value or NAME[subscript]+=value.
+  P_ASSIGN='^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?='
   SEG_WORDS=()
   SEG_REDIR=()
+  # SEG_UNQ[i] is 1 when word i holds a * outside quotes, which the shell
+  # expands against file names; unq is that flag for the word being read.
+  SEG_UNQ=()
+  unq=0
   # Words of the commands that enclose an open $(...), <(...) or backtick sit
   # below SEG_BASE; D_* save the enclosing word at each depth.
   SEG_BASE=0
@@ -889,6 +960,7 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
   substs=0
   D_WORD=()
   D_RAW=()
+  D_UNQ=()
   D_OPEN=()
   D_PAREN=()
   D_BASE=()
@@ -1012,6 +1084,9 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
         else
           word+=$m
         fi
+        # Only a plain chunk holds an unquoted *; a quoted or escaped one is
+        # read by the other branches.
+        [[ "$m" != *\** ]] || unq=1
         in_word=1
       elif [[ "$win" == [\<\>]* || "$win" == '&>'* ]]; then
         # The shell ends a word at an unquoted < or > (or &>), so grep</dev/null
@@ -1021,6 +1096,7 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
           push_word
           word=''
           raw=''
+          unq=0
         fi
         [[ "$win" =~ $P_OP ]]
         m=${BASH_REMATCH[0]}
@@ -1058,6 +1134,7 @@ if [[ -n "$COMMAND" && ${#COMMAND} -le 65536 && "$COMMAND" =~ (^|[^A-Za-z0-9_-])
           fi
           word=''
           raw=''
+          unq=0
           in_word=0
           # A plain parenthesis inside $(...) opens or closes a subshell, so the
           # ) that matches it does not end the substitution.

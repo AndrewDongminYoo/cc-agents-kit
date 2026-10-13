@@ -133,14 +133,25 @@ RECURSIVE = [
     # --- grep: accepted exclusions ---
     (0, "--exclude='.env*'", "grep -rn API_KEY /tmp/some-repo --exclude='.env*'"),
     (0, '--exclude=".env*"', 'grep -rn API_KEY . --exclude=".env*"'),
-    (0, "--exclude=.env* unquoted", "grep -rn API_KEY . --exclude=.env*"),
     (0, "--exclude '.env*' as two words", "grep -rn API_KEY . --exclude '.env*'"),
     (0, '--exclude ".env*" as two words', 'grep -rn API_KEY . --exclude ".env*"'),
+    # #56: an exclusion counts only when its * is quoted. Unquoted, bash
+    # expands --exclude=.env* against a planted file named --exclude=.envjunk.
+    (2, "--exclude=.env* unquoted (#56)", "grep -rn API_KEY . --exclude=.env*"),
+    (2, "unquoted attached exclusion in a non-recursive grep", "grep -n KEY a.txt --exclude=.env*"),
+    (2, "unquoted attached exclusion in any command", "tar czf out.tgz --exclude=.env* src"),
+    (0, "--exclude=.env'*' quotes the *", "grep -rn API_KEY . --exclude=.env'*'"),
+    (0, '--exclude=.env"*" quotes the *', 'grep -rn API_KEY . --exclude=.env"*"'),
+    (0, "--exclude=.env\\* escapes the *", "grep -rn API_KEY . --exclude=.env\\*"),
+    (0, "a quoted * after a split .env still counts", "grep -rn API_KEY . --exclude=.e'nv*'"),
+    # No contiguous .env token for the first stage, so the second reads the quotes.
+    (2, "an unquoted * after a quoted part of .env", 'grep -rn API_KEY . --exclude=.e"nv"*'),
+    (2, "an unquoted * in a two-word value", "grep -rn API_KEY . --exclude .e'nv'*"),
     # Unquoted as two words, the shell expands .env* into dotenv file operands.
     (2, "--exclude .env* as two unquoted words", "grep -rn API_KEY . --exclude .env*"),
     (2, "--exclude .env* as two unquoted words, before the pattern", "grep --exclude .env* -rn KEY ."),
     (2, "an accepted exclusion leaves a separate .env operand", "grep -rn KEY . --exclude '.env*' .env"),
-    (2, "an attached exclusion leaves a separate .env.local operand", "grep -rn KEY . --exclude=.env* .env.local"),
+    (2, "an attached exclusion leaves a separate .env.local operand", "grep -rn KEY . --exclude='.env*' .env.local"),
     (2, "the accepted exclusion is case-sensitive", "grep -rn KEY . --exclude='.ENV*'"),
     (2, "a live dotenv token in another case", "cat .ENV"),
     (0, "an exclusion value names no file in any command", "tar czf out.tgz --exclude='.env*' src"),
@@ -214,7 +225,19 @@ RECURSIVE = [
     (0, "rg -uu --glob='!.env*'", "rg -uu --glob='!.env*' KEY ."),
     (0, "rg -. --glob '!.env*'", "rg -. --glob '!.env*' KEY ."),
     (0, "rg --hidden --iglob='!.env*'", "rg --hidden --iglob='!.env*' KEY ."),
-    (0, "rg --hidden -g!.env* bundled", "rg --hidden -g!.env* KEY ."),
+    # #56: an unquoted * lets a planted file named -g!.envjunk replace the
+    # glob, so the search is judged as if no exclusion were given.
+    (2, "rg --hidden -g!.env* bundled, unquoted (#56)", "rg --hidden -g!.env* KEY ."),
+    (2, "rg --hidden -g !.env* unquoted", "rg --hidden -g !.env* KEY ."),
+    (2, "rg --hidden --glob=!.env* unquoted", "rg --hidden --glob=!.env* KEY ."),
+    (2, "rg --hidden --glob !.env* unquoted", "rg --hidden --glob !.env* KEY ."),
+    (2, "rg --hidden --iglob=!.env* unquoted", "rg --hidden --iglob=!.env* KEY ."),
+    (2, "rg -uu -g!.env* unquoted in a cluster", "rg -uug!.env* KEY ."),
+    (0, "rg --hidden -g'!.env*' bundled, quoted", "rg --hidden -g'!.env*' KEY ."),
+    (0, 'rg --hidden -g"!.env*" bundled, quoted', 'rg --hidden -g"!.env*" KEY .'),
+    (0, "rg --hidden -g!.env\\* escaped", "rg --hidden -g!.env\\* KEY ."),
+    (0, "rg --hidden --iglob '!.env*' as two words", "rg --hidden --iglob '!.env*' KEY ."),
+    (0, "an unquoted rg exclusion without --hidden reads no hidden file", "rg -g!.env* KEY ."),
     # ripgrep lets a later glob override an earlier one.
     (2, "rg: a later -g '*' re-includes dotenv", "rg --hidden KEY . -g '!.env*' -g '*'"),
     (2, "rg: a later --glob=*.local re-includes", "rg -uu --glob='!.env*' --glob='*.local' KEY ."),
@@ -350,7 +373,7 @@ RECURSIVE = [
     (0, "2>&1 keeps a later exclusion", "grep -r KEY . 2>&1 --exclude='.env*'"),
     (0, "{fd}> keeps a later exclusion", "grep -r KEY . {fd}>out --exclude='.env*'"),
     (0, "> attached to the exclusion value", "grep -r KEY . --exclude='.env*'>out"),
-    (2, "> attached to the exclusion value still leaves cat .env", "grep -r KEY . --exclude=.env*>out; cat .env"),
+    (2, "> attached to the exclusion value still leaves cat .env", "grep -r KEY . --exclude='.env*'>out; cat .env"),
     (0, "a quoted heredoc attached to cat is data", "cat<<'EOF'\ngrep -r KEY .\nEOF"),
     # --- rg --iglob excludes case variants too ---
     (0, "rg --iglob '!.env*'", "rg --hidden --iglob '!.env*' KEY ."),
@@ -375,6 +398,8 @@ RECURSIVE = [
     (2, "rg --ignore-file=", "rg --ignore-file=x KEY ."),
     (0, "rg --ignore-file with the exclusion last", "rg --ignore-file x KEY . -g '!.env*'"),
     (0, "rg --ignore-file= with --glob= exclusion", "rg --ignore-file=x --glob='!.env*' KEY ."),
+    (2, "rg --ignore-file with an unquoted last-glob exclusion", "rg --ignore-file x KEY . -g !.env*"),
+    (2, "rg --ignore-file with an unquoted --glob= exclusion", "rg --ignore-file=x --glob=!.env* KEY ."),
     (2, "rg --ignore-file with a later dotenv-capable glob", "rg --ignore-file x -g '!.env*' -g '*' KEY ."),
     # The exclusion must be the last glob: the ignore file is unseen, and *.ts reads .env.production.ts.
     (2, "rg --ignore-file with any later glob", "rg --ignore-file x -g '!.env*' -g '*.ts' KEY ."),
@@ -506,6 +531,47 @@ RECURSIVE += [
     (2, "gxargs runner", "gxargs -n 1 grep -r SECRET ."),
     (2, "gtime runner", "gtime -o out grep -r SECRET ."),
     (2, "genv -S", "genv -S 'grep -r SECRET .'"),
+    # #58: every bash assignment form before the program is skipped.
+    (2, "NAME+=value before grep -r", "X+=x grep -r SECRET ."),
+    (2, "NAME[subscript]=value before grep -r", "A[0]=x grep -r SECRET ."),
+    (2, "NAME[subscript]+=value before grep -r", "A[0]+=x grep -r SECRET ."),
+    (2, "a quoted subscript before grep -r", "A['k y']=x grep -r SECRET ."),
+    (2, "NAME+=value after a runner", "env X+=1 grep -r SECRET ."),
+    (2, "NAME[subscript]=value between runners", "sudo -u root A[1]=y nice grep -r SECRET ."),
+    (0, "NAME=value before a non-recursive grep", "X=x grep -n SECRET a.txt"),
+    (0, "NAME+=value before a non-recursive grep", "X+=x grep -n SECRET a.txt"),
+    (0, "NAME[subscript]=value before a non-recursive grep", "A[0]=x grep -n SECRET a.txt"),
+    (0, "NAME[subscript]+=value before a non-recursive grep", "A[0]+=x grep -n SECRET a.txt"),
+    # #59: a case-insensitive volume runs GREP as grep, so program and runner
+    # names that bash looks up on PATH match in any case.
+    (2, "GREP -r", "GREP -r SECRET ."),
+    (2, "/usr/bin/GREP -r", "/usr/bin/GREP -r SECRET ."),
+    (2, "EGrep -r", "EGrep -r SECRET ."),
+    (2, "Rg --hidden", "Rg --hidden SECRET ."),
+    (2, "/OPT/HOMEBREW/BIN/RG -uu", "/OPT/HOMEBREW/BIN/RG -uu SECRET ."),
+    (2, "TIMEOUT keeps the duration", "TIMEOUT 5 grep -r SECRET ."),
+    (2, "SUDO keeps its option values", "SUDO -u root grep -r SECRET ."),
+    (2, "/USR/BIN/ENV with an upper-case grep", "/USR/BIN/ENV -u HOME GREP -r SECRET ."),
+    (2, "Xargs runner", "find . | Xargs -n 1 grep -r SECRET"),
+    (2, "GNice runner", "GNice -n 5 grep -r SECRET ."),
+    (2, "COMMAND runs /usr/bin/command", "COMMAND grep -r SECRET ."),
+    (2, "/usr/bin/command runner", "/usr/bin/command grep -r SECRET ."),
+    (2, "/USR/BIN/COMMAND runner", "/USR/BIN/COMMAND grep -r SECRET ."),
+    (2, "TIME runs /usr/bin/time", "TIME -o out grep -r SECRET ."),
+    (2, "NOHUP runner", "NOHUP grep -r SECRET ."),
+    (2, "an upper-case runner before an upper-case grep", "SUDO GREP -r SECRET ."),
+    (0, "an upper-case grep with a quoted two-word exclusion", "GREP -rn KEY --exclude '.env*' ."),
+    (0, "an upper-case non-recursive grep", "GREP -n SECRET a.txt"),
+    # exec and builtin have no executable on PATH, so EXEC and BUILTIN are not
+    # found, and IF is a command name, not the keyword.
+    (0, "EXEC is not the exec builtin", "EXEC -a grep ls -r"),
+    (0, "IF is not a keyword", "IF grep -r SECRET ."),
+    # Option letters keep their case: -E is not -e, -U is not -u.
+    (2, "GREP -E does not take -r as its value", "GREP -E -r KEY ."),
+    (2, "GREP -R is recursive", "GREP -R KEY ."),
+    (0, "Rg -U -u is one -u, not two", "Rg -U -u KEY ."),
+    (2, "Rg -u -u is two", "Rg -u -u KEY ."),
+    (2, "a quoted BASH heredoc is run", "BASH <<'EOF'\ngrep -rn KEY .\nEOF"),
 ]
 
 # env -S splits a string into words that env parses again; the hook refuses a
@@ -525,6 +591,8 @@ SPLIT_CASES = [
     (2, "env -S value over 1 KiB", "env -S '" + "x " * 600 + "' grep -n KEY a.txt"),
     (2, "env -S even with a non-recursive grep", "env -S 'grep -n KEY a.txt'"),
     (2, "env -S behind sudo", "sudo -u root env -S 'grep -r SECRET .'"),
+    (2, "ENV -S with an upper-case grep in the value", "ENV -S 'GREP -r SECRET .'"),
+    (2, "env -S with an upper-case rg after it", "env -S '-u HOME' RG --hidden SECRET ."),
     (0, "env -S of another program", "env -S 'echo hi' ls -r"),
     (0, "env -S with no grep in the segment", "env -S '-i' ls; echo grep"),
 ]
@@ -562,19 +630,60 @@ print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  recursive re
 
 DOTENV_MSG = "Blocked: dotenv path"
 
-# The two-word refusal names every accepted exclusion form.
+# The refusal of an unquoted .env* exclusion, two-word or attached (#56), names
+# every accepted form, each with its * quoted, and offers no unquoted one.
+for label, command in (
+    ("two-word", "grep -rn KEY . --exclude .env*"),
+    ("attached", "grep -rn KEY . --exclude=.env*"),
+):
+    proc = subprocess.run(
+        ["/bin/bash", HOOK],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+        capture_output=True,
+        text=True,
+    )
+    ok = (
+        proc.returncode == 2
+        and "Quote the *" in proc.stderr
+        and all(
+            form in proc.stderr
+            for form in ("--exclude='.env*'", '--exclude=".env*"', "--exclude '.env*'", '--exclude ".env*"')
+        )
+        and "--exclude=.env*" not in proc.stderr
+    )
+    fails += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  unquoted {label} refusal names only quoted forms")
+
+# An unquoted attached value gets the quoting refusal only when it ends at a word
+# boundary; a longer value such as .env*x stays a .env token, since quoting its *
+# would not make it pass.
+for want_quote, command in (
+    (True, "grep -r KEY . --exclude=.env*>out"),
+    (True, "grep -r KEY . --exclude=.env*;"),
+    (False, "grep -r KEY . --exclude=.env*x"),
+    (False, "grep -r KEY . --exclude=.env*.bak"),
+):
+    proc = subprocess.run(
+        ["/bin/bash", HOOK],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+        capture_output=True,
+        text=True,
+    )
+    ok = proc.returncode == 2 and ("Quote the *" in proc.stderr) == want_quote
+    ok = ok and (DOTENV_MSG in proc.stderr) != want_quote
+    fails += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  {'quoting' if want_quote else 'dotenv token'} refusal for {command}")
+
+# An unquoted rg exclusion counts as none, and the refusal says the * must be quoted.
 proc = subprocess.run(
     ["/bin/bash", HOOK],
-    input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "grep -rn KEY . --exclude .env*"}}),
+    input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "rg --hidden -g!.env* KEY ."}}),
     capture_output=True,
     text=True,
 )
-ok = proc.returncode == 2 and all(
-    form in proc.stderr
-    for form in ("--exclude='.env*'", "--exclude=.env*", '--exclude=".env*"', "--exclude '.env*'", '--exclude ".env*"')
-)
+ok = proc.returncode == 2 and "-g '!.env*'" in proc.stderr and "only when its * is quoted" in proc.stderr
 fails += not ok
-print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  two-word refusal names every accepted exclusion form")
+print(f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  unquoted rg exclusion refusal names the quoted form")
 
 # A quoted two-word value refused outside a grep command points at the attached form.
 proc = subprocess.run(
