@@ -82,7 +82,8 @@ refuse_commit_ahead() {
 
 # Where the program itself cannot be placed (the name exec -a gives it, a
 # process substitution before it), a git or a program this hook cannot read
-# anywhere later in the same command is refused, over the same span.
+# anywhere later in the same command is refused, over the same span. With a
+# second argument, only a git named outright is.
 refuse_git_ahead() {
   local ahead depth=0
   for ((ahead = $1; ahead < token_count; ahead++)); do
@@ -93,7 +94,7 @@ refuse_git_ahead() {
       # git with a redirection glued on (`git>/dev/null`) is git too.
       git | */git | git[\<\>]* | */git[\<\>]*) block_unparsed ;;
     esac
-    [[ -z "${TOKEN_EXPANSION[ahead]-}" || "${TOKEN_EXPANSION[ahead]}" == literal ]] || block_unparsed
+    [[ -n "${2-}" || -z "${TOKEN_EXPANSION[ahead]-}" || "${TOKEN_EXPANSION[ahead]}" == literal ]] || block_unparsed
   done
 }
 
@@ -1092,6 +1093,19 @@ env_prefix=""
 exec_prefix=""
 runner_risk=""
 runner_appends=""
+# An env option value that runs into a command substitution (`env -C "$(pwd)"
+# git commit`) is still that value: the substitution is read as a command of
+# its own, and on closing it restores env and its option state. Its marker on
+# paren_stack: e for env alone, E with runner_risk, A with runner_appends too.
+env_value_subst=""
+env_value_continues=""
+env_restore=""
+note_env_value_subst() {
+  env_value_subst=e
+  [[ -z "$runner_risk" ]] || env_value_subst=E
+  [[ -z "$runner_appends" ]] || env_value_subst=A
+  return 0
+}
 # `command` runs a builtin or a program, never a shell function, so a name behind
 # it is not looked up among the functions defined below.
 function_lookup=1
@@ -1187,15 +1201,30 @@ while :; do
     resume=1
     cmdword_continues=""
     assignment_continues=""
+    env_value_continues=""
+    env_restore=""
     case "$current" in
       "$BOUNDARY_PREFIX(") paren_stack="${paren_stack}p" ;;
-      "$BOUNDARY_PREFIX\$(") paren_stack="${paren_stack}${at_command_start}" ;;
+      "$BOUNDARY_PREFIX\$(")
+        if [[ -n "$env_value_subst" ]]; then
+          paren_stack="${paren_stack}${env_value_subst}"
+          env_value_subst=""
+        else
+          paren_stack="${paren_stack}${at_command_start}"
+        fi
+        ;;
       "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+")
         opener="${paren_stack#"${paren_stack%?}"}"
         paren_stack="${paren_stack%?}"
         case "$opener" in
           0) resume=0 ;;
           1) [[ "$current" != "$BOUNDARY_PREFIX\$)+" ]] || assignment_continues=1 ;;
+          # An env option value that ran into this substitution: env and what
+          # its options set so far still hold once it closes.
+          [eEA])
+            env_restore=$opener
+            [[ "$current" != "$BOUNDARY_PREFIX\$)+" ]] || env_value_continues=1
+            ;;
           c)
             resume=0
             if [[ "$current" == "$BOUNDARY_PREFIX\$)+" ]]; then
@@ -1215,10 +1244,22 @@ while :; do
     runner_risk=""
     runner_appends=""
     function_lookup=1
+    if [[ -n "$env_restore" ]]; then
+      env_prefix=1
+      [[ "$env_restore" == e ]] || runner_risk=1
+      [[ "$env_restore" != A ]] || runner_appends=1
+    fi
     if ((scan_start < 0)); then
       token_index=$((token_index + 1))
       continue
     fi
+  elif [[ -n "$env_value_continues" ]]; then
+    # The rest of the env option value in `-C "$(pwd)"x`: the word after it is
+    # still env's, unless another substitution continues the value.
+    env_value_continues=""
+    [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX\$(" ]] || note_env_value_subst
+    token_index=$((token_index + 1))
+    continue
   elif [[ -n "$assignment_continues" ]]; then
     # The rest of `out=$(date)x`: still the assignment, so the next word is still
     # the command.
@@ -1371,45 +1412,129 @@ while :; do
     token_index=$((token_index + 1))
     continue
   fi
-  if ((at_command_start)) && [[ -n "$env_prefix" ]]; then
+  if ((at_command_start)) && [[ -n "$env_prefix" && "$current" == -* ]]; then
+    if [[ "$current" == -- ]]; then
+      env_prefix=""
+      token_index=$((token_index + 1))
+      continue
+    fi
+    # Which option this word is, as the letter of its short form: "" for one
+    # that takes no value, ? for one this hook does not know. -i, -0 and -v
+    # (and a lone -, which is -i) take nothing; -u, -C, -P, -S and -a take a
+    # value, the rest of a short cluster (`-uNAME`, `-iuNAME`) or after = in a
+    # long option, else the next word. F stands for --env0-from, which has no
+    # short form. --chdir and --split-string are read under any prefix
+    # getopt_long accepts: no other GNU env long option starts with c or s.
+    env_letter="?"
+    env_value=""
+    env_attached=""
     case "$current" in
-      -i | --ignore-environment)
-        token_index=$((token_index + 1))
-        continue
+      - | --ignore-environment | --null | --debug | --list-signal-handling \
+        | --block-signal | --block-signal=* | --default-signal | --default-signal=* \
+        | --ignore-signal | --ignore-signal=*)
+        env_letter=""
         ;;
-      -u | --unset)
-        if ((token_index + 1 < token_count)) && [[ "${TOKENS[token_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
-          token_index=$((token_index + 2))
-          continue
-        fi
-        ;;
-      -u?* | --unset=*)
-        token_index=$((token_index + 1))
-        continue
-        ;;
-      --)
-        env_prefix=""
-        token_index=$((token_index + 1))
-        continue
-        ;;
-      # -C (--chdir, under any prefix getopt_long accepts: no other GNU env
-      # long option starts with c) and -P take a value, as the next word or
-      # attached. -C runs the program in another directory, so this index is
-      # not the one a commit there would record: a visible commit is refused,
-      # as through sudo. -P only picks where the program is found.
-      -C?* | --c*=* | -P?*)
-        [[ "$current" == -P* ]] || runner_risk=1
-        token_index=$((token_index + 1))
-        continue
-        ;;
-      -C | --c* | -P)
-        if ((token_index + 1 < token_count)) && [[ "${TOKENS[token_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
-          [[ "$current" == -P ]] || runner_risk=1
-          token_index=$((token_index + 2))
-          continue
+      --unset | --unset=*) env_letter=u ;;
+      --c*) env_letter=C ;;
+      --s*) env_letter=S ;;
+      --argv0 | --argv0=*) env_letter=a ;;
+      --env0-from | --env0-from=*) env_letter=F ;;
+      --*) ;;
+      *)
+        env_opts=${current#-}
+        while [[ -n "$env_opts" ]]; do
+          env_letter=${env_opts:0:1}
+          env_opts=${env_opts#?}
+          case "$env_letter" in
+            [iv0]) env_letter="" ;;
+            [uCPSa]) break ;;
+            *)
+              env_letter="?"
+              break
+              ;;
+          esac
+        done
+        if [[ -n "$env_opts" ]]; then
+          env_value=$env_opts
+          env_attached=1
         fi
         ;;
     esac
+    if [[ "$current" == --*=* ]]; then
+      env_value=${current#*=}
+      env_attached=1
+    fi
+    if [[ -z "$env_letter" ]]; then
+      token_index=$((token_index + 1))
+      continue
+    fi
+    # An option this hook does not know may take the next word, so the program
+    # cannot be placed: a git, or a program this hook cannot read, is refused.
+    [[ "$env_letter" != "?" ]] || refuse_git_ahead "$token_index"
+    env_value_index=$token_index
+    if [[ -z "$env_attached" ]]; then
+      env_value_index=$((token_index + 1))
+      env_value=${TOKENS[env_value_index]-}
+    fi
+    # A value that is missing makes env fail: the word is read as before.
+    if [[ "$env_letter" != "?" ]] && ((env_value_index < token_count)) && [[ "$env_value" != "$BOUNDARY_PREFIX"* ]]; then
+      env_value_kind=${TOKEN_EXPANSION[env_value_index]-}
+      [[ "$env_value_kind" != literal ]] || env_value_kind=""
+      case "$env_letter" in
+        # -C runs the program in another directory, so this index is not the
+        # one a commit there would record, and --env0-from reads variables,
+        # GIT_* among them, from a file: a visible commit is refused, as
+        # through sudo. -u and -P (which only picks where the program is
+        # found) leave the commit to be scanned.
+        C | F) runner_risk=1 ;;
+        a)
+          # Run under a name starting git-, git takes the rest as its
+          # subcommand, so `env -a git-commit git status` commits, as with
+          # exec -a.
+          if [[ -n "$env_value_kind" || "$env_value" == *[\<\>]* || "$env_value" == git-* || "${env_value##*/}" == git-* ]]; then
+            refuse_git_ahead "$((env_value_index + 1))"
+          fi
+          ;;
+        S)
+          # -S splits its value into words and runs them, with the words after
+          # it as arguments. A git among them is refused. Only whole words
+          # count: `legit.py` names no git. Quote characters are dropped, and
+          # \_ and \c (which ends the string) are read as spaces, which can
+          # only add words.
+          env_split=${env_value//\\_/ }
+          env_split=${env_split//\\c/ }
+          env_split=${env_split//[\'\"]/}
+          ENV_WORDS=()
+          IFS=$' \t\n' read -r -d '' -a ENV_WORDS <<<"$env_split" || true
+          for env_word in ${ENV_WORDS[@]+"${ENV_WORDS[@]}"}; do
+            [[ "$env_word" != git && "$env_word" != */git ]] || block_unparsed
+          done
+          token_index=$((env_value_index + 1))
+          # An empty string adds no words: the next word is still env's.
+          ((${#ENV_WORDS[@]} > 0)) || continue
+          # A string that starts with an option or an assignment leaves the
+          # program to the words after it, and one whose first word holds an
+          # expansion (the shell's, or env's own ${NAME}) names a program this
+          # hook cannot read. As after any such program, a git after the
+          # string, or a commit in or after it, is refused.
+          case "${ENV_WORDS[0]}" in
+            -* | *=* | *[\$\`]*)
+              for env_word in "${ENV_WORDS[@]}"; do
+                [[ "$env_word" != commit ]] || block_indirect_commit
+              done
+              refuse_git_ahead "$token_index" named
+              indirect=1
+              refuse_commit_ahead "$token_index"
+              ;;
+          esac
+          at_command_start=0
+          continue
+          ;;
+      esac
+      token_index=$((env_value_index + 1))
+      [[ "${TOKENS[token_index]-}" != "$BOUNDARY_PREFIX\$(" ]] || note_env_value_subst
+      continue
+    fi
   fi
   # A function definition: `name() {`, `function name {` or `function name() {`,
   # with any newlines before the brace. Record the body and step over all of it;

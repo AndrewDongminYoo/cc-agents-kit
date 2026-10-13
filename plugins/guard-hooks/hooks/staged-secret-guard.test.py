@@ -456,6 +456,83 @@ for command in (
     rc, err = check_hook(command, runner_repo)
     check(f"{command} without a commit is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
 
+# The rest of env's options (#61). Each command below is refused before the
+# index is read, so a clean index is refused too; the scanned ones block only
+# the credential; the preserved ones pass with the credential staged.
+env_refused = (
+    # -S splits its value into words and runs them: a git among them commits.
+    "env -S 'git commit -m fixture'", 'env -S "git commit -m fixture"', "env -S'git commit -m fixture'",
+    "env --split-string 'git commit -m fixture'", "env --split-string='git commit -m fixture'",
+    "env --spl 'git commit -m fixture'", "env -iS 'git commit -m fixture'",
+    "env -S '/usr/bin/git commit -m fixture'", "env -S \"'git' commit -m fixture\"",
+    "env -S 'git\\_commit -m fixture'", "env -S 'git\\c' commit -m fixture",
+    # A string that leaves the program to later words: a git after it.
+    "env -S '-i' git commit -m fixture", "env -S 'FOO=1' git commit -m fixture", 'env -S "$X" git status',
+    # A cluster ending in C takes the next word, and -C refuses a visible commit.
+    "env -iC /tmp git commit -m fixture",
+    # An option this hook does not know may take the next word.
+    "env -x git commit -m fixture", "env --foo git status", "env -L x git status",
+    # Run under a name starting git-, git takes the rest as its subcommand.
+    "env -a git-commit git status", "env -agit-commit git status", "env --argv0=git-commit git status",
+    "env --argv0 git-commit git status", "env -va git-commit git status", "env -a /x/git-commit git status",
+    'env -a "$N" git status',
+    # --env0-from can set GIT_* from a file, as -C picks another repository.
+    "env --env0-from /tmp/f git commit -m fixture", "env --env0-from=/tmp/f git commit -m fixture",
+    'env --env0-from "$(pwd)/f" git commit -m fixture',
+    # A -C value that runs into a substitution is still the -C value.
+    'env -C "$(pwd)" git commit -m fixture', "env -C $(pwd) git commit -m fixture",
+    'env -C"$(pwd)" git commit -m fixture', 'env --chdir="$(pwd)" git commit -m fixture',
+    'env -C "$(a)$(b)" git commit -m fixture', 'env -C /tmp -P "$(pwd)" git commit -m fixture',
+    'env -C "`pwd`" git commit -m fixture', "env -C `pwd` git commit -m fixture",
+)
+for command in env_refused:
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is refused", rc == 2 and "could not safely parse" in err,
+              f"exit={rc} stderr={err.strip()[:160]}")
+# A -S string whose program this hook cannot read is judged on its commit, in
+# the string or after it, as after any such program.
+for command in (
+    'env -S "$CMD" commit -m fixture', 'env -S "$G commit" -m fixture', "env -S '${G} commit' -m fixture",
+    "env -S '-i' \"$G\" commit -m fixture", "env -S 'FOO=1' \"$G\" commit -m fixture",
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is refused as an indirect commit",
+              rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+env_scanned = (
+    "env -v git commit -m fixture", "env -0 git commit -m fixture", "env - git commit -m fixture",
+    "env --null git commit -m fixture", "env --debug git commit -m fixture",
+    "env --ignore-signal=PIPE git commit -m fixture",
+    "env -iv git commit -m fixture", "env -i0v FOO=1 git commit -m fixture",
+    "env -iu NAME git commit -m fixture", "env -uNAME git commit -m fixture",
+    "env -iP /usr/bin git commit -m fixture", "env -S '' git commit -m fixture",
+    "env -a foo git commit -m fixture", "env -afoo git commit -m fixture", "env --argv0=foo git commit -m fixture",
+    'env -P "$(pwd)" git commit -m fixture', 'env -P "`pwd`" git commit -m fixture',
+    # The substitution in a -C value is still read as a command of its own.
+    'env -C "$(git commit -m fixture)" ls',
+)
+for command in env_scanned:
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is scanned (expect {expected})",
+              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
+              f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    # A word that only contains git names no git.
+    "env -S 'python3 -u' legit.py", "env -S 'node' digit.js", "env -S 'printf %s' $HOME",
+    "env -S 'python3 legit.py'", "env -S 'node /src/digit.js'", "env -S 'git-lfs version'",
+    # A -S string this hook cannot read, with no git or commit near it.
+    'env -S "$CMD" ls', 'env -S "$PY" script.py', 'env -S "${PY:-python3}" script.py',
+    'env -S "python3 $FLAGS" legit.py', 'env -S "$(command -v python3) -u" legit.py',
+    'env -S "echo $HOME"', 'env -S "echo $HOME" | grep x', "env -S 'FOO=1' \"$X\"",
+    "env -a foo git status", "env --env0-from /tmp/f git status", "env -x echo hi",
+    'env -C "$(pwd)" git status', 'env -C "$(a)$(b)" git status',
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
 # A substitution executes even when its output is a quoted argument or an
 # assignment. Its quoting must be independent of the surrounding word.
 substitution_commits = (
