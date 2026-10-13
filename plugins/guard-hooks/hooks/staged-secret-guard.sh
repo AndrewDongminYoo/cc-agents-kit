@@ -102,10 +102,12 @@ refuse_git_ahead() {
 # one that starts with < or >, or whose text before the first < or > is &, a
 # file descriptor number or a {name} (`5>out`, `{fd}>out`). After any other
 # text (`KILL>out`), that text stays as the word and only the rest is removed.
+# A quoted or escaped prefix is such text too (`'5'>out` is the word 5), so it
+# takes the token's index rather than its text, whose quotes are gone.
 runner_redirection() {
-  local prefix
-  [[ "$1" == *[\<\>]* ]] || return 1
-  prefix=${1%%[<>]*}
+  local prefix word=${TOKENS[$1]-}
+  [[ "$word" == *[\<\>]* && -z "${TOKEN_PREFIX_QUOTED[$1]-}" ]] || return 1
+  prefix=${word%%[<>]*}
   [[ "$prefix" == "&" || "$prefix" != *[!0-9]* || "$prefix" =~ $FD_VARNAME ]]
 }
 
@@ -177,7 +179,7 @@ parse_runner() {
     # value glued before a redirection (`-s KILL>out`) is kept as the value,
     # and a quoted < or > is marked literal, which the expansion test refuses.
     if ((take)) && { [[ -n "${TOKEN_EXPANSION[value_index]-}" || "${TOKENS[value_index]-}" == "$BOUNDARY_PREFIX"* ]] \
-      || runner_redirection "${TOKENS[value_index]-}"; }; then
+      || runner_redirection "$value_index"; }; then
       refuse_git_ahead "$runner_next"
       runner_next=-1
       return
@@ -189,7 +191,7 @@ parse_runner() {
   # and a redirection there (`timeout -- >out 5`) leaves the duration unplaced.
   if [[ -n "$duration" ]]; then
     if [[ -n "${TOKEN_EXPANSION[runner_next]-}" || "${TOKENS[runner_next]-}" == "$BOUNDARY_PREFIX"* ]] \
-      || runner_redirection "${TOKENS[runner_next]-}"; then
+      || runner_redirection "$runner_next"; then
       refuse_git_ahead "$runner_next"
       runner_next=-1
       return
@@ -275,6 +277,11 @@ last_unquoted_redirect=""
 # Quote removal loses which < or > was quoted, so only a token with none is
 # trusted to be a redirection where git's subcommand is looked for.
 TOKEN_QUOTED=()
+# Set, the same way, at the index of each token that had a quoted or escaped
+# part before its first unquoted < or >. That part is a word, never a file
+# descriptor or {name}, where a quoted target after it (`5>'out'`) is not.
+token_prefix_quoted=""
+TOKEN_PREFIX_QUOTED=()
 # An unquoted # at the start of a word opens a comment that runs to the end of
 # the line. Read as words, `git commit -m x # note` passed # and note as
 # pathspecs, scanned a candidate git never commits, and let the commit through.
@@ -405,6 +412,7 @@ flush_token() {
       esac
     fi
     [[ -z "$token_quoted" ]] || TOKEN_QUOTED[${#TOKENS[@]}]=1
+    [[ -z "$token_prefix_quoted" ]] || TOKEN_PREFIX_QUOTED[${#TOKENS[@]}]=1
     TOKENS+=("$token")
     TOKEN_EXPANSION+=("$token_expansion")
     token=""
@@ -412,6 +420,7 @@ flush_token() {
     token_expansion=""
     token_quoted=""
     token_redirect=""
+    token_prefix_quoted=""
   fi
 }
 
@@ -946,6 +955,7 @@ while ((command_pos < command_len)); do
           fi
         fi
         if [[ "$char" == '<' || "$char" == '>' ]]; then
+          [[ -n "$token_redirect" || -z "$token_quoted" ]] || token_prefix_quoted=1
           token_redirect=1
           last_unquoted_redirect=1
         fi
@@ -1865,6 +1875,9 @@ while :; do
     # runs on into the body.
     INLINE_TOKENS=("$BOUNDARY_PREFIX;")
     INLINE_EXPANSION=("")
+    # Where in INLINE_TOKENS a body token with a quoted redirection prefix
+    # landed, so that its copy keeps the mark the original has.
+    INLINE_PREFIX_QUOTED=()
     for def_index in "${CALL_DEFS[@]}"; do
       body_start=${FUNC_BODY_START[def_index]}
       body_end=${FUNC_BODY_END[def_index]}
@@ -1958,6 +1971,7 @@ while :; do
               ;;
           esac
         fi
+        [[ -z "${TOKEN_PREFIX_QUOTED[body_index]-}" ]] || INLINE_PREFIX_QUOTED+=("${#INLINE_TOKENS[@]}")
         INLINE_TOKENS+=("$body_token")
         INLINE_EXPANSION+=("$body_expansion")
       done
@@ -1988,6 +2002,9 @@ while :; do
       fi
     fi
     if ((${#INLINE_TOKENS[@]} <= inline_room)); then
+      for inline_offset in ${INLINE_PREFIX_QUOTED[@]+"${INLINE_PREFIX_QUOTED[@]}"}; do
+        TOKEN_PREFIX_QUOTED[${#TOKENS[@]} + inline_offset]=1
+      done
       TOKENS+=("${INLINE_TOKENS[@]}")
       TOKEN_EXPANSION+=("${INLINE_EXPANSION[@]}")
       REGION_FUNC[region_depth]=$func_index

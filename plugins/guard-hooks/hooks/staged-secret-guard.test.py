@@ -448,6 +448,11 @@ for command in (
     # redirection, which the shell removes whole.
     "nice -n 5>/dev/null git status", "nice -n {fd}>/tmp/out 5 git commit -m fixture",
     "timeout -- 5>/tmp/out 5 git commit -m fixture",
+    # A quoted target leaves the number before it a descriptor, and so does
+    # one before a second redirection glued after it.
+    "nice -n 5>'/tmp/out' 5 git commit -m fixture", "timeout -- 5>'/tmp/out' 5 git commit -m fixture",
+    "f() { nice -n 5>'/tmp/out' 5 git commit -m fixture; }; f",
+    "nice -n 5>'/tmp/out'>/dev/null 5 git commit -m fixture",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
@@ -461,6 +466,10 @@ for command in (
     # A value glued before a redirection keeps that value (`-s KILL>out` is
     # `-s KILL`), so the program after it is read.
     "timeout -s KILL>/dev/null 5 git commit -m fixture",
+    # A quoted or escaped number is a word, not a descriptor (`'5'>out` is the
+    # value 5), in a function body too.
+    "nice -n '5'>/dev/null git commit -m fixture", "timeout -- '5'>/dev/null git commit -m fixture",
+    "f() { nice -n '5'>/dev/null git commit -m fixture; }; f",
 ):
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
@@ -472,6 +481,9 @@ for command in (
     "timeout 5 git status 2>/tmp/out", "nice -n >/tmp/out 5 python3 x",
     "sudo -u root>/dev/null git status", "xargs -I {}>/dev/null git log {}", "nice -n -5>/dev/null git status",
     "timeout -- 5s>/dev/null git log",
+    "nice -n '5'>/dev/null git status", 'nice -n "5">/dev/null git status', "nice -n '{fd}'>/dev/null git status",
+    "nice -n \\5>/dev/null git status", "timeout -- '5'>/dev/null git status",
+    "f() { nice -n '5'>/dev/null git status; }; f",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
