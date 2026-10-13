@@ -1144,6 +1144,46 @@ split_env_string() {
   ENV_WORDS=()
   IFS=$' \t\n' read -r -d '' -a ENV_WORDS <<<"$env_string" || true
 }
+# Where env may read an -S string from a word this parse does not place (after
+# a redirection in the value slot, or after an -S string that starts with an
+# option, which GNU env re-parses so it can supply another -S), every later
+# word of the same command is read as an -S string, and a git word in one is
+# refused. The search crosses parentheses and stops at the next ;, | or &
+# outside them. Each word is read as split_env_string reads it (the comment cut,
+# then \_ and \c as word breaks and quotes dropped), but by parameter expansion
+# alone: its here-string writes a temporary file on bash 3.2, once per word.
+refuse_env_strings_ahead() {
+  local ahead depth=0 probe head
+  for ((ahead = $1; ahead < token_count; ahead++)); do
+    case "${TOKENS[ahead]}" in
+      "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(")
+        depth=$((depth + 1))
+        continue
+        ;;
+      "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+")
+        ((depth == 0)) || depth=$((depth - 1))
+        continue
+        ;;
+      "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&")
+        ((depth > 0)) || break
+        continue
+        ;;
+      "$BOUNDARY_PREFIX"*) continue ;;
+    esac
+    probe=${TOKENS[ahead]}
+    head=" $probe"
+    head=${head%%[$' \t\n']\#*}
+    if [[ "$head" != " $probe" && "$head" != *[\'\"\\\$\`]* ]]; then
+      probe=$head
+    fi
+    probe=${probe//\\_/ }
+    probe=${probe//\\c/ }
+    probe=" ${probe//[\'\"]/} "
+    case "$probe" in
+      *[$' \t\n']git[$' \t\n']* | */git[$' \t\n']*) block_unparsed ;;
+    esac
+  done
+}
 # `command` runs a builtin or a program, never a shell function, so a name behind
 # it is not looked up among the functions defined below.
 function_lookup=1
@@ -1564,30 +1604,7 @@ while :; do
       # any later string, as -S itself reads it. A quoted < or > is part of
       # the value, not a redirection.
       if [[ "${TOKEN_EXPANSION[env_value_index]-}" != literal && "$env_value" == *[\<\>]* ]]; then
-        if [[ "$env_letter" == S ]]; then
-          env_depth=0
-          for ((env_ahead = env_value_index; env_ahead < token_count; env_ahead++)); do
-            case "${TOKENS[env_ahead]}" in
-              "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(")
-                env_depth=$((env_depth + 1))
-                continue
-                ;;
-              "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+")
-                ((env_depth == 0)) || env_depth=$((env_depth - 1))
-                continue
-                ;;
-              "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&")
-                ((env_depth > 0)) || break
-                continue
-                ;;
-              "$BOUNDARY_PREFIX"*) continue ;;
-            esac
-            split_env_string "${TOKENS[env_ahead]}"
-            for env_word in ${ENV_WORDS[@]+"${ENV_WORDS[@]}"}; do
-              [[ "$env_word" != git && "$env_word" != */git ]] || block_unparsed
-            done
-          done
-        fi
+        [[ "$env_letter" != S ]] || refuse_env_strings_ahead "$env_value_index"
         refuse_git_ahead "$env_value_index"
         token_index=$((token_index + 1))
         continue
@@ -1629,12 +1646,16 @@ while :; do
           # program to the words after it, and one whose first word holds an
           # expansion (the shell's, or env's own ${NAME}) names a program this
           # hook cannot read. As after any such program, a git after the
-          # string, or a commit in or after it, is refused.
+          # string, or a commit in or after it, is refused. GNU env re-parses
+          # the options a string supplies, so one that starts with an option
+          # can supply another -S (`env -S '-S' 'git commit'`): each later word
+          # is then read as an -S string too.
           case "${ENV_WORDS[0]}" in
             -* | *=* | *[\$\`]*)
               for env_word in "${ENV_WORDS[@]}"; do
                 [[ "$env_word" != commit ]] || block_indirect_commit
               done
+              [[ "${ENV_WORDS[0]}" != -* ]] || refuse_env_strings_ahead "$token_index"
               refuse_git_ahead "$token_index" named
               indirect=1
               refuse_commit_ahead "$token_index"

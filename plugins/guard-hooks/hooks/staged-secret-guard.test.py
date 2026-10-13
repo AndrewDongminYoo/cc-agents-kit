@@ -558,6 +558,20 @@ env_refused = (
     # Glued to the option, or between options, the redirection is stripped
     # before the option is read.
     "env -S>/tmp/out 'git commit -m fixture'", "env -i >/tmp/out -S 'git commit -m fixture'",
+    # GNU env re-parses the options an -S string supplies (#66), so a string
+    # that starts with an option can supply another -S, which splits a later
+    # word: a git word in any later string is refused.
+    "env -S '-S' 'git commit -m fixture'", "env -S'-S' 'git commit -m fixture'",
+    "env --split-string=-S 'git commit -m fixture'", "env --sp=-S 'git commit -m fixture'",
+    "env -iS '-S' 'git commit -m fixture'", "env -S '-S' -S 'git commit -m fixture'",
+    "env -S '-i -S' 'git commit -m fixture'", "env -S '-S' '/usr/bin/git commit -m fixture'",
+    # Quote removal and \_ come before the word is read.
+    "env -S '-S' 'g\"i\"t commit -m fixture'", "env -S '-S' 'git\\_commit -m fixture'",
+    # A # in the word does not hide a git before it: env reads the rest as a
+    # comment and still runs the alias commit.
+    "env -S '-S' 'git -c alias.ci=commit ci -m fixture #c'",
+    # A # after a quote is not read as a comment, as in the -S string itself.
+    "env -S '-S' \"'a' # git commit -m fixture\"",
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):
@@ -598,6 +612,9 @@ env_scanned = (
     "env -u 'A>B' git commit -m fixture",
     "env -a 'worker>log' git commit -m fixture", "env -a\"worker<log\" git commit -m fixture",
     "env --argv0='worker>log' git commit -m fixture",
+    # The later strings an option-leading -S string can split end with the
+    # command: the next one is read.
+    "env -S '-S' 'python3 -u' legit.py; git commit -m fixture",
 )
 for command in env_scanned:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
@@ -641,6 +658,12 @@ for command in (
     "env -S >/tmp/out 'python3 -u' legit.py", "env -u >/tmp/out FOO python3 legit.py",
     # A quoted < or > in a value is part of the value, not a redirection.
     "env -u 'A>B' git status", 'env -u "A<B" git status',
+    # An option-leading -S string with no git word after it (#66), a word that
+    # only contains git, or one in a comment. A commit word in a later string
+    # is not read as a git one.
+    "env -S '-i' python3 legit.py", "env -S '-S' 'python3 -u' legit.py", "env -S '-S' legit.py",
+    "env -S '-S' 'echo # git commit -m fixture'", "env -S '-S' \"$X\"",
+    "env -S '-i' echo 'fix commit'", "env -S >/tmp/out 'echo commit'",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
