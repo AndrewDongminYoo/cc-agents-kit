@@ -128,18 +128,24 @@ parse_runner() {
         | sudo:-u | sudo:--user | sudo:-g | sudo:--group | sudo:-h | sudo:--host \
         | sudo:-p | sudo:--prompt | sudo:-C | sudo:--close-from | sudo:-T | sudo:--command-timeout \
         | sudo:-R | sudo:--chroot | sudo:-D | sudo:--chdir | sudo:-r | sudo:--role | sudo:-t | sudo:--type \
+        | sudo:-a | sudo:--auth-type | sudo:-c | sudo:--login-class | sudo:-U | sudo:--other-user \
         | xargs:-a | xargs:--arg-file | xargs:-d | xargs:--delimiter | xargs:-E | xargs:-I \
-        | xargs:-L | xargs:--max-lines | xargs:-n | xargs:--max-args | xargs:-P | xargs:--max-procs \
+        | xargs:-J | xargs:-R | xargs:-S \
+        | xargs:-L | xargs:-n | xargs:--max-args | xargs:-P | xargs:--max-procs \
         | xargs:-s | xargs:--max-chars | xargs:--process-slot-var)
         take=1
         ;;
+      # GNU xargs --eof, --replace and --max-lines take an optional value,
+      # which binds only when attached (--max-lines=2): the bare word takes
+      # nothing, and the word after it is the program.
       nice:--adjustment=* | nice:-n?* | nice:-[0-9]* | nice:--[0-9]* \
         | timeout:--signal=* | timeout:--kill-after=* | timeout:-s?* | timeout:-k?* \
         | timeout:--foreground | timeout:--preserve-status | timeout:--verbose | timeout:-v \
-        | sudo:--*=* | sudo:-[ughpCTRDrt]?* | sudo:-[AbEHnPS] | sudo:--non-interactive \
+        | sudo:--*=* | sudo:-[acCDghpRrTtUu]?* | sudo:-[AbEHnPS] | sudo:--non-interactive \
         | sudo:--preserve-env | sudo:--set-home | sudo:--stdin | sudo:--background \
-        | xargs:--*=* | xargs:-[adEILnPs]?* | xargs:-[0prtx] | xargs:--null \
+        | xargs:--*=* | xargs:-[adEIJLnPRSs]?* | xargs:-[0prtx] | xargs:--null \
         | xargs:--no-run-if-empty | xargs:--interactive | xargs:--verbose | xargs:--exit \
+        | xargs:--eof | xargs:--replace | xargs:--max-lines \
         | xargs:-i* | xargs:-l* | xargs:-e*) ;;
       *:-*)
         refuse_git_ahead "$runner_next"
@@ -1385,6 +1391,23 @@ while :; do
         env_prefix=""
         token_index=$((token_index + 1))
         continue
+        ;;
+      # -C (--chdir, under any prefix getopt_long accepts: no other GNU env
+      # long option starts with c) and -P take a value, as the next word or
+      # attached. -C runs the program in another directory, so this index is
+      # not the one a commit there would record: a visible commit is refused,
+      # as through sudo. -P only picks where the program is found.
+      -C?* | --c*=* | -P?*)
+        [[ "$current" == -P* ]] || runner_risk=1
+        token_index=$((token_index + 1))
+        continue
+        ;;
+      -C | --c* | -P)
+        if ((token_index + 1 < token_count)) && [[ "${TOKENS[token_index + 1]}" != "$BOUNDARY_PREFIX"* ]]; then
+          [[ "$current" == -P ]] || runner_risk=1
+          token_index=$((token_index + 2))
+          continue
+        fi
         ;;
     esac
   fi
