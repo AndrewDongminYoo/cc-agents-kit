@@ -1512,8 +1512,9 @@ while :; do
       # env takes its value from a later word (`env -S >out 'git commit'`).
       # Which word is not followed: a git, or a program this hook cannot read,
       # later in the command is refused, and after -S so is a git word inside
-      # any later string, as -S itself reads it.
-      if [[ "$env_value" == *[\<\>]* ]]; then
+      # any later string, as -S itself reads it. A quoted < or > is part of
+      # the value, not a redirection.
+      if [[ "${TOKEN_EXPANSION[env_value_index]-}" != literal && "$env_value" == *[\<\>]* ]]; then
         if [[ "$env_letter" == S ]]; then
           env_depth=0
           for ((env_ahead = env_value_index; env_ahead < token_count; env_ahead++)); do

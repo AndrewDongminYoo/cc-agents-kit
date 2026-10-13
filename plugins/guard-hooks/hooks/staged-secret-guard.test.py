@@ -500,6 +500,9 @@ env_refused = (
     "env -a >/tmp/out git-commit git status", "env --argv0 >/tmp/out git-commit git status",
     "env --env0-from >/tmp/out FILE git commit -m fixture",
     "env --env0-from > /tmp/out FILE git commit -m fixture",
+    # A quoted target is still a redirection.
+    "env -u >'/tmp/out' FOO git commit -m fixture", "env -S >\"/tmp/out\" 'git commit -m fixture'",
+    "env -C >'/tmp/out' /tmp git commit -m fixture",
     # Glued to the option, or between options, the redirection is stripped
     # before the option is read.
     "env -S>/tmp/out 'git commit -m fixture'", "env -i >/tmp/out -S 'git commit -m fixture'",
@@ -535,6 +538,8 @@ env_scanned = (
     'env -C "$(git commit -m fixture)" ls',
     # --help ends only its own command: the next one is read.
     "env --help; git commit -m fixture",
+    # A quoted < or > in a value is part of the value, not a redirection.
+    "env -u 'A>B' git commit -m fixture",
 )
 for command in env_scanned:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
@@ -566,6 +571,8 @@ for command in (
     # ahead of it, leaves nothing to refuse.
     "env FOO=1 git status >out", "env -u FOO git status >out", "env -S 'python3 -u' legit.py >out",
     "env -S >/tmp/out 'python3 -u' legit.py", "env -u >/tmp/out FOO python3 legit.py",
+    # A quoted < or > in a value is part of the value, not a redirection.
+    "env -u 'A>B' git status", 'env -u "A<B" git status',
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
