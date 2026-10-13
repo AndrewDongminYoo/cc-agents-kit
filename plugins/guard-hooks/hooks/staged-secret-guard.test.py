@@ -484,6 +484,21 @@ env_refused = (
     'env -C"$(pwd)" git commit -m fixture', 'env --chdir="$(pwd)" git commit -m fixture',
     'env -C "$(a)$(b)" git commit -m fixture', 'env -C /tmp -P "$(pwd)" git commit -m fixture',
     'env -C "`pwd`" git commit -m fixture', "env -C `pwd` git commit -m fixture",
+    # A redirection where the value should be is removed by the shell, so env
+    # takes its value from a later word: a git ahead, or a git word in a later
+    # -S string, is refused.
+    "env -S >/tmp/out 'git commit -m fixture'", "env -S > /tmp/out 'git commit -m fixture'",
+    "env -S 2>/tmp/out 'git commit -m fixture'", "env -S </dev/null 'git commit -m fixture'",
+    "env -iS >/tmp/out 'git commit -m fixture'", "env --split-string >/tmp/out 'git commit -m fixture'",
+    "env -u >/tmp/out FOO git commit -m fixture", "env -iu >/tmp/out FOO git commit -m fixture",
+    "env -C >/tmp/out /tmp git commit -m fixture", "env -C > /tmp/out /tmp git commit -m fixture",
+    "env -iC >/tmp/out /tmp git commit -m fixture", "env -P >/tmp/out /usr/bin git commit -m fixture",
+    "env -a >/tmp/out git-commit git status", "env --argv0 >/tmp/out git-commit git status",
+    "env --env0-from >/tmp/out FILE git commit -m fixture",
+    "env --env0-from > /tmp/out FILE git commit -m fixture",
+    # Glued to the option, or between options, the redirection is stripped
+    # before the option is read.
+    "env -S>/tmp/out 'git commit -m fixture'", "env -i >/tmp/out -S 'git commit -m fixture'",
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):
@@ -533,6 +548,10 @@ for command in (
     # --help and --version print and exit: the git after them never runs.
     "env --help git status", "env --version git commit -m fixture",
     "env --he git status", "env --vers git commit -m fixture",
+    # A redirection after the program, or one before a value with no git
+    # ahead of it, leaves nothing to refuse.
+    "env FOO=1 git status >out", "env -u FOO git status >out", "env -S 'python3 -u' legit.py >out",
+    "env -S >/tmp/out 'python3 -u' legit.py", "env -u >/tmp/out FOO python3 legit.py",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)

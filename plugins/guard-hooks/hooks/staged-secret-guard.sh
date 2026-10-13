@@ -1483,6 +1483,44 @@ while :; do
     if [[ -z "$env_attached" ]]; then
       env_value_index=$((token_index + 1))
       env_value=${TOKENS[env_value_index]-}
+      # A redirection where the value should be is removed by the shell, and
+      # env takes its value from a later word (`env -S >out 'git commit'`).
+      # Which word is not followed: a git, or a program this hook cannot read,
+      # later in the command is refused, and after -S so is a git word inside
+      # any later string, as -S itself reads it.
+      if [[ "$env_value" == *[\<\>]* ]]; then
+        if [[ "$env_letter" == S ]]; then
+          env_depth=0
+          for ((env_ahead = env_value_index; env_ahead < token_count; env_ahead++)); do
+            case "${TOKENS[env_ahead]}" in
+              "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(")
+                env_depth=$((env_depth + 1))
+                continue
+                ;;
+              "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+")
+                ((env_depth == 0)) || env_depth=$((env_depth - 1))
+                continue
+                ;;
+              "$BOUNDARY_PREFIX;" | "$BOUNDARY_PREFIX|" | "$BOUNDARY_PREFIX&")
+                ((env_depth > 0)) || break
+                continue
+                ;;
+              "$BOUNDARY_PREFIX"*) continue ;;
+            esac
+            env_split=${TOKENS[env_ahead]//\\_/ }
+            env_split=${env_split//\\c/ }
+            env_split=${env_split//[\'\"]/}
+            ENV_WORDS=()
+            IFS=$' \t\n' read -r -d '' -a ENV_WORDS <<<"$env_split" || true
+            for env_word in ${ENV_WORDS[@]+"${ENV_WORDS[@]}"}; do
+              [[ "$env_word" != git && "$env_word" != */git ]] || block_unparsed
+            done
+          done
+        fi
+        refuse_git_ahead "$env_value_index"
+        token_index=$((token_index + 1))
+        continue
+      fi
     fi
     # A value that is missing makes env fail: the word is read as before.
     if [[ "$env_letter" != "?" ]] && ((env_value_index < token_count)) && [[ "$env_value" != "$BOUNDARY_PREFIX"* ]]; then
