@@ -1588,8 +1588,10 @@ while :; do
         a)
           # Run under a name starting git-, git takes the rest as its
           # subcommand, so `env -a git-commit git status` commits, as with
-          # exec -a.
-          if [[ -n "$env_value_kind" || "$env_value" == *[\<\>]* || "$env_value" == git-* || "${env_value##*/}" == git-* ]]; then
+          # exec -a. A quoted < or > (literal) is part of the name, not a
+          # redirection.
+          if [[ -n "$env_value_kind" || ("${TOKEN_EXPANSION[env_value_index]-}" != literal && "$env_value" == *[\<\>]*) \
+            || "$env_value" == git-* || "${env_value##*/}" == git-* ]]; then
             refuse_git_ahead "$((env_value_index + 1))"
           fi
           ;;

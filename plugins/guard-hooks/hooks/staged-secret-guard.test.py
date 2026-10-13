@@ -550,6 +550,8 @@ env_scanned = (
     "env --help; git commit -m fixture",
     # A quoted < or > in a value is part of the value, not a redirection.
     "env -u 'A>B' git commit -m fixture",
+    "env -a 'worker>log' git commit -m fixture", "env -a\"worker<log\" git commit -m fixture",
+    "env --argv0='worker>log' git commit -m fixture",
 )
 for command in env_scanned:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
@@ -569,6 +571,8 @@ for command in (
     'env -S "python3 $FLAGS" legit.py', 'env -S "$(command -v python3) -u" legit.py',
     'env -S "echo $HOME"', 'env -S "echo $HOME" | grep x', "env -S 'FOO=1' \"$X\"",
     "env -a foo git status", "env --env0-from /tmp/f git status", "env -x echo hi",
+    # A quoted < or > in an -a name is part of the name: git runs status.
+    "env -a 'worker>log' git status", "env --argv0='worker>log' git status",
     'env -C "$(pwd)" git status', 'env -C "$(a)$(b)" git status',
     # --help and --version print and exit: the git after them never runs.
     "env --help git status", "env --version git commit -m fixture",
