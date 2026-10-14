@@ -1228,9 +1228,12 @@ refuse_env_strings_ahead() {
     # A word that holds a $ (env's own ${NAME}, or the shell's) can be the
     # program, or supply another -S, and is not read: a commit word after it in
     # the same string, or a later word that is commit, is refused, also with a
-    # redirection glued on (`commit>/dev/null`) that the shell removes.
+    # redirection glued on (`commit>/dev/null`) that the shell removes. The
+    # value can end in whitespace (`X='-Sgit ' env -S '${X}commit'`), and quote
+    # removal hides where a shell expansion ended (`"$X"commit`), so after the $
+    # a word that only ends in commit counts too.
     if [[ "$probe" == *\$* ]]; then
-      [[ "${probe#*\$}" != *[$' \t\n']commit[$' \t\n']* ]] || block_indirect_commit
+      [[ "${probe#*\$}" != *commit[$' \t\n']* ]] || block_indirect_commit
       expanded=1
     elif [[ -n "$expanded" ]]; then
       case "${TOKENS[ahead]}" in

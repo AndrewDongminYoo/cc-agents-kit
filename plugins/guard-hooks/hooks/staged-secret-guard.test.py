@@ -626,6 +626,10 @@ for command in (
     # The shell removes a redirection glued to that commit word.
     "env -S >/tmp/out '${G}' commit>/dev/null -m fixture", "env -S \"$CMD\" commit>/dev/null -m fixture",
     "env -S '-S' '${G}' 'commit'>/dev/null -m fixture",
+    # The value can end in whitespace, so a commit glued after the expansion
+    # can still be its own word once env splits the string.
+    "X='-Sgit ' env -S '${X}commit -m fixture'", "env -S '-S' '${G}commit -m fixture'",
+    "env -S \"$X\"commit -m fixture", "env -S '-S' \"$G\"commit -m fixture",
     # Over-refusals: the last -S string env splits is `-i`, so env splits no
     # later word and expands no ${G} in it, looks for a program named `${G}
     # commit -m fixture` or `${G}`, and runs no git (GNU env 9.12 exits 127).
