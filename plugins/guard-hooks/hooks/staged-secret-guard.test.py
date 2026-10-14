@@ -1763,6 +1763,12 @@ large_inputs = (
     ("60KB env -S word dense with \\_", "env -S '-i' '" + "\\_" * 30000 + "' x\n"),
     ("60KB env -S word dense with S", "env -S '-i' '-" + "S" * 60000 + "' x\n"),
     ("60KB env -S value dense with quotes", "env -S '" + '"a' * 30000 + "' x\n"),
+    # A word made of one simple reference repeated: read byte by byte, each
+    # `$a` cost two passes of the tokenizer loop, and 128 KB took past 10 s
+    # (#72). The quoted form takes the same step inside double quotes.
+    ("128KB program word dense with $", "A=git; " + "$a" * 64000 + " x\n"),
+    ("128KB assigned value dense with $", "A=git; B=" + "$a" * 64000 + "; $B x\n"),
+    ("128KB quoted word dense with $", 'echo "' + "$a" * 64000 + '" >/dev/null\n'),
 )
 for locale in ("C", UTF8["LC_ALL"]):
     env = dict(os.environ, LC_ALL=locale)
@@ -1772,6 +1778,19 @@ for locale in ("C", UTF8["LC_ALL"]):
             check(f"{label} reaches credential scan within 10 s under {locale}", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
         except subprocess.TimeoutExpired:
             check(f"{label} reaches credential scan within 10 s under {locale}", False, "timed out")
+
+# A run of simple references is appended in one step (#72). What follows the
+# run, and what the run marks the word as, must read as it did byte by byte.
+for command, expected in (
+    ("echo $a$(git commit -m fixture)", "GitHub token"),
+    ('echo "$a$(git commit -m fixture)"', "GitHub token"),
+    ("G=git; $a$G commit -m fixture", "variable this command assigns"),
+    ("C=commit; git $a$C -m fixture", "unquoted expansion sits where git's subcommand"),
+    ("$a$'git' commit -m fixture", "program name this hook cannot read"),
+    ('git "$a$b" -m fixture', "could not safely parse"),
+):
+    rc, err = check_hook(command, continued_commit_repo)
+    check(f"{command} after a reference run is refused", rc == 2 and expected in err, f"exit={rc} stderr={err.strip()[:160]}")
 
 # Put syntax at and around byte-window edges. The filler is an ordinary word,
 # so it is read rather than skipped as a comment or a safe heredoc. Each form
@@ -1785,6 +1804,10 @@ boundary_forms = (
     ("escaped newline", "echo gi\\\nt commit -m prose", "\\\n"),
     ("substitution opener", "echo $(printf git) commit -m prose", "$("),
     ("substitution closer", "echo $(printf git) commit -m prose", ")"),
+    # A run of simple references is read in one step; the `$` that ends it
+    # must still open the substitution, wherever the window cuts the run.
+    ("reference run before substitution", "echo $ab$cd$(printf git) commit -m prose", "$cd"),
+    ("quoted reference run before substitution", 'echo "$ab$cd$(printf git)" commit -m prose', "$cd"),
     ("redirection operator", "echo text 2>&1", ">&"),
     ("heredoc operator", "cat > note.txt <<'EOF'\n$GIT commit -m prose\nEOF", "<<"),
     ("multibyte word", 'echo "한국어 ✓"', "한국어"),

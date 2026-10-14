@@ -783,6 +783,8 @@ command_pos=0
 # below. Exclude `(` in double quotes too: after `$` it opens a substitution.
 word_special=$' \t\n\'"\\$`<>;|&()#{}'
 double_special=$'"\\$`({}'
+# shellcheck disable=SC2016  # a literal $ to match, not an expansion
+DOLLAR_NAME_RUN='^([$][A-Za-z_][A-Za-z0-9_]*)+'
 chunk_start=0
 chunk_end=0
 while ((command_pos < command_len)); do
@@ -809,6 +811,25 @@ while ((command_pos < command_len)); do
       token="$token$ordinary"
       token_started=1
       command_pos=$((command_pos + ${#ordinary}))
+      continue
+    fi
+    # A run of simple references ($a$b$c) changes nothing the single-byte path
+    # would not: each `$` marks the token as an expansion and the name after it
+    # is ordinary. Byte by byte, a 64 KB word made of `$a` took 8 s, near the
+    # hook's 10 s timeout (#72), so append the whole run in one step. Every
+    # other `$` form (${, $(, $', $", $1, $@, $$, a lone $) takes the path below.
+    if [[ "$char" == '$' && "$quote" != "'" && "$chunk_remaining" =~ $DOLLAR_NAME_RUN ]]; then
+      dollar_run=${BASH_REMATCH[0]}
+      token="$token$dollar_run"
+      token_started=1
+      if [[ -z "$quote" ]]; then
+        token_expansion="split"
+      elif [[ -z "$token_expansion" ]]; then
+        token_expansion="quoted"
+      fi
+      # The run ends on a name byte, so last_unquoted_dollar stays empty, as
+      # the reset above left it.
+      command_pos=$((command_pos + ${#dollar_run}))
       continue
     fi
   fi
