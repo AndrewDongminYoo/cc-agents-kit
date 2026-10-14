@@ -1624,6 +1624,16 @@ for label, command in (
 ):
     rc, err = check_hook(command, continued_commit_repo, env=UTF8)
     check(f"{label}, under a UTF-8 locale, scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+# The quoted-prefix offset of a call word is a byte count, and the word is cut
+# in bytes under either locale: counted as characters, `'éé'>x` was cut past
+# the >, and commit was read as the redirection's target (#68).
+for command in (
+    "f() { git \"$2\" -m x; }; f 'éé'>x commit", "f() { git \"$2\" -m x; }; f 'é<b'>/dev/null commit",
+):
+    for locale_env in (dict(os.environ, LC_ALL="C"), UTF8):
+        rc, err = check_hook(command, runner_repo, env=locale_env)
+        check(f"{command} under LC_ALL={locale_env['LC_ALL']} scans the staged credential",
+              rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
 
 # Large input must still reach the real commit after it before the harness's
 # 10 s timeout. A data-only heredoc can be skipped, but a body piped to node

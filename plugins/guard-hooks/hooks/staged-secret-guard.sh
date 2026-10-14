@@ -111,6 +111,17 @@ runner_redirection() {
   [[ "$prefix" == "&" || "$prefix" != *[!0-9]* || "$prefix" =~ $FD_VARNAME ]]
 }
 
+# Split arg_word into the word before its first unquoted < or > and the
+# operator text after it, at the offset plus one that TOKEN_PREFIX_QUOTED holds.
+# The tokenizer counted that offset in bytes, under LC_ALL=C, so the cut is made
+# in bytes too: under a UTF-8 locale ${arg_word:n} counts characters, and
+# `f 'éé'>x commit` would be cut past the >, reading commit as its target.
+cut_call_word() {
+  local LC_ALL=C
+  redirect_op=${arg_word:$1}
+  arg_word=${arg_word:0:$1-1}
+}
+
 # Read only the option grammars whose arity is known. Unknown syntax never
 # clears a visible git command. These runners execute external programs, so
 # their command operand must bypass same-named shell functions.
@@ -1884,8 +1895,7 @@ while :; do
       if [[ "$arg_kind" != literal && "$arg_word" == *[\<\>]* && "$redirect_at" != q ]]; then
         redirect_last=$arg_index
         if [[ -n "$redirect_at" ]]; then
-          redirect_op=${arg_word:redirect_at}
-          arg_word=${arg_word:0:redirect_at-1}
+          cut_call_word "$redirect_at"
         else
           redirect_op=${arg_word#*[<>]}
           arg_word=${arg_word%%[<>]*}
