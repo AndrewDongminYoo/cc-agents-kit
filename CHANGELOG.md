@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-14
+
+`guard-hooks` closes a set of ways a `git commit` could run past `staged-secret-guard` unscanned (`env -S` strings and their nested or glued `-S` layers, runner options, function-call words, variables the same command assigns) and a recursive search that `secrets-path-guard` let print dotenv contents; both hooks refuse more commands than before, and README §Known limits lists the over-refusals.
+`guard-hooks` moves from 0.4.0 to 0.5.0; `repo-gate` (0.2.6), `context-handoff` (0.2.1), `context-meter` (0.1.0) and `quick-look` (0.1.0) are unchanged.
+
 ### Fixed
 
 - `guard-hooks` 0.5.0 `secrets-path-guard` blocks a recursive search that can print dotenv contents without naming a `.env` file (#44).
