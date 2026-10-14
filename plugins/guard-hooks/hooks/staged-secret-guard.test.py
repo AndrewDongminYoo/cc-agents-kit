@@ -1181,6 +1181,32 @@ for command in (
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
         check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+# A quoted < or > in that prefix is part of the word, which ends at the first
+# unquoted one: `f '5>x'>/dev/null` passes 5>x, not 5, so the commit is not
+# read as limited to a file named 5 (the pathspec 5>x, whose > the git
+# argument parse cannot place, is refused), and `f 'a<b'> /dev/null commit`
+# passes a<b and commit, the target after the bare > removed with it.
+quoted_redirect_repo = repo({"5>x": f"{GITHUB}\n", "other.txt": "clean\n"})
+quoted_redirect_clean = repo({"5>x": "clean\n"})
+for command in (
+    "f() { git commit -m x \"$1\"; }; f '5>x'>/dev/null",
+    "f() { git commit -m x \"$1\"; }; h() { f '5>x'>/dev/null; }; h",
+    "f() { git commit -m x \"$1\"; }; f \\5'>x'>/dev/null",
+):
+    for directory in (quoted_redirect_repo, quoted_redirect_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is refused", rc == 2, f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    "f() { git \"$2\" -m x; }; f 'a<b'> /dev/null commit", "f() { git \"$2\" -m x; }; f \"a>b\">/dev/null commit",
+    "f() { git \"$2\" -m x; }; h() { f 'a<b'> /dev/null commit; }; h",
+    # A quoted > with no unquoted one after it is no redirection at all.
+    "f() { git \"$2\" -m x; }; f \"$X>\" commit",
+):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is scanned (expect {expected})",
+              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
+              f"exit={rc} stderr={err.strip()[:160]}")
 
 # A clean index, so a refusal below cannot be a credential that was found.
 plain = repo({"README.md": "# hello\n"})

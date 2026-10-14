@@ -282,7 +282,10 @@ TOKEN_QUOTED=()
 # descriptor or {name}, where a quoted target after it (`5>'out'`) is not. A
 # backslash-newline is removed before the word is read and quotes nothing, so
 # `5\<newline>>out` is still descriptor 5: unlike token_quoted, this is set
-# only where a quote opens or an escape keeps a character.
+# only where a quote opens or an escape keeps a character. Its value is q until
+# the first unquoted < or > arrives, then that character's offset in the token
+# plus one, since quote removal also hides where the prefix ends (`'5>x'>out`
+# is the word 5>x).
 token_prefix_quoted=""
 TOKEN_PREFIX_QUOTED=()
 # An unquoted # at the start of a word opens a comment that runs to the end of
@@ -415,7 +418,7 @@ flush_token() {
       esac
     fi
     [[ -z "$token_quoted" ]] || TOKEN_QUOTED[${#TOKENS[@]}]=1
-    [[ -z "$token_prefix_quoted" ]] || TOKEN_PREFIX_QUOTED[${#TOKENS[@]}]=1
+    [[ -z "$token_prefix_quoted" ]] || TOKEN_PREFIX_QUOTED[${#TOKENS[@]}]=$token_prefix_quoted
     TOKENS+=("$token")
     TOKEN_EXPANSION+=("$token_expansion")
     token=""
@@ -797,7 +800,7 @@ while ((command_pos < command_len)); do
     elif [[ "$char" != $'\n' ]]; then
       token="$token$char"
       token_started=1
-      [[ -n "$token_redirect" ]] || token_prefix_quoted=1
+      [[ -n "$token_redirect" ]] || token_prefix_quoted=q
     fi
     escaped=""
   elif [[ "$quote" == "'" ]]; then
@@ -827,7 +830,7 @@ while ((command_pos < command_len)); do
         quote="$char"
         token_started=1
         token_quoted=1
-        [[ -n "$token_redirect" ]] || token_prefix_quoted=1
+        [[ -n "$token_redirect" ]] || token_prefix_quoted=q
         # $'…' honours \' where plain single quotes do not, so the quote state
         # can drift from bash's after it. No case was found where that drift
         # hides a body the shell runs; this is hardening, not a known leak.
@@ -960,6 +963,9 @@ while ((command_pos < command_len)); do
           fi
         fi
         if [[ "$char" == '<' || "$char" == '>' ]]; then
+          # The token already holds this character, so its length is the
+          # character's offset plus one.
+          [[ -n "$token_redirect" || -z "$token_prefix_quoted" ]] || token_prefix_quoted=${#token}
           token_redirect=1
           last_unquoted_redirect=1
         fi
@@ -1859,7 +1865,9 @@ while :; do
     # it only names a descriptor (`2>err`, `{fd}>err`) or is the & of `&>`; an
     # operator with nothing after it (`>`, `>&`, `>|`) takes the next word as
     # its target. A quoted or escaped prefix names no descriptor: `f '5'>out x`
-    # passes 5 and x, as `f ''>out x` passes an empty word and x.
+    # passes 5 and x, as `f ''>out x` passes an empty word and x. Such a word is
+    # cut where its first unquoted < or > stood, not at a quoted one (`f
+    # '5>x'>out` passes 5>x), and one with none is no redirection at all.
     CALL_WORDS=()
     CALL_KINDS=()
     redirect_target=""
@@ -1872,12 +1880,18 @@ while :; do
         redirect_last=$arg_index
         continue
       fi
-      if [[ "$arg_kind" != literal && "$arg_word" == *[\<\>]* ]]; then
+      redirect_at=${TOKEN_PREFIX_QUOTED[arg_index]-}
+      if [[ "$arg_kind" != literal && "$arg_word" == *[\<\>]* && "$redirect_at" != q ]]; then
         redirect_last=$arg_index
-        redirect_op=${arg_word#*[<>]}
+        if [[ -n "$redirect_at" ]]; then
+          redirect_op=${arg_word:redirect_at}
+          arg_word=${arg_word:0:redirect_at-1}
+        else
+          redirect_op=${arg_word#*[<>]}
+          arg_word=${arg_word%%[<>]*}
+        fi
         [[ "$redirect_op" == *[!\<\>\&\|]* && "$redirect_op" != "<-" ]] || redirect_target=1
-        arg_word=${arg_word%%[<>]*}
-        if [[ -z "${TOKEN_PREFIX_QUOTED[arg_index]-}" ]] \
+        if [[ -z "$redirect_at" ]] \
           && { [[ "$arg_word" != *[!0-9]* || "$arg_word" == "&" ]] || [[ "$arg_word" =~ $FD_VARNAME ]]; }; then
           continue
         fi
@@ -1912,7 +1926,7 @@ while :; do
     INLINE_TOKENS=("$BOUNDARY_PREFIX;")
     INLINE_EXPANSION=("")
     # Where in INLINE_TOKENS a body token with a quoted redirection prefix
-    # landed, so that its copy keeps the mark the original has.
+    # landed, and its mark, so that its copy keeps the mark the original has.
     INLINE_PREFIX_QUOTED=()
     for def_index in "${CALL_DEFS[@]}"; do
       body_start=${FUNC_BODY_START[def_index]}
@@ -2007,7 +2021,8 @@ while :; do
               ;;
           esac
         fi
-        [[ -z "${TOKEN_PREFIX_QUOTED[body_index]-}" ]] || INLINE_PREFIX_QUOTED+=("${#INLINE_TOKENS[@]}")
+        [[ -z "${TOKEN_PREFIX_QUOTED[body_index]-}" ]] \
+          || INLINE_PREFIX_QUOTED+=("${#INLINE_TOKENS[@]}:${TOKEN_PREFIX_QUOTED[body_index]}")
         INLINE_TOKENS+=("$body_token")
         INLINE_EXPANSION+=("$body_expansion")
       done
@@ -2039,7 +2054,7 @@ while :; do
     fi
     if ((${#INLINE_TOKENS[@]} <= inline_room)); then
       for inline_offset in ${INLINE_PREFIX_QUOTED[@]+"${INLINE_PREFIX_QUOTED[@]}"}; do
-        TOKEN_PREFIX_QUOTED[${#TOKENS[@]} + inline_offset]=1
+        TOKEN_PREFIX_QUOTED[${#TOKENS[@]} + ${inline_offset%%:*}]=${inline_offset#*:}
       done
       TOKENS+=("${INLINE_TOKENS[@]}")
       TOKEN_EXPANSION+=("${INLINE_EXPANSION[@]}")
