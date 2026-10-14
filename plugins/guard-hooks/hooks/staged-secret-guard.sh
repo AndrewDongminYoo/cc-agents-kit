@@ -1160,14 +1160,15 @@ split_env_string() {
 }
 # Where env may read an -S string from a word this parse does not place (after
 # a redirection in the value slot, or after an -S string that starts with an
-# option, which GNU env re-parses so it can supply another -S), every later
+# option, which GNU env re-parses so it can supply another -S, or with an
+# expansion, which can supply that option), every later
 # word of the same command is read as an -S string, and a git word in one is
 # refused. The search crosses parentheses and stops at the next ;, | or &
 # outside them. Each word is read as split_env_string reads it (the comment cut,
 # then \_ and \c as word breaks and quotes dropped), but by parameter expansion
 # alone: its here-string writes a temporary file on bash 3.2, once per word.
 refuse_env_strings_ahead() {
-  local ahead depth=0 probe head
+  local ahead depth=0 probe head expanded=""
   for ((ahead = $1; ahead < token_count; ahead++)); do
     case "${TOKENS[ahead]}" in
       "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(")
@@ -1207,6 +1208,19 @@ refuse_env_strings_ahead() {
     case "$probe" in
       *[$' \t\n']git[$' \t\n']* | */git[$' \t\n']*) block_unparsed ;;
     esac
+    # A word that holds a $ (env's own ${NAME}, or the shell's) can be the
+    # program, or supply another -S, and is not read: a commit word after it in
+    # the same string, or a later word that is commit, is refused, also with a
+    # redirection glued on (`commit>/dev/null`) that the shell removes.
+    if [[ "$probe" == *\$* ]]; then
+      [[ "${probe#*\$}" != *[$' \t\n']commit[$' \t\n']* ]] || block_indirect_commit
+      expanded=1
+    elif [[ -n "$expanded" ]]; then
+      case "${TOKENS[ahead]}" in
+        commit) block_indirect_commit ;;
+        commit[\<\>]*) [[ "${TOKEN_EXPANSION[ahead]-}" == literal ]] || block_indirect_commit ;;
+      esac
+    fi
   done
 }
 # `command` runs a builtin or a program, never a shell function, so a name behind
@@ -1675,13 +1689,17 @@ while :; do
           # the options a string supplies, so one that starts with an option
           # can supply another -S (`env -S '-S' 'git commit'`, `env -S
           # '-Sgit commit'`): the string itself and each later word are then
-          # read for glued -S layers too.
+          # read for glued -S layers too. So are they after a first word that
+          # holds an expansion, which can supply that option (`X=-S env -S
+          # '${X}' 'git commit'`).
           case "${ENV_WORDS[0]}" in
             -* | *=* | *[\$\`]*)
               for env_word in "${ENV_WORDS[@]}"; do
                 [[ "$env_word" != commit ]] || block_indirect_commit
               done
-              [[ "${ENV_WORDS[0]}" != -* ]] || refuse_env_strings_ahead "$env_value_index"
+              if [[ "${ENV_WORDS[0]}" == -* || "${ENV_WORDS[0]}" == *[\$\`]* ]]; then
+                refuse_env_strings_ahead "$env_value_index"
+              fi
               refuse_git_ahead "$token_index" named
               indirect=1
               refuse_commit_ahead "$token_index"

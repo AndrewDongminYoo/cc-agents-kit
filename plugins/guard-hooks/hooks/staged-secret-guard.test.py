@@ -602,6 +602,10 @@ env_refused = (
     "env -S '-Sgit -c alias.ci=commit ci -m fixture'", "env -S '-i -Sgit -c alias.ci=commit ci -m fixture'",
     "env -S ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit -c alias.ci=commit ci -m fixture'",
     "env -S '-S' ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit ci'",
+    # A string whose first word holds an expansion can supply that -S too,
+    # from env's own ${NAME} (#69).
+    "X=-S env -S '${X}' 'git commit -m fixture'", "env -S '${X}' '-Sgit commit -m fixture'",
+    'env -S "$X" \'git commit -m fixture\'',
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):
@@ -613,6 +617,22 @@ for command in env_refused:
 for command in (
     'env -S "$CMD" commit -m fixture', 'env -S "$G commit" -m fixture', "env -S '${G} commit' -m fixture",
     "env -S '-i' \"$G\" commit -m fixture", "env -S 'FOO=1' \"$G\" commit -m fixture",
+    # In a later string env may split, a word holding env's own ${NAME} or the
+    # shell's $ is such a program too (#69): a commit word after it in that
+    # string, or a later word that is commit, is refused.
+    "env -S '-S' '${G} commit -m fixture'", "env -S >/tmp/out '${G} commit -m fixture'",
+    "env -S >/tmp/out '${G}' commit -m fixture", "env -S '-S' '-i ${G} commit -m fixture'",
+    "env -S '-S' \"$G commit -m fixture\"",
+    # The shell removes a redirection glued to that commit word.
+    "env -S >/tmp/out '${G}' commit>/dev/null -m fixture", "env -S \"$CMD\" commit>/dev/null -m fixture",
+    "env -S '-S' '${G}' 'commit'>/dev/null -m fixture",
+    # Over-refusals: the last -S string env splits is `-i`, so env splits no
+    # later word and expands no ${G} in it, looks for a program named `${G}
+    # commit -m fixture` or `${G}`, and runs no git (GNU env 9.12 exits 127).
+    # The hook does not follow which option a string supplies and reads every
+    # later word as an -S string.
+    "env -S '-i' '${G} commit -m fixture'", "env -S '-S' '-i' '${G} commit -m fixture'",
+    "env -S '-i' '${G}' commit>/dev/null -m fixture", "env -S >/tmp/out '-i' '${G}' commit -m fixture",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
@@ -696,6 +716,11 @@ for command in (
     "env -S '-i' echo 'fix commit'", "env -S >/tmp/out 'echo commit'",
     "env -S '-i' -u FOO python3 legit.py", "env -S '-i' --unset=FOO python3 legit.py",
     "env -S '-Spython3 legit.py'", "env -S '-i -Spython3 legit.py'",
+    # A string that starts with an expansion, with no git or commit word that
+    # could follow it (#69): a commit inside a later word holding no $ is not
+    # a commit word, nor is one before the $ word.
+    "env -S '${PY:-python3}' script.py", "env -S '${PY}' script.py -m 'fix commit'",
+    "env -S '-S' 'commit ${G}'", "env -S '${PY}' tool.py 'commit>x'",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
