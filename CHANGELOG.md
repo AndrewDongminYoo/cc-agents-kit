@@ -32,6 +32,14 @@ Entries are grouped by release; the topmost section collects work that has not y
 - `guard-hooks` 0.4.1 `staged-secret-guard` refuses `env -S '-S' 'git commit -m x'` instead of letting it pass unscanned (#66).
   GNU `env` re-parses the options an `-S` string supplies, so a string that starts with an option can supply another `-S` that splits a later word.
   After such a string every later word of the command is read as an `-S` string, and a `git` or `/git` word in one is refused, as after a redirection in the `-S` value slot.
+  The option-leading string itself is read the same way, and so are glued `-S` layers: where any word of a string starts with `-`, a word is also read as starting after every `=` and every `S` in it, so `env -S '-i -Sgit commit'`, `env -S '-i' '-S-Sgit commit'` and `env -S '-i' '--split-string=-Sgit commit'` are refused.
+  That can only refuse more, and it refuses `env -S '-i' 'x -Sgit'`, where `env` looks for a program named `x -Sgit` and runs no git.
+- `guard-hooks` 0.4.1 `staged-secret-guard` scans `f() { git "$2" -m x; }; f '5'>/dev/null commit` instead of letting it pass unscanned (#68).
+  When the hook collects a shell function call's words, a word whose part before its first unquoted `<` or `>` was quoted or escaped (`'5'>out`, `"5">out`, `\5>out`, `''>out`) keeps that part as a word, as bash passes it, and only the redirection is removed; an unquoted `5>out` or `{fd}>out` still names a file descriptor and is removed whole.
+- `guard-hooks` 0.4.1 `staged-secret-guard` refuses `X=-S env -S '${X}' 'git commit -m x'`, `env -S '-S' '${G} commit -m x'` and `env -S >/tmp/out '${G} commit -m x'` instead of letting them pass unscanned (#69).
+  GNU `env -S` expands its own `${NAME}` references, so an `-S` string whose first word holds an expansion can supply another `-S`: that string and every later word of the command are now read as `-S` strings, as after an option-leading string.
+  In the words read that way, a word that holds a `$` names a program the hook cannot read, so a `commit` word after it in the same word, or a later word that is `commit` (`env -S >/tmp/out '${G}' commit`, also `commit>/dev/null`), is refused; `env -S '${PY:-python3}' script.py` still passes.
+  That can only refuse more, and it refuses a later word that `env` takes as the program's name without expanding it, as in `env -S '-i' '${G} commit -m x'`, `env -S '-S' '-i' '${G} commit -m x'` and `env -S '-i' '${G}' commit>/dev/null -m x`, where `env` looks for a program named `${G} commit -m x` or `${G}` and runs no git.
 
 ## [0.7.1] — 2026-10-12
 

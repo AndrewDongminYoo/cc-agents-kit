@@ -602,6 +602,10 @@ env_refused = (
     "env -S '-Sgit -c alias.ci=commit ci -m fixture'", "env -S '-i -Sgit -c alias.ci=commit ci -m fixture'",
     "env -S ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit -c alias.ci=commit ci -m fixture'",
     "env -S '-S' ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit ci'",
+    # A string whose first word holds an expansion can supply that -S too,
+    # from env's own ${NAME} (#69).
+    "X=-S env -S '${X}' 'git commit -m fixture'", "env -S '${X}' '-Sgit commit -m fixture'",
+    'env -S "$X" \'git commit -m fixture\'',
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):
@@ -613,6 +617,26 @@ for command in env_refused:
 for command in (
     'env -S "$CMD" commit -m fixture', 'env -S "$G commit" -m fixture', "env -S '${G} commit' -m fixture",
     "env -S '-i' \"$G\" commit -m fixture", "env -S 'FOO=1' \"$G\" commit -m fixture",
+    # In a later string env may split, a word holding env's own ${NAME} or the
+    # shell's $ is such a program too (#69): a commit word after it in that
+    # string, or a later word that is commit, is refused.
+    "env -S '-S' '${G} commit -m fixture'", "env -S >/tmp/out '${G} commit -m fixture'",
+    "env -S >/tmp/out '${G}' commit -m fixture", "env -S '-S' '-i ${G} commit -m fixture'",
+    "env -S '-S' \"$G commit -m fixture\"",
+    # The shell removes a redirection glued to that commit word.
+    "env -S >/tmp/out '${G}' commit>/dev/null -m fixture", "env -S \"$CMD\" commit>/dev/null -m fixture",
+    "env -S '-S' '${G}' 'commit'>/dev/null -m fixture",
+    # The value can end in whitespace, so a commit glued after the expansion
+    # can still be its own word once env splits the string.
+    "X='-Sgit ' env -S '${X}commit -m fixture'", "env -S '-S' '${G}commit -m fixture'",
+    "env -S \"$X\"commit -m fixture", "env -S '-S' \"$G\"commit -m fixture",
+    # Over-refusals: the last -S string env splits is `-i`, so env splits no
+    # later word and expands no ${G} in it, looks for a program named `${G}
+    # commit -m fixture` or `${G}`, and runs no git (GNU env 9.12 exits 127).
+    # The hook does not follow which option a string supplies and reads every
+    # later word as an -S string.
+    "env -S '-i' '${G} commit -m fixture'", "env -S '-S' '-i' '${G} commit -m fixture'",
+    "env -S '-i' '${G}' commit>/dev/null -m fixture", "env -S >/tmp/out '-i' '${G}' commit -m fixture",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
@@ -696,6 +720,11 @@ for command in (
     "env -S '-i' echo 'fix commit'", "env -S >/tmp/out 'echo commit'",
     "env -S '-i' -u FOO python3 legit.py", "env -S '-i' --unset=FOO python3 legit.py",
     "env -S '-Spython3 legit.py'", "env -S '-i -Spython3 legit.py'",
+    # A string that starts with an expansion, with no git or commit word that
+    # could follow it (#69): a commit inside a later word holding no $ is not
+    # a commit word, nor is one before the $ word.
+    "env -S '${PY:-python3}' script.py", "env -S '${PY}' script.py -m 'fix commit'",
+    "env -S '-S' 'commit ${G}'", "env -S '${PY}' tool.py 'commit>x'",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
@@ -1132,6 +1161,56 @@ for label, command in (
 ):
     rc, err = check_hook(command, continued_commit_repo)
     check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+# A quoted or escaped word before a redirection is a call word, not a file
+# descriptor (#68): `f '5'>/dev/null commit` passes 5 and commit, and `f
+# ''>/dev/null commit` an empty word and commit, so "$2" is commit.
+for command in (
+    "f() { git \"$2\" -m x; }; f '5'>/dev/null commit", "f() { git \"$2\" -m x; }; f \"5\">/dev/null commit",
+    "f() { git \"$2\" -m x; }; f \\5>/dev/null commit", "f() { git \"$2\" -m x; }; f '5'> /dev/null commit",
+    "f() { git \"$2\" -m x; }; f ''>/dev/null commit", "f() { git \"$2\" -m x; }; f '{fd}'>/dev/null commit",
+    "f() { git \"$2\" -m x; }; h() { f '5'>/dev/null commit; }; h", "f() { git \"$2\" -m x; }; f 5 commit",
+):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is scanned (expect {expected})",
+              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
+              f"exit={rc} stderr={err.strip()[:160]}")
+# An unquoted number or {name} before it is a descriptor, removed with the
+# redirection: "$2" is empty here and git runs no commit, as in bash. Nor
+# does it where the empty word kept before the redirection is "$1".
+for command in (
+    "f() { git \"$2\" -m x; }; f 5>/dev/null commit", "f() { git \"$2\" -m x; }; f {fd}>/dev/null commit",
+    "f() { git \"$1\" -m x; }; f ''>/dev/null commit",
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+# A quoted < or > in that prefix is part of the word, which ends at the first
+# unquoted one: `f '5>x'>/dev/null` passes 5>x, not 5, so the commit is not
+# read as limited to a file named 5 (the pathspec 5>x, whose > the git
+# argument parse cannot place, is refused), and `f 'a<b'> /dev/null commit`
+# passes a<b and commit, the target after the bare > removed with it.
+quoted_redirect_repo = repo({"5>x": f"{GITHUB}\n", "other.txt": "clean\n"})
+quoted_redirect_clean = repo({"5>x": "clean\n"})
+for command in (
+    "f() { git commit -m x \"$1\"; }; f '5>x'>/dev/null",
+    "f() { git commit -m x \"$1\"; }; h() { f '5>x'>/dev/null; }; h",
+    "f() { git commit -m x \"$1\"; }; f \\5'>x'>/dev/null",
+):
+    for directory in (quoted_redirect_repo, quoted_redirect_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is refused", rc == 2, f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    "f() { git \"$2\" -m x; }; f 'a<b'> /dev/null commit", "f() { git \"$2\" -m x; }; f \"a>b\">/dev/null commit",
+    "f() { git \"$2\" -m x; }; h() { f 'a<b'> /dev/null commit; }; h",
+    # A quoted > with no unquoted one after it is no redirection at all.
+    "f() { git \"$2\" -m x; }; f \"$X>\" commit",
+):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is scanned (expect {expected})",
+              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
+              f"exit={rc} stderr={err.strip()[:160]}")
 
 # A clean index, so a refusal below cannot be a credential that was found.
 plain = repo({"README.md": "# hello\n"})
@@ -1549,6 +1628,16 @@ for label, command in (
 ):
     rc, err = check_hook(command, continued_commit_repo, env=UTF8)
     check(f"{label}, under a UTF-8 locale, scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+# The quoted-prefix offset of a call word is a byte count, and the word is cut
+# in bytes under either locale: counted as characters, `'éé'>x` was cut past
+# the >, and commit was read as the redirection's target (#68).
+for command in (
+    "f() { git \"$2\" -m x; }; f 'éé'>x commit", "f() { git \"$2\" -m x; }; f 'é<b'>/dev/null commit",
+):
+    for locale_env in (dict(os.environ, LC_ALL="C"), UTF8):
+        rc, err = check_hook(command, runner_repo, env=locale_env)
+        check(f"{command} under LC_ALL={locale_env['LC_ALL']} scans the staged credential",
+              rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
 
 # Large input must still reach the real commit after it before the harness's
 # 10 s timeout. A data-only heredoc can be skipped, but a body piped to node
