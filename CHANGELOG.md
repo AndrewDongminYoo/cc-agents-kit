@@ -5,6 +5,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Fixed
+
+- `guard-hooks` 0.5.1 `staged-secret-guard` reads a run of simple references such as `$a$b$c` in one step, so a 64 KB word made of one reference repeated takes well under a second instead of about 8 s, close to the hook's 10 s timeout past which the commit runs unscanned (#72).
+
 ## [0.8.0] — 2026-10-14
 
 `guard-hooks` closes a set of ways a `git commit` could run past `staged-secret-guard` unscanned (`env -S` strings and their nested or glued `-S` layers, runner options, function-call words, variables the same command assigns) and a recursive search that `secrets-path-guard` let print dotenv contents; both hooks refuse more commands than before, and README §Known limits lists the over-refusals.
