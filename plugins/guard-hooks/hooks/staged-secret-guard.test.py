@@ -213,7 +213,8 @@ for label, command in (
     ("a program named by a variable, with an option and its value", '"$EDITOR" --wait notes.txt'),
     # Only git's own options are assumed to take the next word as a value.
     ("a program named by a substitution, with an option before commit", "$(git rev-parse --show-toplevel)/scripts/check.sh --since HEAD~1 commit"),
-    ("a variable naming git, then an option and its value", "g=git; $g --git-dir .git log --grep commit"),
+    # With no visible assignment; `g=git` before it is read as git (#71).
+    ("a variable naming git, then an option and its value", "$g --git-dir .git log --grep commit"),
     ("a program named by a variable, with unquoted flags", "$PYTHON $flags script.py"),
     ("a quoted program and a quoted argument", '"$EDITOR" "$f"'),
     ("a substitution glued to the program name", "$(npm bin)/eslint ."),
@@ -1427,14 +1428,120 @@ for label, command in (
     ("a substitution glued to the rest of the name", '$(dirname "$x")/git commit -m x'),
     ("two substitutions forming the name", "$(a)$(b) commit"),
     ("a variable naming git, then a flag", "$g --no-pager commit -m x"),
-    # git's own options may take the next word as their value.
-    ("a variable naming git, then an option and its value", "g=git; $g --git-dir .git commit -m x"),
-    ("a variable naming git, then --work-tree and its value", "g=git; $g --work-tree . commit -m x"),
-    ("a variable naming git, then --config-env and its value", "g=git; $g --config-env user.name=HOME commit -m x"),
+    # git's own options may take the next word as their value. No assignment
+    # is visible, which would refuse them on its own (#71).
+    ("a variable naming git, then an option and its value", "$g --git-dir .git commit -m x"),
+    ("a variable naming git, then --work-tree and its value", "$g --work-tree . commit -m x"),
+    ("a variable naming git, then --config-env and its value", "$g --config-env user.name=HOME commit -m x"),
 ):
     rc, err = check_hook(command, plain)
     check(f"{label} is refused", rc == 2, f"exit={rc}")
     check(f"{label} names the unreadable program", "program name this hook cannot read" in err, f"stderr={err.strip()[:160]}")
+
+# A variable the same command visibly assigns a git, /git or commit word to,
+# read as an env -S string reads a word, is read as that value where it names
+# the program or an env -S string's words (#71). The values are not evaluated:
+# every word shaped NAME= counts wherever it stands, the order is not followed,
+# and a name with any such value is refused as a program this hook cannot read,
+# on a clean index too. A program word whose expansions are all quoted is one
+# word, refused only for a git mark and only when it may end in git or /git.
+for command in (
+    "X='-Sgit commit' env -S '${X} -m x'", "export X='-Sgit commit'; env -S '${X} -m x'",
+    "C='git commit'; $C -m x", "C='git commit'; ${C} -m x", "C='git commit'; \"$C\" -m x",
+    "G=git; $G commit -m x", "G=git; \"$G\" -c alias.ci=commit ci", "G=/usr/bin/git; $G -c alias.ci=commit ci",
+    "declare C='git commit'; $C -m x", "declare -x C='git commit'; $C -m x", 'declare "C=git commit"; $C -m x',
+    "typeset C='git commit'; $C -m x", "readonly C='git commit'; $C -m x", "local C='git commit'; $C -m x",
+    "C[0]='git commit'; $C -m x", "C+='git commit'; $C -m x", "C=(git log); ${C[@]} -c alias.ci=commit ci",
+    # A prefix assignment, also one whose name a later command expands.
+    "C='git commit' true; $C -m x", "X='-Sgit commit' true; env -S '${X} -m x'",
+    # Inside a function body, or passed to one.
+    "f() { C='git commit'; }; f; $C -m x", "f() { $1 -m x; }; C='git commit'; f \"$C\"",
+    # Behind command, exec or time.
+    "C='git commit'; command $C -m x", "C='git commit'; exec $C -m x", "C='git commit'; time $C -m x",
+    # Behind env, in an env -S string led by an option or an assignment, and in
+    # a later string an option-leading one lets env split.
+    "X='-Sgit commit'; env $X -m x", "X='-S# git commit'; env $X -m x",
+    "X=git; env -S 'FOO=1 ${X}' -c alias.ci=commit ci", "X='git commit'; env -S '-i' '${X} -m x'",
+    "X='git commit'; env -S '-S' '${X} -m x'", "X='-iSgit -c alias.ci=commit ci'; env -S '${X}'",
+    "X='git commit'; env -S \"$X\" -m x",
+    # A commit word alone marks a name, and so does a glued -S layer.
+    "X='commit -m x'; env -S '${G} ${X}'", "X=-Sgit; env $X -c alias.ci=commit ci",
+    # A value that expands a marked name, and a name holding an S.
+    "G='git commit'; C=$G; $C -m x", "G='git commit'; C=\"$G\"; \"$C\" -m x", "CMDS='git commit'; $CMDS -m x",
+    # A quoted word that may still end in git or /git, one a command
+    # substitution continues, and an unquoted one, which can split.
+    "G=git; \"/usr/bin/$G\" -c alias.ci=commit ci", "G=git; \"${G:-${H}}\" -c alias.ci=commit ci",
+    "G=git; \"${G}it\" -c alias.ci=commit ci",
+    "G=git; \"$G/bin$(true)\" -c alias.ci=commit ci", "D='git commit -m'; $D/run", "C=commit; $C -m x",
+    # A value's quotes are dropped, and a word starts after =, S, \ and _ too; a
+    # later git value turns a commit mark into a git one.
+    "C=\"'git'\"; \"$C\" -c alias.ci=commit ci", "X=--split-string=git; env $X -c alias.ci=commit ci",
+    "X='-S\\_git'; env $X -c alias.ci=commit ci", "C=commit; C=git; \"$C\" -c alias.ci=commit ci",
+    # Over-refusals: the value is not followed further than its words, so a
+    # read-only git through a marked name is refused too, as are an unquoted
+    # path under a directory named git, a program that is not git with a commit
+    # word, and a word that assigns nothing.
+    "G=git; $G log", "g=git; $g --git-dir .git log --grep commit", "X='git log'; env -S '${X}'",
+    "ROOT=~/src/git; $ROOT/configure", "CZ='cz commit'; $CZ", "echo C=git; $C status",
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is refused through its visible assignment",
+              rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+# The refusal does not claim a commit that is not there.
+for command in ("G=git; $G log", "G=/usr/local/git; \"$G\" status", "X='git log'; env -S '${X}'"):
+    rc, err = check_hook(command, runner_clean)
+    check(f"{command} names the assigned variable",
+          rc == 2 and "assigns a value holding git or commit" in err and "`commit` follows" not in err,
+          f"exit={rc} stderr={err.strip()[:160]}")
+for command in (
+    # No visible assignment, or one to another name, keeps today's verdict.
+    "env -S '${PY:-python3}' script.py", '"$CMD" -m x', "$C -m x", "Y='git commit'; $C -m x",
+    # A value naming no git or commit word.
+    "PY=python3; $PY script.py", "X=-i env -S '${X} python3 legit.py'", "X=legit.py; env -S 'python3 ${X}'",
+    "D=digit; $D commit.txt",
+    # A marked name that is not a program word, or one in single quotes.
+    "C='git commit'; echo $C", "C='git commit'; echo \"$C\" | wc -c", "C='git commit'; '$C' -m x",
+    "C='git commit'; '$C>x' -m x", "MSG='fix commit'; git log --grep \"$MSG\"",
+    # A quoted program word that cannot end in git or /git: its last expansion
+    # is followed by plain text that cannot end it so, or holds only a commit
+    # mark, which never makes one word git.
+    'KIND=commit; "./scripts/$KIND.sh"', 'step=commit; "$SCRIPTS/$step"', 'X=commit; ./run-"$X".sh',
+    'G=/usr/local/git; "${G}/bin/tool"', 'PREFIX=/opt/homebrew/opt/git; "$PREFIX/bin/git-credential-osxkeychain" get',
+    'ROOT=~/src/git; "$ROOT/configure"', 'G=git; "$G.sh"', 'S=commit; "$S" -m x',
+    # A longer name that starts with a marked one is another name.
+    "G=git; $GIT_DIR/bin/tool", "G=git; ${GIT_DIR}/bin/tool",
+    # IFS is not read: a value is marked by its own words alone.
+    'while IFS= read -r l; do echo "$l"; done < f; D=~/github/x; "$D/run"', "IFS=,; X=legit.py; $X",
+    # A later word env -S may split, which holds only a commit mark.
+    'MSG="fix commit"; env -S \'${PY:-python3}\' script.py --msg "$MSG"',
+    'MSG="fix commit"; env -S \'${PY:-python3}\' script.py --msg "${MSG}"',
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+# Past 16 marks a word is split at every $ and each name looked up instead of
+# matched as a pattern, with the same verdicts.
+MANY_MARKS = "; ".join(f"M{i}=git" for i in range(20))
+for command, expected in (
+    (f"{MANY_MARKS}; $M19 -c alias.ci=commit ci", 2), (f"{MANY_MARKS}; \"${{M1}}\" log", 2),
+    (f"{MANY_MARKS}; \"$M3/bin/tool\"", 0), (f"{MANY_MARKS}; $M log", 0), (f"{MANY_MARKS}; $M1x log", 0),
+    (f"{MANY_MARKS}; M1$N log", 0), (f"{MANY_MARKS}; S=commit; \"$S\" -m x", 0),
+):
+    rc, err = check_hook(command, runner_clean)
+    check(f"with 20 marks, {command[-28:]} exits {expected}", rc == expected, f"exit={rc} stderr={err.strip()[:160]}")
+# The marks are keyed like function names: a variable the hook inherits under a
+# mark's key names no mark of its own.
+rc, err = check_hook("G=git; true; $C -m x", runner_clean, env={**os.environ, "_cc_var_C": "0"})
+check("an inherited mark key marks nothing", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+rc, err = check_hook(f"{MANY_MARKS}; $C -m x", runner_clean, env={**os.environ, "_cc_var_C": "0"})
+check("an inherited mark key marks nothing past 16 marks", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+# A marked name changes nothing about a git named outright.
+for command in ("G=git; git commit -m x", "C='git commit' git commit -m x", "MSG='fix commit'; git commit -m \"$MSG\""):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is scanned (expect {expected})",
+              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
 
 # A heredoc fed to a literal cat or tee is only written, so its body is not read
 # as commands, and a line in it that names git through a variable is no refusal.
@@ -1649,6 +1756,13 @@ large_js = "class Example {\n" + "".join(
 large_inputs = (
     ("61KB executable heredoc", "cat <<'EOF' | node\n" + large_js + "EOF\n"),
     ("60KB quoted word", 'echo "' + "x" * 60000 + '" >/dev/null\n'),
+    # An env -S word is rewritten (quotes dropped, \_ and every = and S read
+    # as breaks) in time linear in its length: as ${x//p/r}, a 16 KB word dense
+    # with quotes ran past 60 s under a UTF-8 locale.
+    ("64KB env -S word dense with quotes", "env -S '-i' '" + '"$a"' * 16000 + "' x\n"),
+    ("60KB env -S word dense with \\_", "env -S '-i' '" + "\\_" * 30000 + "' x\n"),
+    ("60KB env -S word dense with S", "env -S '-i' '-" + "S" * 60000 + "' x\n"),
+    ("60KB env -S value dense with quotes", "env -S '" + '"a' * 30000 + "' x\n"),
 )
 for locale in ("C", UTF8["LC_ALL"]):
     env = dict(os.environ, LC_ALL=locale)
