@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-10-14
+
+`guard-hooks`' `staged-secret-guard` no longer spends about 8 s, close to its 10 s fail-open timeout, on a long word made of `$NAME` references repeated; it reads such a run in one step.
+`guard-hooks` moves from 0.5.0 to 0.5.1; `repo-gate` (0.2.6), `context-handoff` (0.2.1), `context-meter` (0.1.0) and `quick-look` (0.1.0) are unchanged.
+
 ### Fixed
 
 - `guard-hooks` 0.5.1 `staged-secret-guard` reads a run of simple references such as `$a$b$c` in one step, so a 64 KB word made of one reference repeated takes well under a second instead of about 8 s, close to the hook's 10 s timeout past which the commit runs unscanned (#72).
