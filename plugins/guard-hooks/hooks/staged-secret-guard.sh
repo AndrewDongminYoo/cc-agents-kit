@@ -56,6 +56,13 @@ block_indirect_commit() {
   exit 2
 }
 
+# Separate message: no `commit` need be visible (`G=git; $G log`). The program
+# word expands a variable the same command assigns git or commit to (#71).
+block_assigned_program() {
+  echo "Blocked: a word that may run as the program expands a variable this command assigns a value holding git or commit, so it is a program name this hook cannot read, and it may be a git commit whose repository and options are unknown. It is not necessarily a commit: a read-only git through such a variable is refused too. Call git by name (git commit ..., git log ...) so the staged diff can be scanned." >&2
+  exit 2
+}
+
 # A redirection this parse does not follow (a process substitution target, one
 # where -C's value should be, one whose quoting is unsure) sits where git's
 # words are read, so the words after it cannot be placed. Rather than guess,
@@ -1234,6 +1241,11 @@ refuse_env_strings_ahead() {
     # a word that only ends in commit counts too.
     if [[ "$probe" == *\$* ]]; then
       [[ "${probe#*\$}" != *commit[$' \t\n']* ]] || block_indirect_commit
+      # A name marked git, read from the word itself (the probe has lost
+      # every S), as a git word is above (#71). A commit mark is not: a word
+      # this deep is an argument unless a layer before it supplies -S, and
+      # the program then comes from a word that is read in turn.
+      refuse_assigned_names "${TOKENS[ahead]}" git
       expanded=1
     elif [[ -n "$expanded" ]]; then
       case "${TOKENS[ahead]}" in
@@ -1241,6 +1253,190 @@ refuse_env_strings_ahead() {
         commit[\<\>]*) [[ "${TOKEN_EXPANSION[ahead]-}" == literal ]] || block_indirect_commit ;;
       esac
     fi
+  done
+}
+# Variables the command assigns where it can be read (#71). Values are not
+# evaluated, and where an assignment stands relative to the word that expands
+# it is not followed: a name is marked once any word anywhere in the command
+# assigns it a value that holds a git, /git or commit word, and a word that may
+# run as the program and expands a marked name is refused as a program this
+# hook cannot read. A value is read for those words as an env -S string is,
+# glued -S layers included: its quotes are dropped, and a word also starts
+# after every =, S, \ and _ (`-Sgit`, `--split-string=git`, `\_git`), which can
+# only mark more. Every word shaped NAME=, NAME+=, NAME[..]= or NAME[..]+=
+# counts, wherever it stands, which takes in a prefix or plain assignment,
+# export, declare, typeset, local and readonly with or without options, and an
+# array's words (`C=(git commit)`): following where each command starts would
+# tie this to the parse, and a word that assigns nothing (`echo C=git`) can
+# only refuse more. A value that expands a name an earlier word marked takes
+# that mark (`G='git commit'; C=$G`). A value inherited from the environment
+# stays unseen. A mark keeps its kind, git for a value with a git or /git word
+# and commit for one with only a commit word, and marked names use
+# lookup_function's keying: an index into VAR_MARKED behind a key with its own
+# prefix, so an imported variable of that name marks nothing.
+# Bash 3.2 copies the rest of the string for each match of ${x//p/r} and each
+# ${x#*p}, so reading a dense word that way costs time in the square of its
+# length and can pass the hook's 10 s timeout, where it fails open. Words are
+# matched against whole patterns, or split into an array on IFS with globbing
+# off for the split, instead.
+VAR_MARKED=()
+VAR_KIND=()
+ASSIGNMENT_HEAD='^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?[+]?='
+REFERENCE_NAME='^[{]?([A-Za-z_][A-Za-z0-9_]*)'
+marked_at=-1
+name_marked() {
+  local key="_cc_var_$1" mark
+  mark=${!key-}
+  [[ "$mark" =~ ^[0-9]{1,9}$ ]] || return 1
+  mark=$((10#$mark))
+  if ((mark < ${#VAR_MARKED[@]})) && [[ "${VAR_MARKED[mark]}" == "$1" ]]; then
+    marked_at=$mark
+    return 0
+  fi
+  return 1
+}
+# Split $1 at every character of $2 into WORD_PARTS.
+split_word() {
+  local IFS=$2 noglob=""
+  [[ "$-" == *f* ]] || { noglob=1; set -f; }
+  # shellcheck disable=SC2206  # the split is the point, and globbing is off
+  WORD_PARTS=($1)
+  [[ -z "$noglob" ]] || set +f
+}
+# Whether a word expands, as $NAME or ${NAME...}, a marked name, or with a
+# second argument a name marked git. With few marks, each marked name is matched
+# against the word as a pattern; with many, the word is split at every $ and
+# each name after one is looked up.
+MARKS_MATCHED_BY_PATTERN=16
+expands_marked() {
+  ((${#VAR_MARKED[@]} > 0)) || return 1
+  [[ "$1" == *\$* ]] || return 1
+  local index count name part LC_ALL=C
+  if ((${#VAR_MARKED[@]} <= MARKS_MATCHED_BY_PATTERN)); then
+    for ((index = 0; index < ${#VAR_MARKED[@]}; index++)); do
+      [[ -z "${2-}" || "${VAR_KIND[index]}" == git ]] || continue
+      name=${VAR_MARKED[index]}
+      case "$1" in
+        *"\$$name" | *"\$$name"[!A-Za-z0-9_]* | *"\${$name"[!A-Za-z0-9_]*) return 0 ;;
+      esac
+    done
+    return 1
+  fi
+  # Walked in order, not by index: bash 3.2 finds an element by index from the
+  # start of the array, which is again the square of the length. The text
+  # before the first $ is not a reference.
+  split_word "$1" '$'
+  count=0
+  for part in "${WORD_PARTS[@]}"; do
+    ((count++ > 0)) || continue
+    [[ "$part" =~ $REFERENCE_NAME ]] || continue
+    name_marked "${BASH_REMATCH[1]}" || continue
+    [[ -z "${2-}" || "${VAR_KIND[marked_at]}" == git ]] || continue
+    return 0
+  done
+  return 1
+}
+# The kind of mark a value earns, in value_kind: git, commit, or empty.
+read_value_kind() {
+  local value=$1 IFS=""
+  value_kind=""
+  [[ "$value" == *git* || "$value" == *commit* || "$value" == *[\'\"]* ]] || return 0
+  if [[ "$value" == *[\'\"]* ]]; then
+    split_word "$value" "'\""
+    value="${WORD_PARTS[*]-}"
+  fi
+  split_word "$value" $' \t\n=S\\_'
+  IFS=" "
+  value=" ${WORD_PARTS[*]-} "
+  case "$value" in
+    *" git "* | *"/git "*) value_kind=git ;;
+    *" commit "*) value_kind=commit ;;
+  esac
+}
+# The command's assignments are read the first time a word is checked, so a
+# command that never expands a variable where one is checked pays nothing.
+assignments_read=""
+read_assignments() {
+  [[ -n "$assignments_read" ]] && return 0
+  assignments_read=1
+  mark_assignments
+}
+# A word in an env -S string, or one env may read as one. With a second
+# argument, only a name marked git counts.
+refuse_assigned_names() {
+  read_assignments
+  ! expands_marked "$1" "${2-}" || block_assigned_program
+}
+# The word at token_index, which may run as the program; $2 is set when a
+# command substitution continues it. One with an expansion outside quotes can
+# split into a program and its arguments, so any mark refuses it. One whose
+# expansions are all quoted stays one word, which runs git only when it ends in
+# git or /git: a commit mark is not read there, and nor is any mark when the
+# text after its last expansion is plain and cannot end the word that way
+# (`"$G/bin/tool"`, `"./scripts/$KIND.sh"`).
+refuse_program_word() {
+  local tail
+  read_assignments
+  if [[ "${TOKEN_EXPANSION[token_index]}" != quoted || -n "${2-}" ]]; then
+    ! expands_marked "$1" || block_assigned_program
+    return 0
+  fi
+  expands_marked "$1" git || return 0
+  # What follows the word's last $.
+  split_word "$1" '$'
+  tail=${WORD_PARTS[${#WORD_PARTS[@]} - 1]}
+  if [[ "$tail" == \{* ]]; then
+    tail=${tail#*\}}
+  else
+    tail=${tail#"${tail%%[!A-Za-z0-9_]*}"}
+  fi
+  if [[ -n "$tail" && "$tail" != *[\{\}\`]* && "/git" != *"$tail" && "$tail" != */git ]]; then
+    return 0
+  fi
+  block_assigned_program
+}
+mark_assignments() {
+  local index word name value depth member existing LC_ALL=C
+  local members=()
+  for ((index = 0; index < orig_end; index++)); do
+    word=${TOKENS[index]}
+    [[ "$word" == [A-Za-z_]*=* && "$word" =~ $ASSIGNMENT_HEAD ]] || continue
+    value=${word:${#BASH_REMATCH[0]}}
+    name=${word%%[[+=]*}
+    existing=-1
+    if name_marked "$name"; then
+      [[ "${VAR_KIND[marked_at]}" != git ]] || continue
+      existing=$marked_at
+    fi
+    if [[ -z "$value" && "${TOKENS[index + 1]-}" == "$BOUNDARY_PREFIX(" ]]; then
+      # An array's words, up to its closing parenthesis, as one value
+      # (collected in an array, so a long one is not copied word by word).
+      depth=1
+      member=$((index + 2))
+      members=()
+      while ((member < orig_end && depth > 0)); do
+        case "${TOKENS[member]}" in
+          "$BOUNDARY_PREFIX(" | "$BOUNDARY_PREFIX\$(") depth=$((depth + 1)) ;;
+          "$BOUNDARY_PREFIX)" | "$BOUNDARY_PREFIX\$)" | "$BOUNDARY_PREFIX\$)+") depth=$((depth - 1)) ;;
+          *) members+=("${TOKENS[member]}") ;;
+        esac
+        member=$((member + 1))
+      done
+      value=" ${members[*]-}"
+    fi
+    read_value_kind "$value"
+    if [[ -z "$value_kind" ]] && expands_marked "$value"; then
+      value_kind=commit
+      ! expands_marked "$value" git || value_kind=git
+    fi
+    [[ -n "$value_kind" ]] || continue
+    if ((existing >= 0)); then
+      VAR_KIND[existing]=$value_kind
+      continue
+    fi
+    printf -v "_cc_var_$name" '%s' "${#VAR_MARKED[@]}"
+    VAR_MARKED+=("$name")
+    VAR_KIND+=("$value_kind")
   done
 }
 # `command` runs a builtin or a program, never a shell function, so a name behind
@@ -1714,8 +1910,12 @@ while :; do
           # '${X}' 'git commit'`).
           case "${ENV_WORDS[0]}" in
             -* | *=* | *[\$\`]*)
+              # A ${NAME} in the string that the command visibly assigns git
+              # or commit to is read as that value (#71), after an assignment
+              # too: `X=git; env -S 'FOO=1 ${X}' -c alias.ci=commit ci`.
               for env_word in "${ENV_WORDS[@]}"; do
                 [[ "$env_word" != commit ]] || block_indirect_commit
+                [[ "$env_word" != *\$* ]] || refuse_assigned_names "$env_word"
               done
               if [[ "${ENV_WORDS[0]}" == -* || "${ENV_WORDS[0]}" == *[\$\`]* ]]; then
                 refuse_env_strings_ahead "$env_value_index"
@@ -2155,6 +2355,14 @@ while :; do
     if [[ "$current" == "git" || "$current" == */git ]]; then
       scan_start=$((token_index + 1))
     elif [[ -n "${TOKEN_EXPANSION[token_index]-}" ]]; then
+      # An expansion of a name the command visibly assigns git or commit to
+      # (#71): `C='git commit'; $C -m x`, `G=git; "$G" -c alias.ci=commit ci`.
+      # A word marked literal expands nothing, whatever $ it holds ('$C>x').
+      if [[ "${TOKEN_EXPANSION[token_index]}" != literal && "$current" == *\$* ]]; then
+        program_continued=""
+        [[ "${TOKENS[token_index + 1]-}" != "$BOUNDARY_PREFIX\$(" ]] || program_continued=1
+        refuse_program_word "$current" "$program_continued"
+      fi
       if [[ "${TOKENS[token_index + 1]-}" == "$BOUNDARY_PREFIX\$(" ]]; then
         # `$(echo git) commit`: the program name is still being built. Its
         # arguments start where the substitution closes.
