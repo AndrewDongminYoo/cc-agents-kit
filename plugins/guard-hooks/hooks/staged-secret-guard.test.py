@@ -1132,6 +1132,30 @@ for label, command in (
 ):
     rc, err = check_hook(command, continued_commit_repo)
     check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+# A quoted or escaped word before a redirection is a call word, not a file
+# descriptor (#68): `f '5'>/dev/null commit` passes 5 and commit, and `f
+# ''>/dev/null commit` an empty word and commit, so "$2" is commit.
+for command in (
+    "f() { git \"$2\" -m x; }; f '5'>/dev/null commit", "f() { git \"$2\" -m x; }; f \"5\">/dev/null commit",
+    "f() { git \"$2\" -m x; }; f \\5>/dev/null commit", "f() { git \"$2\" -m x; }; f '5'> /dev/null commit",
+    "f() { git \"$2\" -m x; }; f ''>/dev/null commit", "f() { git \"$2\" -m x; }; f '{fd}'>/dev/null commit",
+    "f() { git \"$2\" -m x; }; h() { f '5'>/dev/null commit; }; h", "f() { git \"$2\" -m x; }; f 5 commit",
+):
+    for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is scanned (expect {expected})",
+              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
+              f"exit={rc} stderr={err.strip()[:160]}")
+# An unquoted number or {name} before it is a descriptor, removed with the
+# redirection: "$2" is empty here and git runs no commit, as in bash. Nor
+# does it where the empty word kept before the redirection is "$1".
+for command in (
+    "f() { git \"$2\" -m x; }; f 5>/dev/null commit", "f() { git \"$2\" -m x; }; f {fd}>/dev/null commit",
+    "f() { git \"$1\" -m x; }; f ''>/dev/null commit",
+):
+    for directory in (runner_repo, runner_clean):
+        rc, err = check_hook(command, directory)
+        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
 
 # A clean index, so a refusal below cannot be a credential that was found.
 plain = repo({"README.md": "# hello\n"})

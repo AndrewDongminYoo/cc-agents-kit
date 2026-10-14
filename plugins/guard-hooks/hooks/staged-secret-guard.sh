@@ -1840,7 +1840,8 @@ while :; do
     # x`. A word is cut at its first < or >, and what came before stays unless
     # it only names a descriptor (`2>err`, `{fd}>err`) or is the & of `&>`; an
     # operator with nothing after it (`>`, `>&`, `>|`) takes the next word as
-    # its target.
+    # its target. A quoted or escaped prefix names no descriptor: `f '5'>out x`
+    # passes 5 and x, as `f ''>out x` passes an empty word and x.
     CALL_WORDS=()
     CALL_KINDS=()
     redirect_target=""
@@ -1858,7 +1859,8 @@ while :; do
         redirect_op=${arg_word#*[<>]}
         [[ "$redirect_op" == *[!\<\>\&\|]* && "$redirect_op" != "<-" ]] || redirect_target=1
         arg_word=${arg_word%%[<>]*}
-        if [[ "$arg_word" != *[!0-9]* || "$arg_word" == "&" ]] || [[ "$arg_word" =~ $FD_VARNAME ]]; then
+        if [[ -z "${TOKEN_PREFIX_QUOTED[arg_index]-}" ]] \
+          && { [[ "$arg_word" != *[!0-9]* || "$arg_word" == "&" ]] || [[ "$arg_word" =~ $FD_VARNAME ]]; }; then
           continue
         fi
       fi
