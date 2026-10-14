@@ -1163,6 +1163,50 @@ note_env_value_subst() {
   [[ -z "$runner_appends" ]] || env_value_subst=A
   return 0
 }
+# Bash 3.2 copies the rest of the string for each match of ${x//p/r}, and under
+# a multibyte locale it walks the string from its start as well: a 3.2 KB env
+# -S word holding 1,600 quotes took 1.9 s per replacement under en_US.UTF-8, and
+# a 16 KB one ran past 60 s, well over the hook's 10 s timeout, where it fails
+# open. The words an env -S string is read from are rewritten by splitting on
+# IFS instead, with globbing off, which takes time linear in their length.
+# Replace each character of $2 in $1 with $3, which is empty or one character,
+# into `replaced`.
+replace_chars() {
+  local LC_ALL=C IFS
+  replaced=$1
+  case "$replaced" in
+    *["$2"]*) ;;
+    *) return 0 ;;
+  esac
+  split_word "$1" "$2"
+  IFS=$3
+  replaced="${WORD_PARTS[*]-}"
+}
+# Read each \_ and \c in $1 as a space, as env -S does, into `replaced`. Every
+# other backslash is kept.
+replace_env_escapes() {
+  local LC_ALL=C IFS part first=1
+  local out=()
+  replaced=$1
+  case "$replaced" in
+    *\\[_c]*) ;;
+    *) return 0 ;;
+  esac
+  split_word "$1" "\\"
+  for part in ${WORD_PARTS[@]+"${WORD_PARTS[@]}"}; do
+    if [[ -n "$first" ]]; then
+      first=""
+      out+=("$part")
+      continue
+    fi
+    case "$part" in
+      [_c]*) out+=(" ${part#?}") ;;
+      *) out+=("\\$part") ;;
+    esac
+  done
+  IFS=""
+  replaced="${out[*]-}"
+}
 # Split an env -S string into ENV_WORDS as env does. An unquoted # that starts a
 # word begins a comment to the end of the string, so the string is cut there,
 # but only when nothing before that # is quoted, escaped or expanded (an
@@ -1176,9 +1220,9 @@ split_env_string() {
   if [[ "$env_head" != " $env_string" && "$env_head" != *[\'\"\\\$\`]* ]]; then
     env_string=$env_head
   fi
-  env_string=${env_string//\\_/ }
-  env_string=${env_string//\\c/ }
-  env_string=${env_string//[\'\"]/}
+  replace_env_escapes "$env_string"
+  replace_chars "$replaced" "'\"" ""
+  env_string=$replaced
   ENV_WORDS=()
   IFS=$' \t\n' read -r -d '' -a ENV_WORDS <<<"$env_string" || true
 }
@@ -1215,20 +1259,21 @@ refuse_env_strings_ahead() {
     # (`-S-Sgit`, `-S--split-string=git`), also inside the current string
     # (`-S '-i -Sgit'`), so where any word of it starts with - a word also
     # starts after every = and every S. That can only refuse more.
-    head=${probe//\\_/ }
-    head=" ${head//[\'\"]/}"
+    replace_env_escapes "$probe"
+    replace_chars "$replaced" "'\"" ""
+    head=" $replaced"
     if [[ "$head" == *[$' \t\n']-* ]]; then
-      probe=${probe//=/ }
-      probe=${probe//S/ }
+      replace_chars "$probe" "=S" " "
+      probe=$replaced
     fi
     head=" $probe"
     head=${head%%[$' \t\n']\#*}
     if [[ "$head" != " $probe" && "$head" != *[\'\"\\\$\`]* ]]; then
       probe=$head
     fi
-    probe=${probe//\\_/ }
-    probe=${probe//\\c/ }
-    probe=" ${probe//[\'\"]/} "
+    replace_env_escapes "$probe"
+    replace_chars "$replaced" "'\"" ""
+    probe=" $replaced "
     case "$probe" in
       *[$' \t\n']git[$' \t\n']* | */git[$' \t\n']*) block_unparsed ;;
     esac

@@ -1756,6 +1756,13 @@ large_js = "class Example {\n" + "".join(
 large_inputs = (
     ("61KB executable heredoc", "cat <<'EOF' | node\n" + large_js + "EOF\n"),
     ("60KB quoted word", 'echo "' + "x" * 60000 + '" >/dev/null\n'),
+    # An env -S word is rewritten (quotes dropped, \_ and every = and S read
+    # as breaks) in time linear in its length: as ${x//p/r}, a 16 KB word dense
+    # with quotes ran past 60 s under a UTF-8 locale.
+    ("64KB env -S word dense with quotes", "env -S '-i' '" + '"$a"' * 16000 + "' x\n"),
+    ("60KB env -S word dense with \\_", "env -S '-i' '" + "\\_" * 30000 + "' x\n"),
+    ("60KB env -S word dense with S", "env -S '-i' '-" + "S" * 60000 + "' x\n"),
+    ("60KB env -S value dense with quotes", "env -S '" + '"a' * 30000 + "' x\n"),
 )
 for locale in ("C", UTF8["LC_ALL"]):
     env = dict(os.environ, LC_ALL=locale)
