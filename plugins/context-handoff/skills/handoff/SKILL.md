@@ -48,9 +48,11 @@ Use File Mode when a context-threshold nudge fires (the `context-meter` plugin s
 1. Write `~/.claude/handoffs/<repo-basename>-<YYYYMMDD-HHMM>.md`, and create the directory if needed.
 2. Make the first line exactly `cwd: <absolute project root>`. Nothing here requires that line, but it is what a SessionStart pickup hook would grep to route the file to the right project, and writing it costs nothing if you add one later.
 3. Add a `NEXT MISSION` section containing one short paragraph that tells the successor session what to do first, followed by the standard template below.
+   End the file with this line, because the receiving session sees only the file and not this skill: `After resuming from this file, move it to ~/.claude/handoffs/archive/ so it is not picked up twice.`
 4. Tell the user the file path and recommend `/clear` or a new session. Paste the file in yourself, or wire a SessionStart hook that surfaces anything in `~/.claude/handoffs/` whose `cwd:` matches the project and archives it once picked up.
+   Also tell the user to move the file to `~/.claude/handoffs/archive/` once the new session has resumed from it.
 
-After a session resumes from the file, move the file to `~/.claude/handoffs/archive/` so it is not picked up twice.
+The producing session ends before the file is used, so the archive step belongs to the receiving session or to the user, never to the session that wrote the file.
 Never write a handoff file without one of the triggers above.
 Never commit handoff files.
 

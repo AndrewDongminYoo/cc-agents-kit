@@ -27,12 +27,13 @@ Rules the routing depends on:
 - **Never hand-write a store that a job generates.**
   If a scheduled job builds a journal or digest from memory files, write the memory well and let the job carry the fact there.
   A direct write to the generated store collides with the job.
-- **A page you add to a shared knowledge store must pass that store's own check before the session ends.** Before you finish:
-  - Read the store's schema first.
-  - Register the page the way the store indexes its pages.
-  - Run the store's check and leave it green.
+- **A page you add to a shared knowledge store must meet the conventions that store defines before the session ends.** Before you finish, apply each one the store actually has:
+  - If it documents a schema, read the schema first.
+  - If it keeps an index, register the page the way the store indexes its pages.
+  - If it has a check command, run it and leave it green.
 
-  A page added without these steps is debt that another session has to diagnose, and an invalid page can turn the shared check red for every other session.
+  Do not invent a schema, an index, or a command that the store does not define; a plain directory of Markdown files needs none of these steps.
+  A page added without the steps its store requires is debt that another session has to diagnose, and an invalid page can turn the shared check red for every other session.
 - Keep accounts and contexts separate: work written for one account's store never lands in another's.
 - Classify scope out loud (project vs global vs cross-project store) for each fact.
   Make the decision at save time, and say it, because a decision that is not said is the one that gets skipped.
