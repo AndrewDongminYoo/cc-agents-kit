@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `context-handoff` 0.2.2 `log-it` adds an extend, retire, then create step before a new memory is written, and its routing rules no longer name one author's wiki, journal job or rule files.
+- `context-handoff` 0.2.2 `handoff` names when File Mode applies and tells you to archive a handoff file after a session resumes from it and never to commit one.
+  It no longer names a PreCompact hook that this plugin does not ship, and it adds a receiving-side mistake: acting on a handoff's stated status without reading the source again.
+
 ## [0.8.1] — 2026-10-14
 
 `guard-hooks`' `staged-secret-guard` no longer spends about 8 s, close to its 10 s fail-open timeout, on a long word made of `$NAME` references repeated; it reads such a run in one step.
