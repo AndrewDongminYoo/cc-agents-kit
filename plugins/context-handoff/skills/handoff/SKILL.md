@@ -12,7 +12,7 @@ metadata:
 
 Produce a detailed, self-contained context summary that lets work continue in a brand-new session with no access to this one.
 By default, print the output to chat for the user to copy and paste.
-Use File Mode (below) only when a context-threshold nudge requests it or the user explicitly asks for a handoff file.
+Use File Mode (below) only for one of its three triggers: a context-threshold nudge, an explicit request for a handoff file, or a `log-it` thin handoff.
 
 ## When to Use
 
@@ -43,16 +43,14 @@ Make the call at a phase boundary ("ok, we're done with that"), never mid-phase.
 
 ## File Mode
 
-Use File Mode when a context-threshold nudge fires (the `context-meter` plugin sends one, if you run it), when the user explicitly asks for a handoff file, or when `log-it` routes unfinished work to its thin handoff (that variant keeps its own shorter shape and follows the archive and commit rules below):
+Use File Mode when a context-threshold nudge fires (the `context-meter` plugin sends one, if you run it), when the user explicitly asks for a handoff file, or when `log-it` routes unfinished work to its thin handoff (that variant replaces step 3 with its own shorter body and follows the other steps):
 
-1. Write `~/.claude/handoffs/<repo-basename>-<YYYYMMDD-HHMM>.md`, and create both `~/.claude/handoffs/` and `~/.claude/handoffs/archive/` if they are missing.
+1. Write `~/.claude/handoffs/<repo-basename>-<YYYYMMDD-HHMM>.md`, and create the directory if needed.
 2. Make the first line exactly `cwd: <absolute project root>`. Nothing here requires that line, but it is what a SessionStart pickup hook would grep to route the file to the right project, and writing it costs nothing if you add one later.
 3. Add a `NEXT MISSION` section containing one short paragraph that tells the successor session what to do first, followed by the standard template below.
-   End the file with this line, because the receiving session sees only the file and not this skill: `After resuming from this file, create ~/.claude/handoffs/archive/ if it is missing and move this file into it, so it is not picked up twice.`
 4. Tell the user the file path and recommend `/clear` or a new session. Paste the file in yourself, or wire a SessionStart hook that surfaces anything in `~/.claude/handoffs/` whose `cwd:` matches the project and archives it once picked up.
-   Also tell the user to move the file to `~/.claude/handoffs/archive/` once the new session has resumed from it.
 
-The producing session ends before the file is used, so the archive step belongs to the receiving session or to the user, never to the session that wrote the file.
+Archiving belongs to that pickup hook: a hook that surfaces a file archives it, and without a hook nothing surfaces the file a second time, so neither session has an archive step.
 Never write a handoff file without one of the triggers above.
 Never commit handoff files.
 
