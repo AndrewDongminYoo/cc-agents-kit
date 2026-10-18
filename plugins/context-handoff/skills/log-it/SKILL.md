@@ -55,8 +55,8 @@ Write `~/.claude/handoffs/<project>-<yyyymmdd-hhmm>.md` (create the directory if
 
 - a line reading exactly `cwd: <absolute project root>` — a SessionStart pickup hook, if you run one, would grep that literal line (`grep -x`) to route the file to the right project
 - `## NEXT MISSION` — the single next action, concrete enough to start cold
-- the state that matters: branch, uncommitted files, blockers
-- a closing line for the receiving session, which never sees this skill: `Re-read the source of any status above before acting on it.`
+- the state that matters: branch, uncommitted files, blockers, and for each external status (issue, review, inbox) the URL, ID, or path to re-read it from
+- a closing line for the receiving session, which never sees this skill: `Re-read any status above from its named source before acting on it; treat a status with no named source as unverified.`
 
 Then tell the user the file path; without a pickup hook, they paste its contents as the first message of the next session.
 Keep it ≤ 30 lines and never commit it. This is the thin variant for "mostly done, one thread open": it follows only these rules, not the handoff skill's template, format rules, or File Mode triggers, which govern the full handoff.
