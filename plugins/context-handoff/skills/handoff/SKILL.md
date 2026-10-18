@@ -11,7 +11,8 @@ metadata:
 ## Overview
 
 Produce a detailed, self-contained context summary that lets work continue in a brand-new session with no access to this one.
-The output is printed to the chat for the user to copy and paste — it is NOT written to a file.
+By default, print the output to chat for the user to copy and paste.
+Use File Mode (below) only when a context-threshold nudge requests it or the user explicitly asks for a handoff file.
 
 ## When to Use
 
@@ -20,8 +21,8 @@ The output is printed to the chat for the user to copy and paste — it is NOT w
 - The context window is approaching capacity.
 - You need to carry context to another machine, tool, or teammate.
 
-**Not this skill:** a short durable fact for future sessions → write a memory file in the persistent memory directory and index it in `MEMORY.md` (auto-loaded each session). `handoff` only prints to chat; never write memory files from here — the two channels serve different lifetimes.
-**Handoff-first policy:** the first auto-compact of every session is intercepted by the `handoff-first-precompact` PreCompact hook. When that interception message appears, this skill IS the first option: print the handoff immediately and tell the user to `/clear` and paste it into the fresh session. Only if the user chooses to keep the session does the next auto-compact proceed normally.
+**Not this skill:** a short durable fact for future sessions → write a memory file in the persistent memory directory and index it in `MEMORY.md` (auto-loaded each session). Never write memory files from `handoff` — the two channels serve different lifetimes.
+**Handoff-first policy:** if you run a PreCompact hook that intercepts the first auto-compact of a session (this plugin ships none), its interception message makes this skill the first option: print the handoff immediately and tell the user to `/clear` and paste it into the fresh session. Only if the user chooses to keep the session does the next auto-compact proceed normally.
 
 If the session has no meaningful work to preserve, say so and stop.
 
@@ -40,16 +41,19 @@ If nothing travels but the context is degrading anyway, that is the handoff-firs
 If a hook triggered this — a PreCompact interception, or a context-threshold nudge — the gate is already answered: skip straight to Steps.
 Make the call at a phase boundary ("ok, we're done with that"), never mid-phase.
 
-## File Mode (context-threshold automation)
+## File Mode
 
-When the user asks for a handoff FILE, or a context-threshold nudge fires if you run one, write instead of printing:
+Use File Mode when a context-threshold nudge fires (the `context-meter` plugin sends one, if you run it) or the user explicitly asks for a handoff file.
+`log-it` writes its own thin handoff file under its own rules; this section does not govern that file.
 
-1. Path: `~/.claude/handoffs/<repo-basename>-<YYYYMMDD-HHMM>.md` (create the directory if needed).
-2. First line of the file body must be exactly `cwd: <absolute project root>`. Nothing here requires that line, but it is what a SessionStart pickup hook would grep to route the file to the right project, and writing it costs nothing if you add one later.
-3. Then add a `NEXT MISSION` section (one short paragraph: what the successor session must do first), followed by the standard template below.
-4. Tell the user the file path and recommend `/clear` or a new session. Paste the file in yourself, or wire a SessionStart hook that surfaces anything in `~/.claude/handoffs/` whose `cwd:` matches the project and archives it once picked up.
+1. Write `~/.claude/handoffs/<repo-basename>-<YYYYMMDD-HHMM>.md`, and create the directory if needed.
+2. Make the first line exactly `cwd: <absolute project root>`. Nothing here requires that line, but it is what a SessionStart pickup hook would grep to route the file to the right project, and writing it costs nothing if you add one later.
+3. Add a `NEXT MISSION` section containing one short paragraph that tells the successor session what to do first, followed by the standard template below.
+4. Tell the user the file path and recommend `/clear` or a new session. Without a pickup hook, the user pastes the file's contents as the first message of the new session (copying the file to the other machine first when the session moves). Or wire a SessionStart hook that surfaces anything in `~/.claude/handoffs/` whose `cwd:` matches the project and archives it once picked up.
 
-File mode is the one sanctioned exception to "print only, never write".
+Archiving belongs to that pickup hook: a hook that surfaces a file archives it, and without a hook nothing surfaces the file a second time, so neither session has an archive step.
+Never write a handoff file without one of the triggers above.
+Never commit handoff files.
 
 ## Steps
 
@@ -57,7 +61,7 @@ File mode is the one sanctioned exception to "print only, never write".
    - `git diff --stat HEAD~10..HEAD` — recent changes
    - `git status --porcelain` — uncommitted changes
 2. **Extract** from the conversation: exact user wording, work completed, decisions, files touched, constraints/preferences established.
-3. **Format** using the template below and print it to the chat.
+3. **Format** using the template below and deliver it through the selected mode.
 
 Write in first person ("I did...", "I told you...").
 Capture USER REQUESTS and EXPLICIT CONSTRAINTS verbatim — do not paraphrase or invent them.
@@ -110,7 +114,10 @@ EXPLICIT CONSTRAINTS
 CONTEXT FOR CONTINUATION
 ------------------------
 - [What the next session needs to know; warnings/gotchas; doc references]
+- Before acting on any status recorded above (tracker, review, store or console, inbox), re-read its source: this handoff records what the writing session believed, and that status may have changed since.
 ```
+
+The last line of CONTEXT FOR CONTINUATION is fixed text: keep it in every handoff, because the receiving session sees only the handoff and never this skill.
 
 ## Format Rules
 
@@ -123,7 +130,7 @@ CONTEXT FOR CONTINUATION
 
 ## Continuation Instructions
 
-After printing the summary, tell the user:
+For chat output, tell the user:
 
 ```plaintext
 TO CONTINUE IN A NEW SESSION:
@@ -134,7 +141,10 @@ TO CONTINUE IN A NEW SESSION:
 
 ## Common Mistakes
 
-- Writing to a file or committing — this skill only prints to chat, except File Mode above (never commit either way).
+- Writing a file from this skill without one of the File Mode triggers: an explicit request or a context-threshold nudge.
+- Putting an instruction for the receiving session only in this skill; the receiver reads the handoff, so anything it must do belongs in the handoff text.
+- Committing a handoff file.
 - Paraphrasing user requests or inventing constraints — both must be verbatim.
 - Using `#` headers / bold / code fences in the content — breaks clean paste.
 - Calling non-existent tools (`session_read`, `todoread`) — the conversation is already in context.
+- Dropping the fixed re-read line from CONTEXT FOR CONTINUATION: without it the receiving side builds on stated status (tracker, review, store or console, inbox) that may have changed since the handoff was written.
