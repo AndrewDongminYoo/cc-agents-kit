@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-10-18
+
+`context-handoff`'s `log-it` and `handoff` skills catch up with the copies maintained outside the plugin, and drop text that only fit one author's setup (#77).
+`context-handoff` moves from 0.2.1 to 0.2.2; `guard-hooks` (0.5.1), `repo-gate` (0.2.6), `context-meter` (0.1.0) and `quick-look` (0.1.0) are unchanged.
+
 ### Changed
 
 - `context-handoff` 0.2.2 `log-it` adds an extend, retire, then create step before a new memory is written, applies a shared store's schema, index and check steps only when the store defines them, and no longer names one author's wiki, journal job or rule files.
