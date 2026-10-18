@@ -8,8 +8,8 @@ Entries are grouped by release; the topmost section collects work that has not y
 ### Changed
 
 - `context-handoff` 0.2.2 `log-it` adds an extend, retire, then create step before a new memory is written, applies a shared store's schema, index and check steps only when the store defines them, and no longer names one author's wiki, journal job or rule files.
-  Its thin handoff is a File Mode trigger of `handoff` and ends with a line telling the receiving session to re-read stated status.
-- `context-handoff` 0.2.2 `handoff` names when File Mode applies (a context-threshold nudge, an explicit request, or a `log-it` thin handoff) and never commits a handoff file.
+  Its thin handoff states that it follows its own rules rather than `handoff`'s, tells the user how to deliver it, and ends with a line telling the receiving session to re-read stated status.
+- `context-handoff` 0.2.2 `handoff` names when File Mode applies (a context-threshold nudge or an explicit request), says how to deliver the file without a pickup hook, and never commits a handoff file.
   Every handoff carries a fixed line telling the receiving session to re-read tracker, review, store or inbox status before acting on it, because the receiver reads the handoff and never the skill.
   Archiving stays with the pickup hook that surfaces a file, and the skill no longer names a PreCompact hook that this plugin does not ship.
 

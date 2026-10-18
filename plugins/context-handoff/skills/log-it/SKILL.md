@@ -58,8 +58,8 @@ Write `~/.claude/handoffs/<project>-<yyyymmdd-hhmm>.md` (create the directory if
 - the state that matters: branch, uncommitted files, blockers
 - a closing line for the receiving session, which never sees this skill: `Re-read the source of any status above before acting on it.`
 
-Then tell the user the file path, as the handoff skill's File Mode does.
-Keep it ≤ 30 lines. The full template belongs to the handoff skill; this is the thin variant for "mostly done, one thread open", it replaces that template, and it is one of the handoff skill's File Mode triggers. Never commit it.
+Then tell the user the file path; without a pickup hook, they paste its contents as the first message of the next session.
+Keep it ≤ 30 lines and never commit it. This is the thin variant for "mostly done, one thread open": it follows only these rules, not the handoff skill's template, format rules, or File Mode triggers, which govern the full handoff.
 
 ## Gate
 

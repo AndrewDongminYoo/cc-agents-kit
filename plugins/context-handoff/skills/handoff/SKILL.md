@@ -12,7 +12,7 @@ metadata:
 
 Produce a detailed, self-contained context summary that lets work continue in a brand-new session with no access to this one.
 By default, print the output to chat for the user to copy and paste.
-Use File Mode (below) only for one of its three triggers: a context-threshold nudge, an explicit request for a handoff file, or a `log-it` thin handoff.
+Use File Mode (below) only when a context-threshold nudge requests it or the user explicitly asks for a handoff file.
 
 ## When to Use
 
@@ -43,12 +43,13 @@ Make the call at a phase boundary ("ok, we're done with that"), never mid-phase.
 
 ## File Mode
 
-Use File Mode when a context-threshold nudge fires (the `context-meter` plugin sends one, if you run it), when the user explicitly asks for a handoff file, or when `log-it` routes unfinished work to its thin handoff (that variant replaces step 3 with its own shorter body and follows the other steps):
+Use File Mode when a context-threshold nudge fires (the `context-meter` plugin sends one, if you run it) or the user explicitly asks for a handoff file.
+`log-it` writes its own thin handoff file under its own rules; this section does not govern that file.
 
 1. Write `~/.claude/handoffs/<repo-basename>-<YYYYMMDD-HHMM>.md`, and create the directory if needed.
 2. Make the first line exactly `cwd: <absolute project root>`. Nothing here requires that line, but it is what a SessionStart pickup hook would grep to route the file to the right project, and writing it costs nothing if you add one later.
 3. Add a `NEXT MISSION` section containing one short paragraph that tells the successor session what to do first, followed by the standard template below.
-4. Tell the user the file path and recommend `/clear` or a new session. Paste the file in yourself, or wire a SessionStart hook that surfaces anything in `~/.claude/handoffs/` whose `cwd:` matches the project and archives it once picked up.
+4. Tell the user the file path and recommend `/clear` or a new session. Without a pickup hook, the user pastes the file's contents as the first message of the new session (copying the file to the other machine first when the session moves). Or wire a SessionStart hook that surfaces anything in `~/.claude/handoffs/` whose `cwd:` matches the project and archives it once picked up.
 
 Archiving belongs to that pickup hook: a hook that surfaces a file archives it, and without a hook nothing surfaces the file a second time, so neither session has an archive step.
 Never write a handoff file without one of the triggers above.
@@ -140,7 +141,7 @@ TO CONTINUE IN A NEW SESSION:
 
 ## Common Mistakes
 
-- Writing to a file without one of the File Mode triggers: an explicit request, a context-threshold nudge, or a `log-it` thin handoff.
+- Writing a file from this skill without one of the File Mode triggers: an explicit request or a context-threshold nudge.
 - Putting an instruction for the receiving session only in this skill; the receiver reads the handoff, so anything it must do belongs in the handoff text.
 - Committing a handoff file.
 - Paraphrasing user requests or inventing constraints — both must be verbatim.
