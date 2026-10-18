@@ -43,7 +43,7 @@ Make the call at a phase boundary ("ok, we're done with that"), never mid-phase.
 
 ## File Mode
 
-Use File Mode when a context-threshold nudge fires (the `context-meter` plugin sends one, if you run it) or the user explicitly asks for a handoff file:
+Use File Mode when a context-threshold nudge fires (the `context-meter` plugin sends one, if you run it), when the user explicitly asks for a handoff file, or when `log-it` routes unfinished work to its thin handoff (that variant keeps its own shorter shape and follows the archive and commit rules below):
 
 1. Write `~/.claude/handoffs/<repo-basename>-<YYYYMMDD-HHMM>.md`, and create the directory if needed.
 2. Make the first line exactly `cwd: <absolute project root>`. Nothing here requires that line, but it is what a SessionStart pickup hook would grep to route the file to the right project, and writing it costs nothing if you add one later.
@@ -115,7 +115,10 @@ EXPLICIT CONSTRAINTS
 CONTEXT FOR CONTINUATION
 ------------------------
 - [What the next session needs to know; warnings/gotchas; doc references]
+- Before acting on any status recorded above (tracker, review, store or console, inbox), re-read its source: this handoff records what the writing session believed, and that status may have changed since.
 ```
+
+The last line of CONTEXT FOR CONTINUATION is fixed text: keep it in every handoff, because the receiving session sees only the handoff and never this skill.
 
 ## Format Rules
 
@@ -139,11 +142,10 @@ TO CONTINUE IN A NEW SESSION:
 
 ## Common Mistakes
 
-- Writing to a file without an explicit File Mode request or a context-threshold nudge.
+- Writing to a file without one of the File Mode triggers: an explicit request, a context-threshold nudge, or a `log-it` thin handoff.
+- Putting an instruction for the receiving session only in this skill; the receiver reads the handoff, so anything it must do belongs in the handoff text.
 - Committing a handoff file.
 - Paraphrasing user requests or inventing constraints — both must be verbatim.
 - Using `#` headers / bold / code fences in the content — breaks clean paste.
 - Calling non-existent tools (`session_read`, `todoread`) — the conversation is already in context.
-- **Receiving side:** building on a handoff's stated status (tracker, review, store or console, inbox) without re-reading the source.
-  A handoff records what an earlier session believed when it wrote the file, and that status may have changed since.
-  Re-read the source before acting on it.
+- Dropping the fixed re-read line from CONTEXT FOR CONTINUATION: without it the receiving side builds on stated status (tracker, review, store or console, inbox) that may have changed since the handoff was written.

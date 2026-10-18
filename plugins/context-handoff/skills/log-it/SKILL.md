@@ -56,8 +56,9 @@ Write `~/.claude/handoffs/<project>-<yyyymmdd-hhmm>.md` with:
 - a line reading exactly `cwd: <absolute project root>` — a SessionStart pickup hook, if you run one, would grep that literal line (`grep -x`) to route the file to the right project
 - `## NEXT MISSION` — the single next action, concrete enough to start cold
 - the state that matters: branch, uncommitted files, blockers
+- a closing line for the receiving session, which never sees this skill: `Re-read the source of any status above before acting on it. After resuming from this file, move it to ~/.claude/handoffs/archive/ so it is not picked up twice.`
 
-Keep it ≤ 30 lines. The full template belongs to the handoff skill; this is the thin variant for "mostly done, one thread open".
+Keep it ≤ 30 lines. The full template belongs to the handoff skill; this is the thin variant for "mostly done, one thread open", and it is one of the handoff skill's File Mode triggers. Never commit it.
 
 ## Gate
 
