@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `context-handoff` 0.2.3 `handoff` asks for the source of each external status (a URL, an ID, or a path) in CURRENT STATE, and its fixed closing line tells the receiving session to re-read status from that named source and to treat a status with no named source as unverified.
+  `log-it`'s thin handoff asks for the same source and closes with the same instruction, because a receiver without the earlier conversation cannot re-read a status it cannot locate.
+
 ## [0.8.2] — 2026-10-18
 
 `context-handoff`'s `log-it` and `handoff` skills catch up with the copies maintained outside the plugin, and drop text that only fit one author's setup (#77).

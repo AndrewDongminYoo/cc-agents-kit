@@ -91,6 +91,7 @@ CURRENT STATE
 - [Current state of the codebase or task]
 - [Build/test status if applicable]
 - [Any environment or configuration state]
+- [Each external status (tracker issue, review, store or console, inbox) with the source to re-read it from: a URL, an ID, or a path]
 
 PENDING TASKS
 -------------
@@ -114,7 +115,7 @@ EXPLICIT CONSTRAINTS
 CONTEXT FOR CONTINUATION
 ------------------------
 - [What the next session needs to know; warnings/gotchas; doc references]
-- Before acting on any status recorded above (tracker, review, store or console, inbox), re-read its source: this handoff records what the writing session believed, and that status may have changed since.
+- Before acting on any status recorded above (tracker, review, store or console, inbox), re-read it from its named source: this handoff records what the writing session believed, and that status may have changed since. Treat a status with no named source as unverified.
 ```
 
 The last line of CONTEXT FOR CONTINUATION is fixed text: keep it in every handoff, because the receiving session sees only the handoff and never this skill.
