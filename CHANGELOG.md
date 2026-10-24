@@ -9,6 +9,8 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 - `context-handoff` 0.2.3 `handoff` asks for the source of each external status (a URL, an ID, or a path) in CURRENT STATE, and its fixed closing line tells the receiving session to re-read status from that named source and to treat a status with no named source as unverified.
   `log-it`'s thin handoff asks for the same source and closes with the same instruction, because a receiver without the earlier conversation cannot re-read a status it cannot locate.
+- `repo-gate` 0.2.7 `ci-babysit` says that a `skipping` bucket ends the watch without proving anything about the change, and asks for each skipped job and its condition before a PR is reported green: a bot-actor `if:` makes every Dependabot PR look green.
+- `repo-gate` 0.2.7 `fix-osv-vulnerabilities` explains that a yarn berry resolution key must name the exact descriptor a parent requested, so an exact pin needs an exact key, and that such a key stops working when the parent moves its pin.
 
 ## [0.8.2] — 2026-10-18
 

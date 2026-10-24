@@ -213,6 +213,8 @@ done
 
 Each `fail` or `cancel` bucket is a terminal failure.
 Only a non-empty set of `pass` and `skipping` buckets exits successfully.
+A `skipping` bucket ends the watch, but it is no evidence about the change: before you report a PR as green, name each skipped job and the condition that skipped it.
+A job `if:` that excludes bot actors skips every build and test job on a Dependabot PR, so the rollup is green while the update breaks the build (react-native-step-counter #74, 2026-10-24: every Jest suite failed locally on a PR whose checks all passed).
 Malformed JSON and unknown buckets are explicit errors.
 After terminal failures are handled, a command failure with an exit other than 0 or 8 is also an explicit error.
 An exit of 8 is pending only when the command returned valid non-empty JSON that contains a `pending` bucket.
