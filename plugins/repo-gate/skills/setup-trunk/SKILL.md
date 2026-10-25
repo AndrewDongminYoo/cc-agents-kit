@@ -53,6 +53,16 @@ trunk init  # then: trunk config hide
 `trunk config hide` adds `.trunk/` to `.gitignore`, keeping the config local.
 Alternatively, `trunk init --single-player-mode` does both in one step (verified in `trunk init --help`: "initialize trunk with a gitignored config, run 'trunk config share' to undo").
 
+**A brand-new repository needs one commit before init.**
+Detection reads committed files, so on a repository with no commit `trunk init` prints `No committed files in repo, unable to analyze files.` and exits 1.
+Commit the initial files first.
+In a repository scaffolded this session, that commit is a precondition of the setup, not a separate request.
+
+**`-n` is not a safe way to make init non-interactive.**
+`trunk init -n` answers no to every prompt, so it enables 0 linters, disables `trunk-announce`, `trunk-check-pre-push` and `trunk-fmt-pre-commit`, and installs no git hooks.
+Pair it with the explicit `trunk check enable` and `trunk actions enable` calls below, or the run leaves an empty gate that still reports success.
+(Both behaviors measured with trunk 1.25.0 on 2026-10-25.)
+
 ### 3. Review built-in actions
 
 After `trunk init`, review which built-in actions are active and compare them with existing CI and repository hooks:
@@ -79,6 +89,16 @@ trunk actions enable trunk-check-pre-push
 
 **Disable `trunk-fmt-pre-commit` only** when contributing to an external repo that owns its own formatting rules (e.g., submitting a PR to an open-source project).
 Re-enable when back on your own repo.
+
+**Enabling an action does not install the git hooks.**
+`trunk actions enable` only writes the action into `trunk.yaml`.
+Run `trunk git-hooks sync` to install them, then read `git config core.hooksPath`: trunk points it at its own cache and leaves `.git/hooks` holding nothing but samples.
+An empty `.git/hooks` is therefore not evidence that the gate is missing, and `trunk git-hooks sync` prints `Trunk is managing your git hooks` whether or not anything changed.
+
+**Prove the hook with a commit, not by running it.**
+Executing the hook script from `core.hooksPath` by hand prints nothing and formats nothing, so it cannot tell you the gate works.
+Stage a file carrying one fixable defect, commit it, and read the committed blob back.
+(trunk 1.25.0, 2026-10-25: a staged `*emphasis*` with trailing spaces was committed as `_emphasis_` with none.)
 
 ### 4. Full-repo scan and baseline
 
@@ -247,6 +267,21 @@ Without the GitHub CLI, fetch the raw file from `https://gist.githubusercontent.
 The baseline turns off only the rules Prettier already enforces — whitespace, indentation, blank lines, line length, and heading, list, fence, and emphasis style — and leaves every content rule on, `MD040` included.
 Relax a content rule only per repository, with the reason written beside it.
 An existing backlog is `markdownlint-triage`'s job, not a reason to turn rules off here.
+
+A table whose pipes are not aligned reports `markdownlint/MD060` on every row.
+Prettier aligns them, so run `trunk fmt` on the file before you treat `MD060` as a gap in this baseline.
+
+### Shell: replace the generated `enable=all`
+
+`trunk check enable shellcheck` writes a `.trunk/configs/.shellcheckrc` that sets `enable=all`, which turns on shellcheck's optional style checks.
+On one 163-line bash script that produced 100 findings, every one of them `low` (`SC2250` on brace style, `SC2292` on `[[ ]]`), which hides real defects and teaches the reader to skip the gate.
+Use `severity=info` with `disable=SC1087`, the form already in `~/.claude/.trunk/configs/.shellcheckrc`, and the same script reports nothing.
+(2026-10-25, the dependabot policy repository.)
+
+Neither shellcheck nor shfmt parses zsh.
+A `#!/bin/zsh` script reports `shellcheck/SC1071` at `high`, and `shfmt` would rewrite it as bash.
+Prefer moving the script to `#!/usr/bin/env bash`.
+Ignore the path for both linters only when the zsh shebang is deliberate, and say so in a comment beside the ignore.
 
 ### Next.js / TypeScript
 
