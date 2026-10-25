@@ -7,20 +7,20 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [0.8.3] — 2026-10-25
 
-`repo-gate`'s `setup-trunk` records how a first run in a brand-new repository behaves and what a generated `.shellcheckrc` should become (#82, #83), `ci-babysit` and `fix-osv-vulnerabilities` record two lessons from a Dependabot sweep (#81), and `context-handoff`'s `handoff` names the source of each external status (#79).
-`repo-gate` moves from 0.2.6 to 0.2.8 and `context-handoff` from 0.2.2 to 0.2.3; `guard-hooks` (0.5.1), `context-meter` (0.1.0) and `quick-look` (0.1.0) are unchanged.
+`repo-gate`'s `setup-trunk` records how a first run in a brand-new repository behaves and what a generated `.shellcheckrc` should become (#82, #83, #84), `ci-babysit` and `fix-osv-vulnerabilities` record two lessons from a Dependabot sweep (#81), and `context-handoff`'s `handoff` and `log-it` name the source of each external status (#79).
+`repo-gate` moves from 0.2.6 to 0.2.9 and `context-handoff` from 0.2.2 to 0.2.3; `guard-hooks` (0.5.1), `context-meter` (0.1.0) and `quick-look` (0.1.0) are unchanged.
 
 ### Changed
 
-- `context-handoff` 0.2.3 `handoff` asks for the source of each external status (a URL, an ID, or a path) in CURRENT STATE, and its fixed closing line tells the receiving session to re-read status from that named source and to treat a status with no named source as unverified.
+- `context-handoff` 0.2.3 `handoff` asks for the source of each external status (a URL, an ID, or a path) in CURRENT STATE, and its fixed closing line tells the receiving session to re-read status from that named source and to treat a status with no named source as unverified (#79).
   `log-it`'s thin handoff asks for the same source and closes with the same instruction, because a receiver without the earlier conversation cannot re-read a status it cannot locate.
-- `repo-gate` 0.2.7 `ci-babysit` says that a `skipping` bucket ends the watch without proving anything about the change, and asks for each skipped job and its condition before a PR is reported green: a bot-actor `if:` makes every Dependabot PR look green.
-- `repo-gate` 0.2.7 `fix-osv-vulnerabilities` explains that a yarn berry resolution key must name the exact descriptor a parent requested, so an exact pin needs an exact key, and that such a key stops working when the parent moves its pin.
-- `repo-gate` 0.2.8 `setup-trunk` covers a first run in a brand-new repository: `trunk init` exits 1 until one commit exists, `trunk init -n` leaves an empty gate that still reports success, and `trunk actions enable` installs no git hooks until `trunk git-hooks sync` runs.
+- `repo-gate` 0.2.7 `ci-babysit` says that a `skipping` bucket ends the watch without proving anything about the change, and asks for each skipped job and its condition before a PR is reported green: a bot-actor `if:` makes every Dependabot PR look green (#81).
+- `repo-gate` 0.2.7 `fix-osv-vulnerabilities` explains that a yarn berry resolution key must name the exact descriptor a parent requested, so an exact pin needs an exact key, and that such a key stops working when the parent moves its pin (#81).
+- `repo-gate` 0.2.8 `setup-trunk` covers a first run in a brand-new repository: `trunk init` exits 1 until one commit exists, `trunk init -n` leaves an empty gate that still reports success, and `trunk actions enable` installs no git hooks until `trunk git-hooks sync` runs (#82, #83).
   It asks for the hook to be proved with a real commit rather than by running the hook script, and for a checkout's own custom actions to be read and approved before its hooks are installed, because a definition can bind arbitrary shell to `pre-commit`.
-- `repo-gate` 0.2.8 `setup-trunk` replaces the generated `.shellcheckrc`'s `enable=all` with `severity=info` and warns against a repository-wide `disable=SC1087`, because that check is an error that reports a real array-expansion defect.
+- `repo-gate` 0.2.8 `setup-trunk` replaces the generated `.shellcheckrc`'s `enable=all` with `severity=info` and warns against a repository-wide `disable=SC1087`, because that check is an error that reports a real array-expansion defect (#82, #83).
   It also notes that `trunk fmt` clears `markdownlint/MD060` table findings and that neither shellcheck nor shfmt parses zsh.
-- `repo-gate` 0.2.9 `setup-trunk` no longer points at a configuration file on one author's machine or at a repository readers cannot reach, and states its `shellcheck` measurement by tool version and date instead.
+- `repo-gate` 0.2.9 `setup-trunk` no longer points at a configuration file on one author's machine or at a repository readers cannot reach, and states its `shellcheck` measurement by tool version and date instead (#84).
   The `SC1087` guidance and the measured counts are unchanged.
 
 ## [0.8.2] — 2026-10-18
