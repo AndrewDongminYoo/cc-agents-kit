@@ -20,6 +20,8 @@ Entries are grouped by release; the topmost section collects work that has not y
   It asks for the hook to be proved with a real commit rather than by running the hook script, and for a checkout's own custom actions to be read and approved before its hooks are installed, because a definition can bind arbitrary shell to `pre-commit`.
 - `repo-gate` 0.2.8 `setup-trunk` replaces the generated `.shellcheckrc`'s `enable=all` with `severity=info` and warns against a repository-wide `disable=SC1087`, because that check is an error that reports a real array-expansion defect.
   It also notes that `trunk fmt` clears `markdownlint/MD060` table findings and that neither shellcheck nor shfmt parses zsh.
+- `repo-gate` 0.2.9 `setup-trunk` no longer points at a configuration file on one author's machine or at a repository readers cannot reach, and states its `shellcheck` measurement by tool version and date instead.
+  The `SC1087` guidance and the measured counts are unchanged.
 
 ## [0.8.2] — 2026-10-18
 

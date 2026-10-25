@@ -283,11 +283,11 @@ Prettier aligns them, so run `trunk fmt` on the file before you treat `MD060` as
 On one 163-line bash script that produced 100 findings, every one of them `low` (`SC2250` on brace style, `SC2292` on `[[ ]]`), which hides real defects and teaches the reader to skip the gate.
 Use `severity=info` alone, and the same script reports nothing.
 
-Do not reach for a repository-wide `disable=SC1087` to get there, even though `~/.claude/.trunk/configs/.shellcheckrc` carries one.
+Do not reach for a repository-wide `disable=SC1087` to get there.
 `SC1087` is an `error`, so no `severity` setting filters it, and it reports a real defect rather than a style preference: `"$arr[@]"` expands to the first element followed by a literal `[@]`.
 Measured on the same 163-line script, `severity=info` without that disable reports 0 and exits 0, while `enable=all` reports 100 and exits 1.
 Suppress `SC1087` at the one line that needs it, after confirming the brackets are meant literally.
-(2026-10-25, the dependabot policy repository.)
+(Measured with shellcheck 0.11.0 on 2026-10-25.)
 
 Neither shellcheck nor shfmt parses zsh.
 A `#!/bin/zsh` script reports `shellcheck/SC1071` at `high`, and `shfmt` would rewrite it as bash.
