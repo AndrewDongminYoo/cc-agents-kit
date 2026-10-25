@@ -90,6 +90,12 @@ trunk actions enable trunk-check-pre-push
 **Disable `trunk-fmt-pre-commit` only** when contributing to an external repo that owns its own formatting rules (e.g., submitting a PR to an open-source project).
 Re-enable when back on your own repo.
 
+**In a checkout you do not control, read the actions before you install the hooks.**
+`actions.definitions[].run` holds arbitrary shell, and a definition can bind it to `git_hooks: [pre-commit]`, exactly as the Flutter `dart-actions` example below does.
+Installing the hooks and then exercising them with a commit runs that repository's shell as you.
+So read `actions.definitions` and `actions.enabled` in the repository's own `trunk.yaml` first, approve each custom entry by name, and on a checkout you do not trust skip both the hook sync and the probe commit below.
+The built-in review above covers trunk's own actions only.
+
 **Enabling an action does not install the git hooks.**
 `trunk actions enable` only writes the action into `trunk.yaml`.
 Run `trunk git-hooks sync` to install them, then read `git config core.hooksPath`: trunk points it at its own cache and leaves `.git/hooks` holding nothing but samples.
