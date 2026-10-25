@@ -190,6 +190,12 @@ jobs:
         run: |
           hits=$(grep -rniE '/Users/[a-z]|/Volumes/[a-z]|llm-wiki|ydm2790' plugins/ \
                  | grep -vE '/Users/(me|you|user|USERNAME|<[a-z]+>)\b' || true)
+          # A ~/.claude path is a leak unless its first component is a standard
+          # Claude Code location or one this kit's skills use for every reader;
+          # anything else (.trunk, scripts, docs) names one author's files (#82).
+          claude_hits=$(grep -rnoE '(~|[$]HOME|[$][{]HOME[}])/\.claude/[A-Za-z0-9_.-]+' plugins/ \
+                 | grep -vE '/\.claude/(projects|plugins|skills|commands|agents|rules|handoffs|settings\.json|settings\.local\.json|CLAUDE\.md)$' || true)
+          hits=$(printf '%s\n%s\n' "$hits" "$claude_hits" | sed '/^$/d')
           if [ -n "$hits" ]; then
             printf '%s\n' "$hits" >&2
             echo "^ published plugins must not carry machine-specific paths" >&2
