@@ -82,7 +82,17 @@ def section(out, heading):
     return body
 
 
-WORDS = ["esbuild", "Esbuild", "hasown", "estree", "bigints", "meta", "lookahead", "worktree", "recieve"]
+WORDS = [
+    "esbuild",
+    "Esbuild",
+    "hasown",
+    "estree",
+    "bigints",
+    "meta",
+    "lookahead",
+    "worktree",
+    "recieve",
+]
 failures = []
 
 
@@ -120,14 +130,18 @@ residue = "\n".join(section(out, "IN NO DICTIONARY"))
 check(
     "a compound hit (look•ahead) is not counted as coverage",
     "lookahead" in residue and "warning:" not in out,
-    residue + out[out.find("STDERR"):],
+    residue + out[out.find("STDERR") :],
 )
 
 # esbuild+hasown+estree+bigints are pending. npm covers three of them and node
 # covers two, but only bigints is still new once npm is taken - so a ranking
 # that scored each dictionary independently would claim node covers two.
 candidates = section(out, "DICTIONARY CANDIDATES")
-ranked = [line.split() for line in candidates if line.split() and line.split()[0] in {"npm", "node"}]
+ranked = [
+    line.split()
+    for line in candidates
+    if line.split() and line.split()[0] in {"npm", "node"}
+]
 check(
     "greedy ranking scores each row against what the rows above it leave",
     [r[:4] for r in ranked] == [["npm", "3", "3", "4"], ["node", "1", "2", "1"]],
@@ -135,7 +149,8 @@ check(
 )
 check(
     "every pending word lands in exactly one row",
-    sum(int(r[1]) for r in ranked) == 4 and "4 word(s) no enabled dictionary has" in out,
+    sum(int(r[1]) for r in ranked) == 4
+    and "4 word(s) no enabled dictionary has" in out,
     "\n".join(candidates),
 )
 

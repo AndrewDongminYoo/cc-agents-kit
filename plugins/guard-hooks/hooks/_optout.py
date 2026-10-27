@@ -16,9 +16,14 @@ import os
 import subprocess
 import tempfile
 
-WRAP = 'cd "$3" && cat "$1" | bash "$2"; echo "STATUS ${PIPESTATUS[0]} ${PIPESTATUS[1]}"'
+WRAP = (
+    'cd "$3" && cat "$1" | bash "$2"; echo "STATUS ${PIPESTATUS[0]} ${PIPESTATUS[1]}"'
+)
 HUGE = json.dumps(
-    {"tool_name": "Write", "tool_input": {"file_path": "/tmp/x.sh", "content": "x" * 200_000}}
+    {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/tmp/x.sh", "content": "x" * 200_000},
+    }
 )
 
 
@@ -33,7 +38,10 @@ def run_piped(hook, disable_var, payload, disabled, cwd="."):
         tmp = fh.name
     try:
         proc = subprocess.run(
-            ["/bin/bash", "-c", WRAP, "_", tmp, hook, cwd], capture_output=True, text=True, env=env
+            ["/bin/bash", "-c", WRAP, "_", tmp, hook, cwd],
+            capture_output=True,
+            text=True,
+            env=env,
         )
     finally:
         os.unlink(tmp)
@@ -51,7 +59,9 @@ def drain(hook, disable_var, cwd="."):
     """A disabled hook must still drain a 200KB payload. Returns failures."""
     writer_rc, hook_rc, _, _ = run_piped(hook, disable_var, HUGE, True, cwd)
     ok = writer_rc == 0 and hook_rc == 0
-    return report(ok, f"writer={writer_rc} (want 0)  disabled hook still drains a 200KB payload")
+    return report(
+        ok, f"writer={writer_rc} (want 0)  disabled hook still drains a 200KB payload"
+    )
 
 
 def contract(hook, disable_var, blocking, safe, cwd="."):

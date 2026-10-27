@@ -16,11 +16,19 @@ CASES = [
     (2, "rm -rf $HOME", "rm -rf $HOME"),
     (2, "rm -rf ${HOME}", "rm -rf ${HOME}"),
     (2, 'rm -rf "$HOME"', 'rm -rf "$HOME"'),
-    (2, 'required braced home expansion', 'rm -rf "${HOME:?}"'),
-    (2, 'required braced home expansion without colon and with diagnostic', 'rm -rf "${HOME?HOME must be set}"'),
-    (2, 'required braced home expansion with diagnostic', 'rm -rf "${HOME:?HOME must be set}"'),
-    (2, 'required braced home expansion with trailing slash', 'rm -rf "${HOME:?}"/'),
-    (2, 'parameter-trimmed home expansion', 'rm -rf "${HOME%/}"'),
+    (2, "required braced home expansion", 'rm -rf "${HOME:?}"'),
+    (
+        2,
+        "required braced home expansion without colon and with diagnostic",
+        'rm -rf "${HOME?HOME must be set}"',
+    ),
+    (
+        2,
+        "required braced home expansion with diagnostic",
+        'rm -rf "${HOME:?HOME must be set}"',
+    ),
+    (2, "required braced home expansion with trailing slash", 'rm -rf "${HOME:?}"/'),
+    (2, "parameter-trimmed home expansion", 'rm -rf "${HOME%/}"'),
     (2, "rm -rf /", "rm -rf /"),
     (2, "uppercase -R spelling", "rm -Rf /"),
     (2, "--recursive spelling", "rm --recursive --force /"),
@@ -40,7 +48,7 @@ CASES = [
     (0, "safe: node_modules", "rm -rf node_modules"),
     (0, "safe: named dir under home", "rm -rf ~/Downloads/tmp"),
     (0, "safe: absolute scoped path", "rm -rf /tmp/scratch"),
-    (0, 'safe: HOME-prefixed variable', 'rm -rf "${HOMEWORK}"'),
+    (0, "safe: HOME-prefixed variable", 'rm -rf "${HOMEWORK}"'),
     (0, "safe: non-recursive rm", "rm file.txt"),
     (0, "safe: download to a file", "curl -o installer.sh https://example.com/i.sh"),
     (0, "safe: pipe to a non-interpreter", "curl https://example.com/x | jq ."),
@@ -51,7 +59,9 @@ CASES = [
 fails = 0
 for expected, label, command in CASES:
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     ok = proc.returncode == expected
     fails += not ok
     print(
@@ -67,13 +77,14 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     ok = proc.returncode == 0
     fails += not ok
     print(
         f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 0)  fail-open: {label}"
     )
-
 
 
 DISABLE_VAR = "CC_GUARD_DISABLE_DANGEROUS_COMMAND"

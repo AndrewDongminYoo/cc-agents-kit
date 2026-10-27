@@ -49,23 +49,31 @@ def check(label, condition, detail=""):
 # every assertion below vacuously "quiet". Detect that and say so instead.
 # Mirror the hook's own lookup: a binary the hook never tries cannot warn.
 have_shellcheck = bool(
-    shutil.which("shellcheck")
-    or Path("/opt/homebrew/bin/shellcheck").is_file()
+    shutil.which("shellcheck") or Path("/opt/homebrew/bin/shellcheck").is_file()
 )
 
 with tempfile.TemporaryDirectory() as tmp:
     if not have_shellcheck:
         print("SKIP  no shellcheck binary reachable — findings cannot be exercised")
         code, ctx = run(write(tmp, "dirty.sh", DIRTY))
-        check("degrades quietly without shellcheck", code == 0 and ctx is None,
-              f"exit={code} ctx={ctx}")
+        check(
+            "degrades quietly without shellcheck",
+            code == 0 and ctx is None,
+            f"exit={code} ctx={ctx}",
+        )
     else:
         # --- a script with a finding: the case the hook exists for ---
         code, ctx = run(write(tmp, "dirty.sh", DIRTY))
-        check("finding is surfaced", ctx is not None and "shellcheck" in ctx.lower(),
-              f"ctx={ctx}")
-        check("the finding text is included", ctx is not None and "SC2086" in ctx,
-              f"ctx={ctx}")
+        check(
+            "finding is surfaced",
+            ctx is not None and "shellcheck" in ctx.lower(),
+            f"ctx={ctx}",
+        )
+        check(
+            "the finding text is included",
+            ctx is not None and "SC2086" in ctx,
+            f"ctx={ctx}",
+        )
         check("exit stays 0 (advisory, never blocks)", code == 0, f"exit={code}")
 
         # --- a clean script must not produce noise on every edit ---
@@ -108,7 +116,9 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     check(
         f"fail-open: {label}",
         proc.returncode == 0 and not proc.stdout.strip(),
@@ -123,7 +133,10 @@ DISABLE_VAR = "CC_GUARD_DISABLE_SHELLCHECK"
 
 with tempfile.TemporaryDirectory() as tmp:
     warning_payload = json.dumps(
-        {"tool_name": "Write", "tool_input": {"file_path": write(tmp, "dirty.sh", DIRTY)}}
+        {
+            "tool_name": "Write",
+            "tool_input": {"file_path": write(tmp, "dirty.sh", DIRTY)},
+        }
     )
     _, hook_rc, out, err = _optout.run_piped(HOOK, DISABLE_VAR, warning_payload, True)
     check(

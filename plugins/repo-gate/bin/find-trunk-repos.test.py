@@ -66,6 +66,7 @@ fi
 exit 1
 """
 
+
 failures = 0
 for label, expected, content_status, expected_stdout, required_stderr in SCENARIOS:
     with tempfile.TemporaryDirectory() as temp_dir:

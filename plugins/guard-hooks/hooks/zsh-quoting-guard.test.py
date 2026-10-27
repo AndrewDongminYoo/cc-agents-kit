@@ -37,7 +37,11 @@ CASES = [
         'git --git-dir=/tmp/repo-metadata commit -m "fix: preserve `players`"',
     ),
     (2, "unquoted --include glob", 'grep -rn "AudioPool" lib/ --include=*.dart'),
-    (2, "unquoted --include separated glob", 'grep -rn "AudioPool" lib/ --include *.dart'),
+    (
+        2,
+        "unquoted --include separated glob",
+        'grep -rn "AudioPool" lib/ --include *.dart',
+    ),
     (2, "unquoted --glob separated glob", "rg AudioPool --glob *.dart"),
     (2, "unquoted find -name glob", "find . -name *.md"),
     (0, "safe: -F file carrier", "git commit -F /tmp/msg.txt"),
@@ -70,7 +74,9 @@ CASES = [
 fails = 0
 for expected, label, command in CASES:
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     ok = proc.returncode == expected
     fails += not ok
     print(
@@ -85,7 +91,9 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     ok = proc.returncode == 0
     fails += not ok
     print(
@@ -93,9 +101,10 @@ for label, payload in (
     )
 
 
-
 DISABLE_VAR = "CC_GUARD_DISABLE_ZSH_QUOTING"
-BLOCKING = json.dumps({"tool_name": "Bash", "tool_input": {"command": "find . -name *.md"}})
+BLOCKING = json.dumps(
+    {"tool_name": "Bash", "tool_input": {"command": "find . -name *.md"}}
+)
 SAFE = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls -la /tmp"}})
 
 # --- opt-out contract -------------------------------------------------------

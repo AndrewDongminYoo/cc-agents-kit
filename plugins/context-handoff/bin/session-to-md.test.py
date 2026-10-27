@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Prove session-to-md renders safe sessions and rejects unsafe output requests."""
 
-import os
-import json
 import base64
 import hashlib
+import json
+import os
 import re
 import subprocess
 import tempfile
@@ -63,7 +63,9 @@ with tempfile.TemporaryDirectory() as temp_dir:
         and "## 👤 User" in rendered
         and "hello" in rendered
     )
-    print(f"{'ok  ' if passed else 'FAIL'} renders a session to the exact output path: exit={result.returncode}")
+    print(
+        f"{'ok  ' if passed else 'FAIL'} renders a session to the exact output path: exit={result.returncode}"
+    )
     failures += not passed
 
 with tempfile.TemporaryDirectory() as temp_dir:
@@ -89,6 +91,7 @@ with tempfile.TemporaryDirectory() as temp_dir:
     )
     failures += not passed
 
+
 class ExportTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -98,28 +101,83 @@ class ExportTests(unittest.TestCase):
         self.env = {**os.environ, "CLAUDE_CONFIG_DIR": self.temp.name}
         self.entries = [
             self.entry("user", "  첫 요청\n\n    indented code\n"),
-            self.entry("assistant", [
-                {"type": "text", "text": "Checking **the output**."},
-                {"type": "tool_use", "id": "call-1", "name": "Bash", "input": {"command": "echo " + "가" * 1600}},
-            ]),
-            self.entry("user", [
-                {"type": "tool_result", "tool_use_id": "call-1", "content": "\u001b[31m" + "결과" * 1600 + "\u001b[0m"},
-                {"type": "text", "text": "Keep this mixed user message."},
-            ]),
-            self.entry("user", [{"type": "tool_result", "tool_use_id": "call-1", "content": "", "is_error": True}]),
-            self.entry("assistant", [{"type": "tool_use", "id": "pending", "name": "Read", "input": {}}]),
-            self.entry("assistant", [{"type": "thinking", "thinking": "PRIVATE_THINKING"}, {"type": "text", "text": "Done."}]),
+            self.entry(
+                "assistant",
+                [
+                    {"type": "text", "text": "Checking **the output**."},
+                    {
+                        "type": "tool_use",
+                        "id": "call-1",
+                        "name": "Bash",
+                        "input": {"command": "echo " + "가" * 1600},
+                    },
+                ],
+            ),
+            self.entry(
+                "user",
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call-1",
+                        "content": "\u001b[31m" + "결과" * 1600 + "\u001b[0m",
+                    },
+                    {"type": "text", "text": "Keep this mixed user message."},
+                ],
+            ),
+            self.entry(
+                "user",
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call-1",
+                        "content": "",
+                        "is_error": True,
+                    }
+                ],
+            ),
+            self.entry(
+                "assistant",
+                [{"type": "tool_use", "id": "pending", "name": "Read", "input": {}}],
+            ),
+            self.entry(
+                "assistant",
+                [
+                    {"type": "thinking", "thinking": "PRIVATE_THINKING"},
+                    {"type": "text", "text": "Done."},
+                ],
+            ),
         ]
 
     @staticmethod
     def entry(role, content, **extra):
-        return {"type": role, "timestamp": "2026-09-10T09:00:00Z", "message": {"content": content}, **extra}
+        return {
+            "type": role,
+            "timestamp": "2026-09-10T09:00:00Z",
+            "message": {"content": content},
+            **extra,
+        }
 
     def export(self, fmt="json", *args, entries=None, raw=""):
         records = self.entries if entries is None else entries
-        self.source.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in records) + raw)
+        self.source.write_text(
+            "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in records) + raw
+        )
         output = self.root / f"export-{len(list(self.root.iterdir()))}.{fmt}"
-        result = subprocess.run(["node", str(SCRIPT), str(self.source), "--format", fmt, "--out", str(output), *args], capture_output=True, text=True, env=self.env)
+        result = subprocess.run(
+            [
+                "node",
+                str(SCRIPT),
+                str(self.source),
+                "--format",
+                fmt,
+                "--out",
+                str(output),
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+            env=self.env,
+        )
         return result, output
 
     def document(self, *args, **kwargs):
@@ -132,14 +190,18 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(doc["schema_version"], 1)
         self.assertTrue(all(r["type"] == "message" for r in doc["records"]))
         self.assertEqual(doc["records"][0]["text"], "  첫 요청\n\n    indented code\n")
-        self.assertIn("Keep this mixed user message.", [r["text"] for r in doc["records"]])
+        self.assertIn(
+            "Keep this mixed user message.", [r["text"] for r in doc["records"]]
+        )
         self.assertNotIn("PRIVATE_THINKING", json.dumps(doc))
 
     def test_complete_inputs_and_multiple_outputs_are_paired(self):
         doc = self.document("--tools", "collapsed")
         calls = [r for r in doc["records"] if r["type"] == "tool"]
         self.assertEqual(len(calls), 2)
-        self.assertEqual(json.loads(calls[0]["input"])["command"], "echo " + "가" * 1600)
+        self.assertEqual(
+            json.loads(calls[0]["input"])["command"], "echo " + "가" * 1600
+        )
         self.assertEqual([o["text"] for o in calls[0]["outputs"]], ["결과" * 1600, ""])
         self.assertTrue(calls[0]["outputs"][1]["is_error"])
         self.assertEqual(calls[0]["output_state"], "recorded")
@@ -153,14 +215,30 @@ class ExportTests(unittest.TestCase):
         call = next(r for r in doc["records"] if r["type"] == "tool")
         self.assertIn("truncated", call["input"])
         for fmt in ("md", "html"):
-            result, output = self.export(fmt, "--tools", "collapsed", "--tool-limit", "30")
+            result, output = self.export(
+                fmt, "--tools", "collapsed", "--tool-limit", "30"
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("truncated", output.read_text())
-        emoji = self.document("--tools", "full", "--tool-limit", "1", entries=[
-            self.entry("assistant", [{"type": "tool_use", "id": "e", "name": "Bash", "input": {}}]),
-            self.entry("user", [{"type": "tool_result", "tool_use_id": "e", "content": "😀😀"}]),
-        ])
-        self.assertEqual(emoji["records"][0]["outputs"][0]["text"], "😀\n… (+1 chars truncated)")
+        emoji = self.document(
+            "--tools",
+            "full",
+            "--tool-limit",
+            "1",
+            entries=[
+                self.entry(
+                    "assistant",
+                    [{"type": "tool_use", "id": "e", "name": "Bash", "input": {}}],
+                ),
+                self.entry(
+                    "user",
+                    [{"type": "tool_result", "tool_use_id": "e", "content": "😀😀"}],
+                ),
+            ],
+        )
+        self.assertEqual(
+            emoji["records"][0]["outputs"][0]["text"], "😀\n… (+1 chars truncated)"
+        )
 
     def test_filters_internal_records_and_attachment_payloads(self):
         entries = [
@@ -169,9 +247,19 @@ class ExportTests(unittest.TestCase):
             self.entry("user", "META_SECRET", isMeta=True),
             self.entry("user", "COMPACTION_SECRET", isCompactSummary=True),
             self.entry("system", "SYSTEM_SECRET"),
-            self.entry("assistant", [{"type": "thinking", "thinking": "THINKING_SECRET"}]),
-            self.entry("user", [{"type": "image", "source": {"data": "IMAGE_SECRET"}}, {"type": "document", "source": {"url": "FILE_SECRET"}}]),
-            self.entry("user", "<system-reminder>REMINDER_SECRET</system-reminder>real text"),
+            self.entry(
+                "assistant", [{"type": "thinking", "thinking": "THINKING_SECRET"}]
+            ),
+            self.entry(
+                "user",
+                [
+                    {"type": "image", "source": {"data": "IMAGE_SECRET"}},
+                    {"type": "document", "source": {"url": "FILE_SECRET"}},
+                ],
+            ),
+            self.entry(
+                "user", "<system-reminder>REMINDER_SECRET</system-reminder>real text"
+            ),
         ]
         for fmt in ("md", "html", "json"):
             result, output = self.export(fmt, entries=entries)
@@ -182,7 +270,12 @@ class ExportTests(unittest.TestCase):
 
     def test_thinking_remains_explicit_opt_in(self):
         doc = self.document("--thinking")
-        self.assertTrue(any(r["type"] == "thinking" and r["text"] == "PRIVATE_THINKING" for r in doc["records"]))
+        self.assertTrue(
+            any(
+                r["type"] == "thinking" and r["text"] == "PRIVATE_THINKING"
+                for r in doc["records"]
+            )
+        )
 
     def test_command_tags_in_ordinary_prose_preserve_surrounding_text(self):
         text = "prefix <command-name>/fake</command-name> suffix must survive"
@@ -199,7 +292,9 @@ class ExportTests(unittest.TestCase):
                 f"before <{tag}>UNCLOSED_SECRET",
             ):
                 for fmt in ("md", "html", "json"):
-                    result, output = self.export(fmt, entries=[self.entry("user", text)])
+                    result, output = self.export(
+                        fmt, entries=[self.entry("user", text)]
+                    )
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertNotIn("SECRET", output.read_text())
                     self.assertIn("before", output.read_text())
@@ -210,28 +305,62 @@ class ExportTests(unittest.TestCase):
         for title_type in ("ai-title", "custom-title"):
             for flag in ("isSidechain", "isMeta", "isCompactSummary"):
                 for fmt in ("md", "html", "json"):
-                    result, output = self.export(fmt, entries=[
-                        self.entry("user", "Public title"),
-                        {"type": title_type, flag: True, "title": "PRIVATE_TITLE_SECRET"},
-                    ])
+                    result, output = self.export(
+                        fmt,
+                        entries=[
+                            self.entry("user", "Public title"),
+                            {
+                                "type": title_type,
+                                flag: True,
+                                "title": "PRIVATE_TITLE_SECRET",
+                            },
+                        ],
+                    )
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertNotIn("PRIVATE_TITLE_SECRET", output.read_text(), (title_type, flag, fmt))
+                    self.assertNotIn(
+                        "PRIVATE_TITLE_SECRET",
+                        output.read_text(),
+                        (title_type, flag, fmt),
+                    )
 
     def test_result_timestamps_and_turns_preserve_arrival_order(self):
-        doc = self.document("--tools", "full", entries=[
-            self.entry("assistant", [{"type": "tool_use", "id": "x", "name": "Read", "input": {}}]),
-            self.entry("user", "First user turn"),
-            self.entry("user", [{"type": "tool_result", "tool_use_id": "x", "content": "first"}], timestamp="2026-09-10T09:02:00Z"),
-            self.entry("assistant", "An intervening message"),
-            self.entry("user", [{"type": "tool_result", "tool_use_id": "x", "content": "second"}], timestamp="2026-09-10T09:03:00Z"),
-        ])
+        doc = self.document(
+            "--tools",
+            "full",
+            entries=[
+                self.entry(
+                    "assistant",
+                    [{"type": "tool_use", "id": "x", "name": "Read", "input": {}}],
+                ),
+                self.entry("user", "First user turn"),
+                self.entry(
+                    "user",
+                    [{"type": "tool_result", "tool_use_id": "x", "content": "first"}],
+                    timestamp="2026-09-10T09:02:00Z",
+                ),
+                self.entry("assistant", "An intervening message"),
+                self.entry(
+                    "user",
+                    [{"type": "tool_result", "tool_use_id": "x", "content": "second"}],
+                    timestamp="2026-09-10T09:03:00Z",
+                ),
+            ],
+        )
         self.assertEqual([r["turn"] for r in doc["records"]], [0, 1, 1])
-        self.assertEqual([r["id"] for r in doc["records"]], ["record-1", "record-2", "record-3"])
-        self.assertEqual([o["text"] for o in doc["records"][0]["outputs"]], ["first", "second"])
-        self.assertEqual([o["timestamp"] for o in doc["records"][0]["outputs"]], ["2026-09-10T09:02:00.000Z", "2026-09-10T09:03:00.000Z"])
+        self.assertEqual(
+            [r["id"] for r in doc["records"]], ["record-1", "record-2", "record-3"]
+        )
+        self.assertEqual(
+            [o["text"] for o in doc["records"][0]["outputs"]], ["first", "second"]
+        )
+        self.assertEqual(
+            [o["timestamp"] for o in doc["records"][0]["outputs"]],
+            ["2026-09-10T09:02:00.000Z", "2026-09-10T09:03:00.000Z"],
+        )
 
     def test_relocated_plugin_command_uses_bundled_template(self):
         import shutil
+
         plugin = self.root / "relocated-plugin"
         binary = plugin / "bin" / "session-to-md"
         binary.parent.mkdir(parents=True)
@@ -239,20 +368,55 @@ class ExportTests(unittest.TestCase):
         binary.chmod(0o755)
         template = plugin / "skills/session-export/templates/session.html"
         template.parent.mkdir(parents=True)
-        shutil.copy2(SCRIPT.parent.parent / "skills/session-export/templates/session.html", template)
+        shutil.copy2(
+            SCRIPT.parent.parent / "skills/session-export/templates/session.html",
+            template,
+        )
         self.source.write_text(json.dumps(self.entry("user", "Portable plugin")) + "\n")
         output = self.root / "relocated.html"
-        result = subprocess.run(["session-to-md", str(self.source), "--format", "html", "--out", str(output)], cwd=self.root, env={**self.env, "PATH": str(binary.parent) + os.pathsep + os.environ["PATH"]}, capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                "session-to-md",
+                str(self.source),
+                "--format",
+                "html",
+                "--out",
+                str(output),
+            ],
+            cwd=self.root,
+            env={
+                **self.env,
+                "PATH": str(binary.parent) + os.pathsep + os.environ["PATH"],
+            },
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Portable plugin", output.read_text())
 
     def test_malformed_lines_unknown_blocks_and_orphan_results_are_visible(self):
-        doc = self.document("--tools", "full", entries=[
-            self.entry("user", "hello"), None, [],
-            {"type": "unknown-future-record"},
-            self.entry("assistant", [{"type": "future", "payload": "OMIT_ME"}]),
-            self.entry("user", [{"type": "tool_result", "tool_use_id": "orphan", "content": "ORPHAN_SECRET"}]),
-        ], raw='{"partial":')
+        doc = self.document(
+            "--tools",
+            "full",
+            entries=[
+                self.entry("user", "hello"),
+                None,
+                [],
+                {"type": "unknown-future-record"},
+                self.entry("assistant", [{"type": "future", "payload": "OMIT_ME"}]),
+                self.entry(
+                    "user",
+                    [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "orphan",
+                            "content": "ORPHAN_SECRET",
+                        }
+                    ],
+                ),
+            ],
+            raw='{"partial":',
+        )
         self.assertEqual(doc["diagnostics"]["malformed_lines"], 1)
         self.assertEqual(doc["diagnostics"]["unsupported_records"], 3)
         self.assertEqual(doc["diagnostics"]["omitted_content_blocks"], 1)
@@ -262,36 +426,85 @@ class ExportTests(unittest.TestCase):
 
     def test_ambiguous_ids_cannot_leak_sidechain_results(self):
         call = [{"type": "tool_use", "id": "duplicate", "name": "Bash", "input": {}}]
-        doc = self.document("--tools", "full", entries=[
-            self.entry("assistant", call),
-            self.entry("assistant", call, isSidechain=True),
-            self.entry("user", [{"type": "tool_result", "tool_use_id": "duplicate", "content": "AMBIGUOUS_SECRET"}]),
-        ])
+        doc = self.document(
+            "--tools",
+            "full",
+            entries=[
+                self.entry("assistant", call),
+                self.entry("assistant", call, isSidechain=True),
+                self.entry(
+                    "user",
+                    [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "duplicate",
+                            "content": "AMBIGUOUS_SECRET",
+                        }
+                    ],
+                ),
+            ],
+        )
         self.assertEqual(doc["records"][0]["output_state"], "excluded")
         self.assertEqual(doc["diagnostics"]["ambiguous_tool_outputs"], 1)
         self.assertNotIn("AMBIGUOUS_SECRET", json.dumps(doc))
 
     def test_html_escapes_source_markup_and_keeps_controls_local(self):
         attack = '</pre><script>alert("bad")</script><img src="https://example.invalid/leak">'
-        result, output = self.export("html", "--tools", "full", "--toc", entries=[
-            self.entry("user", attack),
-            self.entry("assistant", [{"type": "tool_use", "id": "x", "name": attack, "input": {"x": attack}}]),
-            self.entry("user", [{"type": "tool_result", "tool_use_id": "x", "content": attack}]),
-        ])
+        result, output = self.export(
+            "html",
+            "--tools",
+            "full",
+            "--toc",
+            entries=[
+                self.entry("user", attack),
+                self.entry(
+                    "assistant",
+                    [
+                        {
+                            "type": "tool_use",
+                            "id": "x",
+                            "name": attack,
+                            "input": {"x": attack},
+                        }
+                    ],
+                ),
+                self.entry(
+                    "user",
+                    [{"type": "tool_result", "tool_use_id": "x", "content": attack}],
+                ),
+            ],
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         html = output.read_text()
         self.assertNotIn(attack, html)
         self.assertIn("&lt;script&gt;", html)
         self.assertIn("Content-Security-Policy", html)
         self.assertIn("default-src 'none'", html)
-        policy = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)"', html)
+        policy = re.search(
+            r'<meta http-equiv="Content-Security-Policy" content="([^"]+)"', html
+        )
         self.assertIsNotNone(policy)
-        directives = {parts[0]: parts[1:] for directive in policy.group(1).split(";") if (parts := directive.split())}
+        directives = {
+            parts[0]: parts[1:]
+            for directive in policy.group(1).split(";")
+            if (parts := directive.split())
+        }
         for tag in ("style", "script"):
             blocks = re.findall(rf"<{tag}>(.*?)</{tag}>", html, re.DOTALL)
             self.assertEqual(len(blocks), 1)
-            expected = ["'sha256-" + base64.b64encode(hashlib.sha256(block.encode("utf-8")).digest()).decode("ascii") + "'" for block in blocks]
-            self.assertEqual(directives[f"{tag}-src"], expected, f"{tag} CSP hash must match the emitted block")
+            expected = [
+                "'sha256-"
+                + base64.b64encode(
+                    hashlib.sha256(block.encode("utf-8")).digest()
+                ).decode("ascii")
+                + "'"
+                for block in blocks
+            ]
+            self.assertEqual(
+                directives[f"{tag}-src"],
+                expected,
+                f"{tag} CSP hash must match the emitted block",
+            )
         self.assertIn("<details open>", html)
         self.assertIn('id="expand-tools"', html)
         self.assertIn('href="#record-1"', html)
@@ -330,11 +543,19 @@ class ExportTests(unittest.TestCase):
             self.assertFalse(output.exists())
 
     def test_invalid_options_extensions_and_dates(self):
-        for args in (("--format", "pdf"), ("--tool-limit", "0"), ("--tool-limit", "1x"), ("--last", "999999999999999999999"), ("--out", str(self.root / "wrong.md"))):
+        for args in (
+            ("--format", "pdf"),
+            ("--tool-limit", "0"),
+            ("--tool-limit", "1x"),
+            ("--last", "999999999999999999999"),
+            ("--out", str(self.root / "wrong.md")),
+        ):
             result, _ = self.export("json", *args)
             self.assertNotEqual(result.returncode, 0, args)
             self.assertNotIn("at main", result.stderr)
-        doc = self.document(entries=[self.entry("user", "hello", timestamp="not-a-date")])
+        doc = self.document(
+            entries=[self.entry("user", "hello", timestamp="not-a-date")]
+        )
         self.assertEqual(doc["records"][0]["timestamp"], "")
         self.assertNotIn("NaN", json.dumps(doc))
 
@@ -353,14 +574,24 @@ class ExportTests(unittest.TestCase):
     def test_selection_and_listing_respect_config_dir_without_prose(self):
         cwd = str(Path.cwd())
         import re
+
         project = self.root / "projects" / re.sub(r"[^A-Za-z0-9]", "-", cwd)
         project.mkdir(parents=True)
         for index, name in enumerate(("older", "newer")):
             file = project / f"{name}.jsonl"
-            file.write_text(json.dumps(self.entry("user", f"PRIVATE_PROMPT_{name}")) + "\n")
+            file.write_text(
+                json.dumps(self.entry("user", f"PRIVATE_PROMPT_{name}")) + "\n"
+            )
             os.utime(file, (index + 1, index + 1))
+
         def invoke(args):
-            return subprocess.run(["node", str(SCRIPT), *args], env=self.env, text=True, capture_output=True)
+            return subprocess.run(
+                ["node", str(SCRIPT), *args],
+                env=self.env,
+                text=True,
+                capture_output=True,
+            )
+
         listing = invoke(["--list"])
         self.assertEqual(listing.returncode, 0, listing.stderr)
         self.assertIn("newer", listing.stdout)
@@ -369,7 +600,10 @@ class ExportTests(unittest.TestCase):
             output = self.root / f"selected-{index}.json"
             result = invoke([*args, "--format", "json", "--out", str(output)])
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(output.read_text())["metadata"]["session"], "newer" if index == 2 else "older")
+            self.assertEqual(
+                json.loads(output.read_text())["metadata"]["session"],
+                "newer" if index == 2 else "older",
+            )
         rejected = invoke(["../outside"])
         self.assertNotEqual(rejected.returncode, 0)
 

@@ -17,7 +17,9 @@ OLD, NEW = 1_700_000_000, 1_700_000_100
 def run(file_path):
     """Return (exit_code, additionalContext or None)."""
     payload = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": file_path}})
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     out = proc.stdout.strip()
     if not out:
         return proc.returncode, None
@@ -80,7 +82,9 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     # --- fresh lockfile: silence, or the warning is noise on every edit ---
-    _, ctx = run(fixture(tmp, "package.json", ["yarn.lock"], manifest_time=OLD, lock_time=NEW))
+    _, ctx = run(
+        fixture(tmp, "package.json", ["yarn.lock"], manifest_time=OLD, lock_time=NEW)
+    )
     check("fresh lockfile stays silent", ctx is None, f"ctx={ctx}")
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -110,7 +114,9 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     check(
         f"fail-open: {label}",
         proc.returncode == 0 and not proc.stdout.strip(),
@@ -125,7 +131,10 @@ DISABLE_VAR = "CC_GUARD_DISABLE_LOCKFILE_DRIFT"
 
 with tempfile.TemporaryDirectory() as tmp:
     warning_payload = json.dumps(
-        {"tool_name": "Write", "tool_input": {"file_path": fixture(tmp, "package.json", ["yarn.lock"])}}
+        {
+            "tool_name": "Write",
+            "tool_input": {"file_path": fixture(tmp, "package.json", ["yarn.lock"])},
+        }
     )
     _, hook_rc, out, err = _optout.run_piped(HOOK, DISABLE_VAR, warning_payload, True)
     check(

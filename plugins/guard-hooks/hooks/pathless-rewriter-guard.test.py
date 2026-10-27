@@ -64,7 +64,9 @@ CASES = [
 fails = 0
 for expected, label, command in CASES:
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     ok = proc.returncode == expected
     fails += not ok
     print(
@@ -80,7 +82,9 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     ok = proc.returncode == 0
     fails += not ok
     print(

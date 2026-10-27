@@ -26,7 +26,10 @@ PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----"
 def repo(files, stage=True):
     """Create a git repo with files staged, and return its path."""
     d = tempfile.mkdtemp()
-    run = lambda *a: subprocess.run(["git", "-C", d, *a], capture_output=True, text=True)
+
+    def run(*a):
+        return subprocess.run(["git", "-C", d, *a], capture_output=True, text=True)
+
     run("init", "-q")
     run("config", "user.email", "t@example.invalid")
     run("config", "user.name", "t")
@@ -54,7 +57,13 @@ def marker_command(directory, name):
 def check_hook(command, cwd, env=None, timeout=None):
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
     proc = subprocess.run(
-        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True, cwd=cwd, env=env, timeout=timeout
+        ["/bin/bash", HOOK],
+        input=payload,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=env,
+        timeout=timeout,
     )
     return proc.returncode, proc.stderr
 
@@ -131,7 +140,7 @@ for label, command in (
     # (2026-09-03: a `git -C "$d" log` loop was blocked as an unparsable commit).
     ("git log with a quoted shell-variable -C", 'git -C "$d" log --oneline -1'),
     ("git log with a fully quoted composite -C", 'git -C "$base/$d" log -1'),
-    ("git log with an escaped dollar in -C", 'git -C /tmp/\\$lit log -1'),
+    ("git log with an escaped dollar in -C", "git -C /tmp/\\$lit log -1"),
     # "$*" and "${name[*]}" join to one word, so they stay allowed.
     ("quoted star expansion is one word", 'git -C "${arr[*]}" log -1'),
     # [@] is three ordinary characters in a path; only ${...[@]} is an array.
@@ -141,80 +150,172 @@ for label, command in (
     ("bracket-at between two expansions", 'git -C "$root/${x}dir[@]${suffix}" log'),
     # Defining a function executes nothing -- including every line of its body,
     # not only the first, which is all the parser used to skip.
-    ("a function definition containing a commit", 'f() { git commit -m x; }'),
+    ("a function definition containing a commit", "f() { git commit -m x; }"),
     ("a definition whose second line commits", "f() { echo; git commit -m x; }"),
     ("a function-keyword definition", "function f { git commit -m x; }"),
     ("a function called before it is defined", "f; f() { git commit -m x; }"),
     # The body ends at the right brace. Every `}` closes one, and `{` opens one
     # only where a command can start, so a body is never read past its end.
-    ("a definition closed straight after fi", "f() { if true; then git commit -m x; fi }"),
-    ("a definition containing a brace group", "f() { { git status; }; git commit -m x; }"),
-    ("a function-keyword definition with parentheses", "function f() { git commit -m x; }"),
-    ("a function-keyword definition with a nested one", "function f { function g { :; }; git commit -m x; }"),
+    (
+        "a definition closed straight after fi",
+        "f() { if true; then git commit -m x; fi }",
+    ),
+    (
+        "a definition containing a brace group",
+        "f() { { git status; }; git commit -m x; }",
+    ),
+    (
+        "a function-keyword definition with parentheses",
+        "function f() { git commit -m x; }",
+    ),
+    (
+        "a function-keyword definition with a nested one",
+        "function f { function g { :; }; git commit -m x; }",
+    ),
     # The latest definition wins, as in the shell.
-    ("a function redefined before its call", "f() { git commit -m x; }; f() { git status; }; f"),
+    (
+        "a function redefined before its call",
+        "f() { git commit -m x; }; f() { git status; }; f",
+    ),
     # A definition that may not have taken effect is read alongside the ones it
     # would replace, and here none of them commits.
-    ("a read-only function shadowed in a subshell", "f() { git status; }; ( f() { git log -1; } ); f"),
+    (
+        "a read-only function shadowed in a subshell",
+        "f() { git status; }; ( f() { git log -1; } ); f",
+    ),
     # Past its recursion bound a function has been read at every level above,
     # so a read-only body is not refused for naming git.
-    ("a recursive function running a read-only git command", "f() { git status; f; }; f"),
+    (
+        "a recursive function running a read-only git command",
+        "f() { git status; f; }; f",
+    ),
     # An inlined body is appended after the command, behind a separator, so a
     # bare git at the very end does not read the body's first word as its
     # subcommand.
-    ("a bare git after a call whose body starts with commit", "f() { commit -m x; }; f; git"),
+    (
+        "a bare git after a call whose body starts with commit",
+        "f() { commit -m x; }; f; git",
+    ),
     # A setup script: thirty steps, each logging through a helper and checking
     # status, run three times. 180 calls in all, none of them a commit.
-    ("a script of thirty steps run three times", 'log() { printf "%s\\n" "$*"; }\nR=/repo\n' + "".join(f'step{i}() {{\n  log "step {i}"\n  git -C "$R" status --short\n  npm run task{i} -- --flag "$1"\n}}\n' for i in range(30)) + "".join(f"step{i} arg{r}\n" for r in range(3) for i in range(30))),
+    (
+        "a script of thirty steps run three times",
+        'log() { printf "%s\\n" "$*"; }\nR=/repo\n'
+        + "".join(
+            f'step{i}() {{\n  log "step {i}"\n  git -C "$R" status --short\n  npm run task{i} -- --flag "$1"\n}}\n'
+            for i in range(30)
+        )
+        + "".join(f"step{i} arg{r}\n" for r in range(3) for i in range(30)),
+    ),
     # A finished `if` leaves later definitions certain again.
     # Options alone leave the parameters in place; -o takes an option name.
-    ("a wrapper that only sets options", 'f() { set -euo pipefail; git "$@"; }; f status'),
+    (
+        "a wrapper that only sets options",
+        'f() { set -euo pipefail; git "$@"; }; f status',
+    ),
     ("a wrapper with a bare set -", 'f() { set -; git "$@"; }; f status'),
     # A closed group leaves later definitions certain again.
-    ("a function redefined after a brace group", "{ :; }; f() { git commit -m x; }; f() { git status; }; f"),
+    (
+        "a function redefined after a brace group",
+        "{ :; }; f() { git commit -m x; }; f() { git status; }; f",
+    ),
     # unset -v removes a variable, never the function.
-    ("a git function kept through unset -v", "git() { :; }; unset -v git; git commit -m x"),
+    (
+        "a git function kept through unset -v",
+        "git() { :; }; unset -v git; git commit -m x",
+    ),
     # A comment is not a command, and a # inside a word is not a comment.
     ("a commit only in a comment", "# git commit -m x"),
     ("a commit after a comment's semicolon", "echo hi # ; git commit -m x"),
     # A quoted brace is a word, so it does not end the body early.
-    ("a definition with a quoted brace as an argument", 'f() { echo "}"; git commit -m x; }'),
-    ("a function redefined after an if", "if true; then :; fi; f() { git commit -m x; }; f() { git status; }; f"),
+    (
+        "a definition with a quoted brace as an argument",
+        'f() { echo "}"; git commit -m x; }',
+    ),
+    (
+        "a function redefined after an if",
+        "if true; then :; fi; f() { git commit -m x; }; f() { git status; }; f",
+    ),
     # `command` and `env` run a program named f, never the function.
     ("a function name behind command", "f() { git commit -m x; }; command f"),
     ("a function name behind env", "f() { git commit -m x; }; env f"),
     # "$2" with no second argument is still a word, and `git "" commit` is not a
     # commit.
-    ("a missing quoted parameter standing as the subcommand", 'c() { git "$2" commit -m x; }; c a'),
+    (
+        "a missing quoted parameter standing as the subcommand",
+        'c() { git "$2" commit -m x; }; c a',
+    ),
     # "$1" is one word whatever the call passed, so an unquoted `$d` given to it
     # is a single unknown path, not a word that could turn into a subcommand.
-    ("a quoted parameter given an unquoted word", 'gs() { git -C "$1" status --short; }; for d in */; do gs $d; done'),
-    ("a quoted parameter given a substitution", 'show() { git -C "$1" log -3; }; show $(git rev-parse --show-toplevel)'),
-    ("a slice of the arguments", 'in_repo() { git -C "$1" "${@:2}"; }; in_repo ./frontend status'),
+    (
+        "a quoted parameter given an unquoted word",
+        'gs() { git -C "$1" status --short; }; for d in */; do gs $d; done',
+    ),
+    (
+        "a quoted parameter given a substitution",
+        'show() { git -C "$1" log -3; }; show $(git rev-parse --show-toplevel)',
+    ),
+    (
+        "a slice of the arguments",
+        'in_repo() { git -C "$1" "${@:2}"; }; in_repo ./frontend status',
+    ),
     # The `}` of `${ROOT:-$(pwd)}` ends a parameter expansion, not the body.
-    ("a body holding a defaulted substitution", 'f() { local d=${ROOT:-$(pwd)}; git -C "$d" "$@"; }; f status'),
+    (
+        "a body holding a defaulted substitution",
+        'f() { local d=${ROOT:-$(pwd)}; git -C "$d" "$@"; }; f status',
+    ),
     ("a git wrapper running a read-only verb", 'g() { git "$@"; }; g status'),
     # "$@" keeps each word whole, and `git "commit -m x"` names no subcommand
     # git has; only an unquoted $@ splits it.
-    ("a wrapper passed one word holding a commit", 'g() { git "$@"; }; g "commit -m x"'),
-    ("a logging wrapper running a read-only command unquoted", 'run() { echo "+ $*"; $@; }; run "git status"'),
-    ("a git wrapper passing an unquoted $* a read-only verb", "g() { git $*; }; g status"),
+    (
+        "a wrapper passed one word holding a commit",
+        'g() { git "$@"; }; g "commit -m x"',
+    ),
+    (
+        "a logging wrapper running a read-only command unquoted",
+        'run() { echo "+ $*"; $@; }; run "git status"',
+    ),
+    (
+        "a git wrapper passing an unquoted $* a read-only verb",
+        "g() { git $*; }; g status",
+    ),
     # A quoted < or >, or one an expansion produced, is part of a word, never a
     # redirection, and `git "commit>x"` names no subcommand git has.
-    ("a wrapper passed a quoted word holding a redirection", 'g() { git "$@"; }; g "commit>x"'),
-    ("a wrapper passed an expansion holding a redirection", 'f() { g $1; }; g() { git "$@"; }; f "commit>x"'),
-    ("a wrapper whose output is redirected", 'g() { git "$@"; }; g status >/dev/null 2>&1'),
+    (
+        "a wrapper passed a quoted word holding a redirection",
+        'g() { git "$@"; }; g "commit>x"',
+    ),
+    (
+        "a wrapper passed an expansion holding a redirection",
+        'f() { g $1; }; g() { git "$@"; }; f "commit>x"',
+    ),
+    (
+        "a wrapper whose output is redirected",
+        'g() { git "$@"; }; g status >/dev/null 2>&1',
+    ),
     # "$*" joins the words into one, and `"git commit -m x"` is no program.
-    ("a wrapper running its words joined by \"$*\"", 'run() { "$*"; }; run git commit -m x'),
+    (
+        'a wrapper running its words joined by "$*"',
+        'run() { "$*"; }; run git commit -m x',
+    ),
     # `commit` after an unreadable program name is only judged where git would
     # read its subcommand; anything else is ordinary work.
     ("a program named by a variable", "$PYTHON script.py commit"),
     ("a program named by a variable, with -c", "\"$PY\" -c 'print(1)'"),
-    ("a program named by a variable, with an option and its value", '"$EDITOR" --wait notes.txt'),
+    (
+        "a program named by a variable, with an option and its value",
+        '"$EDITOR" --wait notes.txt',
+    ),
     # Only git's own options are assumed to take the next word as a value.
-    ("a program named by a substitution, with an option before commit", "$(git rev-parse --show-toplevel)/scripts/check.sh --since HEAD~1 commit"),
+    (
+        "a program named by a substitution, with an option before commit",
+        "$(git rev-parse --show-toplevel)/scripts/check.sh --since HEAD~1 commit",
+    ),
     # With no visible assignment; `g=git` before it is read as git (#71).
-    ("a variable naming git, then an option and its value", "$g --git-dir .git log --grep commit"),
+    (
+        "a variable naming git, then an option and its value",
+        "$g --git-dir .git log --grep commit",
+    ),
     ("a program named by a variable, with unquoted flags", "$PYTHON $flags script.py"),
     ("a quoted program and a quoted argument", '"$EDITOR" "$f"'),
     ("a substitution glued to the program name", "$(npm bin)/eslint ."),
@@ -223,15 +324,24 @@ for label, command in (
     ("git as an argument after a substitution", "echo $(date) git commit -m x"),
     # Heredoc prose is parsed as commands here, and markdown often starts a line
     # with a backticked word.
-    ("a heredoc line starting with a backticked word", "cat > n.md <<'EOF'\n`git` commit messages are conventional\nEOF"),
+    (
+        "a heredoc line starting with a backticked word",
+        "cat > n.md <<'EOF'\n`git` commit messages are conventional\nEOF",
+    ),
     ("git log with an unparsed --option", "git --no-pager log -1"),
-    ("git log behind a long option carrying its own value", "git --git-dir=/repo/.git log -1"),
+    (
+        "git log behind a long option carrying its own value",
+        "git --git-dir=/repo/.git log -1",
+    ),
     ("git log behind a pathspec flag", "git --literal-pathspecs log -1"),
     # A subcommand argument whose value is the word commit is a search term, not
     # an invocation; the scan must stop at the subcommand to tell them apart.
     ("commit as a --grep value", "git --no-pager log --grep commit"),
     ("commit inside a pathspec", "git --no-pager diff -- README.commit"),
-    ("git log inside command substitution", 'c=$(git -C "$HOME/x" log --since=30.days --oneline); echo "$c"'),
+    (
+        "git log inside command substitution",
+        'c=$(git -C "$HOME/x" log --since=30.days --oneline); echo "$c"',
+    ),
     # Stepping over a redirection or exec still finds the real subcommand.
     ("git log after a redirection", "git >/dev/null log -1"),
     ("git log after a descriptor duplication", "git 2>&1 log -1"),
@@ -239,7 +349,10 @@ for label, command in (
     ("a read-only git behind exec -a", "exec -a g git log -1"),
     ("exec that only redirects", "exec 3>&1"),
     ("a read-only git after a quoted redirection target", 'git >"/tmp/out" status'),
-    ("a search term after a quoted redirection target", 'git >"/tmp/out" log --grep commit'),
+    (
+        "a search term after a quoted redirection target",
+        'git >"/tmp/out" log --grep commit',
+    ),
     ("a pathspec after a quoted redirection target", 'git >"/tmp/out" diff -- commit'),
     ("a clobber redirection on a read-only git", "git log -1 >| out.txt"),
     ("an &> redirection on a read-only git", "git log -1 &>/dev/null && echo ok"),
@@ -248,16 +361,34 @@ for label, command in (
     ("a {varname} descriptor redirection on a read-only git", "git {fd}>out log -1"),
     ("a read-only git behind exec -a with its name attached", "exec -afoo git log -1"),
     ("a redirection before a read-only git", "2>/dev/null git log -1"),
-    ("a redirection with a separate target before a read-only git", "2> /dev/null git log -1"),
+    (
+        "a redirection with a separate target before a read-only git",
+        "2> /dev/null git log -1",
+    ),
     ("a read-only git behind a cluster of exec's c and l", "exec -clc git status"),
-    ("a read-only git past an exec function that may be unset", "exec() { :; }; unset -f exec; exec git status"),
+    (
+        "a read-only git past an exec function that may be unset",
+        "exec() { :; }; unset -f exec; exec git status",
+    ),
     ("a separate <<- target on a read-only git", "git <<- EOF log -1\nEOF"),
-    ("a command substitution target after a read-only git's subcommand", "git log -1 > $(echo f)"),
-    ("a function without git given a process substitution target", 'g() { echo "$@"; }; g > >(cat) hi'),
+    (
+        "a command substitution target after a read-only git's subcommand",
+        "git log -1 > $(echo f)",
+    ),
+    (
+        "a function without git given a process substitution target",
+        'g() { echo "$@"; }; g > >(cat) hi',
+    ),
     # A function may be named exec: defining it runs nothing, and calling it
     # runs its body, not the builtin.
-    ("a function named exec, defined only", 'exec() { git commit -m x; }; echo defined'),
-    ("a function named exec, called for a read-only verb", 'exec() { git "$@"; }; exec status'),
+    (
+        "a function named exec, defined only",
+        "exec() { git commit -m x; }; echo defined",
+    ),
+    (
+        "a function named exec, called for a read-only verb",
+        'exec() { git "$@"; }; exec status',
+    ),
 ):
     rc, _ = check_hook(command, d)
     check(f"ignores {label}", rc == 0, f"exit={rc}")
@@ -297,17 +428,35 @@ for label, command in (
     # Quoted, and still several words: one per element.
     ("quoted array expansion", 'args=(/repo commit -m x --); git -C "${args[@]}" log'),
     # Every modified form still expands to one word per element.
-    ("array expansion with an offset", 'args=(/repo commit -m x --); git -C "${args[@]:0}" log'),
-    ("array expansion with suffix removal", 'args=(/repo commit -m x --); git -C "${args[@]%x}" log'),
-    ("array expansion with a replacement", 'args=(/repo commit -m x --); git -C "${args[@]/a/b}" log'),
-    ("array indices expansion", 'args=(/repo commit -m x --); git -C "${!args[@]}" log'),
+    (
+        "array expansion with an offset",
+        'args=(/repo commit -m x --); git -C "${args[@]:0}" log',
+    ),
+    (
+        "array expansion with suffix removal",
+        'args=(/repo commit -m x --); git -C "${args[@]%x}" log',
+    ),
+    (
+        "array expansion with a replacement",
+        'args=(/repo commit -m x --); git -C "${args[@]/a/b}" log',
+    ),
+    (
+        "array indices expansion",
+        'args=(/repo commit -m x --); git -C "${!args[@]}" log',
+    ),
     ("quoted positional parameters", 'git -C "$@" log'),
     ("quoted braced positional parameters", 'git -C "${@}" log'),
     # git accepts a separate value for its long options, verified against the
     # binary for --git-dir, --work-tree and --namespace, so the token after an
     # unrecognised one is not necessarily the subcommand.
-    ("long option with a separate value then commit", "git --git-dir /repo/.git commit -m x"),
-    ("long option with a separate value then a read-only verb", "git --work-tree /repo log"),
+    (
+        "long option with a separate value then commit",
+        "git --git-dir /repo/.git commit -m x",
+    ),
+    (
+        "long option with a separate value then a read-only verb",
+        "git --work-tree /repo log",
+    ),
 ):
     rc, _ = check_hook(command, d)
     check(f"blocks {label}", rc == 2, f"exit={rc}")
@@ -331,13 +480,16 @@ for label, command in (
     ("env prefix", "env git commit -m x"),
     # A keyword introduces the command; the git after it is still a command.
     ("commit after an if keyword", "if git commit -m x; then echo ok; fi"),
-    ("commit inside a for body", "for d in a b; do git -C \"$d\" commit -m x; done"),
+    ("commit inside a for body", 'for d in a b; do git -C "$d" commit -m x; done'),
     ("commit after then", "if true; then git commit -m x; fi"),
     ("commit after a negation", "! git commit -m x"),
     ("commit behind the time keyword", "time git commit -m x"),
     ("commit behind time -p", "time -p git commit -m x"),
     # A value that can add words can add -a, which commits unstaged tracked files.
-    ("multiword expansion as a commit option value", 'args=(msg -a); git commit -m "${args[@]}"'),
+    (
+        "multiword expansion as a commit option value",
+        'args=(msg -a); git commit -m "${args[@]}"',
+    ),
     ("absolute env prefix", "/usr/bin/env git commit -m x"),
     ("env -i prefix", "env -i git commit -m x"),
     ("env --ignore-environment prefix", "env --ignore-environment git commit -m x"),
@@ -350,8 +502,16 @@ for label, command in (
     ("env -u prefix", "env -u NAME git commit -m x"),
 ):
     rc, err = check_hook(command, continued_commit_repo)
-    check(f"{label} is parsed, not refused", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
-    check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label} is parsed, not refused",
+        "could not safely parse" not in err,
+        f"stderr={err.strip()[:160]}",
+    )
+    check(
+        f"{label} scans the staged credential",
+        rc == 2 and "GitHub token" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Runners execute a program, not a same-named shell function. sudo may change
 # repository/config context and xargs appends unknown input; their commits must
@@ -359,25 +519,48 @@ for label, command in (
 runner_repo = repo({"fixture.txt": f"{GITHUB}\n"})
 runner_clean = repo({"fixture.txt": "clean\n"})
 for prefix in (
-    "nohup", "/usr/bin/nohup --", "nice", "nice -n 4", "nice --adjustment=4",
-    "nice -10", "timeout 5", "timeout -s TERM -k 1 5", "timeout --foreground 5",
-    "nohup nice -n 4 timeout 5", "exec nohup",
+    "nohup",
+    "/usr/bin/nohup --",
+    "nice",
+    "nice -n 4",
+    "nice --adjustment=4",
+    "nice -10",
+    "timeout 5",
+    "timeout -s TERM -k 1 5",
+    "timeout --foreground 5",
+    "nohup nice -n 4 timeout 5",
+    "exec nohup",
 ):
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(prefix + " git commit -m fixture", directory)
-        check(f"{prefix} scans the {'credential' if expected else 'clean'} candidate",
-              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{prefix} scans the {'credential' if expected else 'clean'} candidate",
+            rc == expected and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 for prefix in (
-    "sudo", "sudo -u nobody --", "sudo -D /tmp", "sudo --chdir=/tmp",
-    "sudo -n FOO=x -u root", "sudo FOO=x -n BAR=y -u root",
-    "sudo FOO= -u root --", "sudo FOO=git -u root",
+    "sudo",
+    "sudo -u nobody --",
+    "sudo -D /tmp",
+    "sudo --chdir=/tmp",
+    "sudo -n FOO=x -u root",
+    "sudo FOO=x -n BAR=y -u root",
+    "sudo FOO= -u root --",
+    "sudo FOO=git -u root",
     "sudo odd.name=x -u root",
-    "echo fixture | xargs", "xargs -0 -r -n 1", "xargs --max-args=1 --",
-    "xargs -I{}", "xargs -a input.txt", "xargs --arg-file=input.txt",
+    "echo fixture | xargs",
+    "xargs -0 -r -n 1",
+    "xargs --max-args=1 --",
+    "xargs -I{}",
+    "xargs -a input.txt",
+    "xargs --arg-file=input.txt",
 ):
     rc, err = check_hook(prefix + " git commit -m fixture", runner_clean)
-    check(f"{prefix} refuses an unknown commit context", rc == 2 and "could not safely parse" in err,
-          f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{prefix} refuses an unknown commit context",
+        rc == 2 and "could not safely parse" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 for label, command in (
     ("runner prose", "echo nohup git commit -m fixture"),
     ("runner data argument", "nohup echo git commit -m fixture"),
@@ -385,7 +568,10 @@ for label, command in (
     ("sudo option value", "sudo -u git echo commit"),
     ("xargs option value", "xargs -a git echo commit"),
     ("sudo read-only command", "sudo -u nobody git log --grep commit"),
-    ("sudo assignment before options and read-only command", "sudo FOO=x -u root git status"),
+    (
+        "sudo assignment before options and read-only command",
+        "sudo FOO=x -u root git status",
+    ),
     ("sudo assignment before options and prose", "sudo FOO=x -u root echo git commit"),
     ("sudo option value looking like an assignment", "sudo -u FOO=x echo git commit"),
     ("sudo program path containing equals", "sudo /tmp/program=x git commit"),
@@ -403,8 +589,11 @@ for command in (
     "echo commit | xargs git",
 ):
     rc, err = check_hook(command, runner_repo)
-    check("runner function uncertainty retains external fallback", rc == 2,
-          f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "runner function uncertainty retains external fallback",
+        rc == 2,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Runner option arities (#57). GNU xargs --max-lines, --eof and --replace take
 # an optional value that binds only when attached, so the bare word takes
@@ -413,177 +602,289 @@ for command in (
 # too. Read as taking a value, `git` was consumed and `commit` ran unscanned. The read-only form shows the option is known rather than refused.
 for option in ("--max-lines", "--eof", "--replace", "--max-lines=2", "-L 2"):
     for directory in (runner_repo, runner_clean):
-        rc, err = check_hook(f"echo x | xargs {option} git commit -m fixture", directory)
-        check(f"xargs {option} git commit is refused", rc == 2 and "could not safely parse" in err,
-              f"exit={rc} stderr={err.strip()[:160]}")
+        rc, err = check_hook(
+            f"echo x | xargs {option} git commit -m fixture", directory
+        )
+        check(
+            f"xargs {option} git commit is refused",
+            rc == 2 and "could not safely parse" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
     rc, err = check_hook(f"echo x | xargs {option} git log --grep commit", runner_repo)
-    check(f"xargs {option} is parsed before a read-only git", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"xargs {option} is parsed before a read-only git",
+        rc == 0,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 # Options that take the next word, from macOS xargs(1) (-J, -R, -S) and sudo
 # 1.9's parse_args.c (-a, -c, -U): `git` is their value and `commit` the
 # program. Read as taking nothing, or not known at all, git commit is refused.
 for command in (
-    "xargs -J git commit -m fixture", "xargs -R git commit -m fixture", "xargs -S git commit -m fixture",
+    "xargs -J git commit -m fixture",
+    "xargs -R git commit -m fixture",
+    "xargs -S git commit -m fixture",
     "xargs -J% git log --grep commit",
-    "sudo -a git commit -m fixture", "sudo --auth-type git commit -m fixture",
-    "sudo -c git commit -m fixture", "sudo --login-class git commit -m fixture",
-    "sudo -U git commit -m fixture", "sudo --other-user git commit -m fixture",
+    "sudo -a git commit -m fixture",
+    "sudo --auth-type git commit -m fixture",
+    "sudo -c git commit -m fixture",
+    "sudo --login-class git commit -m fixture",
+    "sudo -U git commit -m fixture",
+    "sudo --other-user git commit -m fixture",
     "sudo -cstaff git status",
 ):
     rc, err = check_hook(command, runner_repo)
-    check(f"{command} reads the option value", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{command} reads the option value",
+        rc == 0,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 # A redirection where a runner option's value should be is removed by the
 # shell, so the runner takes a later word as its value (#64): read as the
 # value, the redirection left the real value to be taken as the program, and
 # the commit ran unscanned. A git later in the command is refused, before the
 # index is read, so a clean index is refused too.
 for command in (
-    "nice -n >/tmp/out 5 git commit -m fixture", "nice -n > /tmp/out 5 git commit -m fixture",
+    "nice -n >/tmp/out 5 git commit -m fixture",
+    "nice -n > /tmp/out 5 git commit -m fixture",
     "nice --adjustment 2>/tmp/out 5 git commit -m fixture",
     "nice -n >/tmp/out 5 git -c alias.ci=commit ci -m fixture",
-    "sudo -u >/tmp/out root git commit -m fixture", "sudo -g &>/tmp/out wheel git commit -m fixture",
-    "timeout -s >/tmp/out KILL 5 git commit -m fixture", "timeout -k </dev/null 1 5 git commit -m fixture",
-    "xargs -n >/tmp/out 1 git commit -m fixture", "xargs -I <<<x {} git commit -m fixture",
+    "sudo -u >/tmp/out root git commit -m fixture",
+    "sudo -g &>/tmp/out wheel git commit -m fixture",
+    "timeout -s >/tmp/out KILL 5 git commit -m fixture",
+    "timeout -k </dev/null 1 5 git commit -m fixture",
+    "xargs -n >/tmp/out 1 git commit -m fixture",
+    "xargs -I <<<x {} git commit -m fixture",
     # timeout's duration slot after -- is a value slot as well.
-    "timeout -- >/tmp/out 5 git commit -m fixture", "timeout -- > /tmp/out 5 git commit -m fixture",
+    "timeout -- >/tmp/out 5 git commit -m fixture",
+    "timeout -- > /tmp/out 5 git commit -m fixture",
     # A file descriptor number or a {name} before the < or > is part of the
     # redirection, which the shell removes whole.
-    "nice -n 5>/dev/null git status", "nice -n {fd}>/tmp/out 5 git commit -m fixture",
+    "nice -n 5>/dev/null git status",
+    "nice -n {fd}>/tmp/out 5 git commit -m fixture",
     "timeout -- 5>/tmp/out 5 git commit -m fixture",
     # A quoted target leaves the number before it a descriptor, and so does
     # one before a second redirection glued after it.
-    "nice -n 5>'/tmp/out' 5 git commit -m fixture", "timeout -- 5>'/tmp/out' 5 git commit -m fixture",
+    "nice -n 5>'/tmp/out' 5 git commit -m fixture",
+    "timeout -- 5>'/tmp/out' 5 git commit -m fixture",
     "f() { nice -n 5>'/tmp/out' 5 git commit -m fixture; }; f",
     "nice -n 5>'/tmp/out'>/dev/null 5 git commit -m fixture",
     # A backslash-newline is removed before the word is read and quotes
     # nothing: the number joined across it is still a descriptor.
-    "nice -n 5\\\n>/tmp/out 6 git commit -m fixture", "nice -n \\\n5>/tmp/out 6 git commit -m fixture",
-    "timeout -- 5\\\n>/tmp/out 6 git commit -m fixture", "nice -n 5\\\n6>/tmp/out 7 git commit -m fixture",
+    "nice -n 5\\\n>/tmp/out 6 git commit -m fixture",
+    "nice -n \\\n5>/tmp/out 6 git commit -m fixture",
+    "timeout -- 5\\\n>/tmp/out 6 git commit -m fixture",
+    "nice -n 5\\\n6>/tmp/out 7 git commit -m fixture",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
-        check(f"{command} is refused", rc == 2 and "could not safely parse" in err,
-              f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is refused",
+            rc == 2 and "could not safely parse" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 # A redirection after the program, or a git only in the next command, is still
 # read: the commit is scanned, and a read-only git passes.
 for command in (
-    "nice -n 5 git >/tmp/out commit -m fixture", "timeout -s KILL 5 git >/tmp/out commit -m fixture",
+    "nice -n 5 git >/tmp/out commit -m fixture",
+    "timeout -s KILL 5 git >/tmp/out commit -m fixture",
     "nice -n >/tmp/out 5 python3 x; git commit -m fixture",
     # A value glued before a redirection keeps that value (`-s KILL>out` is
     # `-s KILL`), so the program after it is read.
     "timeout -s KILL>/dev/null 5 git commit -m fixture",
     # A quoted or escaped number is a word, not a descriptor (`'5'>out` is the
     # value 5), in a function body too.
-    "nice -n '5'>/dev/null git commit -m fixture", "timeout -- '5'>/dev/null git commit -m fixture",
+    "nice -n '5'>/dev/null git commit -m fixture",
+    "timeout -- '5'>/dev/null git commit -m fixture",
     "f() { nice -n '5'>/dev/null git commit -m fixture; }; f",
 ):
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{command} is scanned (expect {expected})",
-              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
-              f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is scanned (expect {expected})",
+            rc == expected
+            and "could not safely parse" not in err
+            and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 for command in (
-    "nice -n 5 git status >/tmp/out", "sudo -u root git status >/tmp/out", "xargs -n 1 git log >/tmp/out",
-    "timeout 5 git status 2>/tmp/out", "nice -n >/tmp/out 5 python3 x",
-    "sudo -u root>/dev/null git status", "xargs -I {}>/dev/null git log {}", "nice -n -5>/dev/null git status",
+    "nice -n 5 git status >/tmp/out",
+    "sudo -u root git status >/tmp/out",
+    "xargs -n 1 git log >/tmp/out",
+    "timeout 5 git status 2>/tmp/out",
+    "nice -n >/tmp/out 5 python3 x",
+    "sudo -u root>/dev/null git status",
+    "xargs -I {}>/dev/null git log {}",
+    "nice -n -5>/dev/null git status",
     "timeout -- 5s>/dev/null git log",
-    "nice -n '5'>/dev/null git status", 'nice -n "5">/dev/null git status', "nice -n '{fd}'>/dev/null git status",
-    "nice -n \\5>/dev/null git status", "timeout -- '5'>/dev/null git status",
+    "nice -n '5'>/dev/null git status",
+    'nice -n "5">/dev/null git status',
+    "nice -n '{fd}'>/dev/null git status",
+    "nice -n \\5>/dev/null git status",
+    "timeout -- '5'>/dev/null git status",
     "f() { nice -n '5'>/dev/null git status; }; f",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
-        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}"
+        )
 # env -C (--chdir) and -P take a value, as the next word or attached, so the
 # word after the value is the program. Read as the program, -C hid the git
 # after it. -C runs git in another directory, whose index this hook does not
 # scan, so a visible commit is refused as through sudo; -P only picks where
 # git is found, so the commit is scanned.
-for option in ("-C /tmp", "-C/tmp", "--chdir /tmp", "--chdir=/tmp", "--ch /tmp", "-u FOO -C /tmp", '-C "$dir"'):
+for option in (
+    "-C /tmp",
+    "-C/tmp",
+    "--chdir /tmp",
+    "--chdir=/tmp",
+    "--ch /tmp",
+    "-u FOO -C /tmp",
+    '-C "$dir"',
+):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(f"env {option} git commit -m fixture", directory)
-        check(f"env {option} git commit is refused", rc == 2 and "could not safely parse" in err,
-              f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"env {option} git commit is refused",
+            rc == 2 and "could not safely parse" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 for option in ("-P /usr/bin", "-P/usr/bin"):
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(f"env {option} git commit -m fixture", directory)
-        check(f"env {option} git commit is scanned (expect {expected})",
-              rc == expected and "could not safely parse" not in err, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"env {option} git commit is scanned (expect {expected})",
+            rc == expected and "could not safely parse" not in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 # Past the -C value, a program this hook cannot read is judged on its commit.
 for directory in (runner_repo, runner_clean):
     rc, err = check_hook('env -C /tmp "$G" commit -m fixture', directory)
-    check("env -C /tmp $G commit is refused", rc == 2, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "env -C /tmp $G commit is refused",
+        rc == 2,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 for command in (
-    "env -C /tmp git log --grep commit", "env -C /tmp/github echo hi", 'env -C "$dir" ls',
-    'env -v printenv "$HOME"', "env -S 'python3 -u' legit.py",
+    "env -C /tmp git log --grep commit",
+    "env -C /tmp/github echo hi",
+    'env -C "$dir" ls',
+    'env -v printenv "$HOME"',
+    "env -S 'python3 -u' legit.py",
 ):
     rc, err = check_hook(command, runner_repo)
-    check(f"{command} without a commit is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{command} without a commit is preserved",
+        rc == 0,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # The rest of env's options (#61). Each command below is refused before the
 # index is read, so a clean index is refused too; the scanned ones block only
 # the credential; the preserved ones pass with the credential staged.
 env_refused = (
     # -S splits its value into words and runs them: a git among them commits.
-    "env -S 'git commit -m fixture'", 'env -S "git commit -m fixture"', "env -S'git commit -m fixture'",
-    "env --split-string 'git commit -m fixture'", "env --split-string='git commit -m fixture'",
-    "env --spl 'git commit -m fixture'", "env -iS 'git commit -m fixture'",
-    "env -S '/usr/bin/git commit -m fixture'", "env -S \"'git' commit -m fixture\"",
-    "env -S 'git\\_commit -m fixture'", "env -S 'git\\c' commit -m fixture",
+    "env -S 'git commit -m fixture'",
+    'env -S "git commit -m fixture"',
+    "env -S'git commit -m fixture'",
+    "env --split-string 'git commit -m fixture'",
+    "env --split-string='git commit -m fixture'",
+    "env --spl 'git commit -m fixture'",
+    "env -iS 'git commit -m fixture'",
+    "env -S '/usr/bin/git commit -m fixture'",
+    "env -S \"'git' commit -m fixture\"",
+    "env -S 'git\\_commit -m fixture'",
+    "env -S 'git\\c' commit -m fixture",
     # A # inside a word starts no comment, and the string is not cut at a #
     # after quoted, escaped or expanded text.
-    "env -S 'echo a#b git commit -m fixture'", "env -S 'echo \"#\" git commit -m fixture'",
-    "env -S 'echo \\# git commit -m fixture'", "env -S \"'a' # git commit -m fixture\"",
-    "env -S 'FOO=\"a # b\" git commit -m fixture'", 'env -S "$X # git commit -m fixture"',
+    "env -S 'echo a#b git commit -m fixture'",
+    "env -S 'echo \"#\" git commit -m fixture'",
+    "env -S 'echo \\# git commit -m fixture'",
+    "env -S \"'a' # git commit -m fixture\"",
+    "env -S 'FOO=\"a # b\" git commit -m fixture'",
+    'env -S "$X # git commit -m fixture"',
     "env -S '${X} # git commit -m fixture'",
     # A string that leaves the program to later words: a git after it.
-    "env -S '-i' git commit -m fixture", "env -S 'FOO=1' git commit -m fixture", 'env -S "$X" git status',
+    "env -S '-i' git commit -m fixture",
+    "env -S 'FOO=1' git commit -m fixture",
+    'env -S "$X" git status',
     # A cluster ending in C takes the next word, and -C refuses a visible commit.
     "env -iC /tmp git commit -m fixture",
     # An option this hook does not know may take the next word.
-    "env -x git commit -m fixture", "env --foo git status", "env --bogus git status", "env -L x git status",
+    "env -x git commit -m fixture",
+    "env --foo git status",
+    "env --bogus git status",
+    "env -L x git status",
     # A long-option prefix getopt_long finds ambiguous is not resolved.
-    "env --de git status", "env --i git status", "env --ignore- git status", "env --d=x git status",
+    "env --de git status",
+    "env --i git status",
+    "env --ignore- git status",
+    "env --d=x git status",
     # A unique prefix is read as its option: --e is --env0-from, --a is --argv0.
-    "env --e /tmp/f git commit -m fixture", "env --a git-commit git status",
+    "env --e /tmp/f git commit -m fixture",
+    "env --a git-commit git status",
     # Run under a name starting git-, git takes the rest as its subcommand.
-    "env -a git-commit git status", "env -agit-commit git status", "env --argv0=git-commit git status",
-    "env --argv0 git-commit git status", "env -va git-commit git status", "env -a /x/git-commit git status",
+    "env -a git-commit git status",
+    "env -agit-commit git status",
+    "env --argv0=git-commit git status",
+    "env --argv0 git-commit git status",
+    "env -va git-commit git status",
+    "env -a /x/git-commit git status",
     'env -a "$N" git status',
     # --env0-from can set GIT_* from a file, as -C picks another repository.
-    "env --env0-from /tmp/f git commit -m fixture", "env --env0-from=/tmp/f git commit -m fixture",
+    "env --env0-from /tmp/f git commit -m fixture",
+    "env --env0-from=/tmp/f git commit -m fixture",
     'env --env0-from "$(pwd)/f" git commit -m fixture',
     # A -C value that runs into a substitution is still the -C value.
-    'env -C "$(pwd)" git commit -m fixture', "env -C $(pwd) git commit -m fixture",
-    'env -C"$(pwd)" git commit -m fixture', 'env --chdir="$(pwd)" git commit -m fixture',
-    'env -C "$(a)$(b)" git commit -m fixture', 'env -C /tmp -P "$(pwd)" git commit -m fixture',
-    'env -C "`pwd`" git commit -m fixture', "env -C `pwd` git commit -m fixture",
+    'env -C "$(pwd)" git commit -m fixture',
+    "env -C $(pwd) git commit -m fixture",
+    'env -C"$(pwd)" git commit -m fixture',
+    'env --chdir="$(pwd)" git commit -m fixture',
+    'env -C "$(a)$(b)" git commit -m fixture',
+    'env -C /tmp -P "$(pwd)" git commit -m fixture',
+    'env -C "`pwd`" git commit -m fixture',
+    "env -C `pwd` git commit -m fixture",
     # A redirection where the value should be is removed by the shell, so env
     # takes its value from a later word: a git ahead, or a git word in a later
     # -S string, is refused.
-    "env -S >/tmp/out 'git commit -m fixture'", "env -S > /tmp/out 'git commit -m fixture'",
-    "env -S 2>/tmp/out 'git commit -m fixture'", "env -S </dev/null 'git commit -m fixture'",
-    "env -iS >/tmp/out 'git commit -m fixture'", "env --split-string >/tmp/out 'git commit -m fixture'",
-    "env -u >/tmp/out FOO git commit -m fixture", "env -iu >/tmp/out FOO git commit -m fixture",
-    "env -C >/tmp/out /tmp git commit -m fixture", "env -C > /tmp/out /tmp git commit -m fixture",
-    "env -iC >/tmp/out /tmp git commit -m fixture", "env -P >/tmp/out /usr/bin git commit -m fixture",
-    "env -a >/tmp/out git-commit git status", "env --argv0 >/tmp/out git-commit git status",
+    "env -S >/tmp/out 'git commit -m fixture'",
+    "env -S > /tmp/out 'git commit -m fixture'",
+    "env -S 2>/tmp/out 'git commit -m fixture'",
+    "env -S </dev/null 'git commit -m fixture'",
+    "env -iS >/tmp/out 'git commit -m fixture'",
+    "env --split-string >/tmp/out 'git commit -m fixture'",
+    "env -u >/tmp/out FOO git commit -m fixture",
+    "env -iu >/tmp/out FOO git commit -m fixture",
+    "env -C >/tmp/out /tmp git commit -m fixture",
+    "env -C > /tmp/out /tmp git commit -m fixture",
+    "env -iC >/tmp/out /tmp git commit -m fixture",
+    "env -P >/tmp/out /usr/bin git commit -m fixture",
+    "env -a >/tmp/out git-commit git status",
+    "env --argv0 >/tmp/out git-commit git status",
     "env --env0-from >/tmp/out FILE git commit -m fixture",
     "env --env0-from > /tmp/out FILE git commit -m fixture",
     # A quoted target is still a redirection.
-    "env -u >'/tmp/out' FOO git commit -m fixture", "env -S >\"/tmp/out\" 'git commit -m fixture'",
+    "env -u >'/tmp/out' FOO git commit -m fixture",
+    "env -S >\"/tmp/out\" 'git commit -m fixture'",
     "env -C >'/tmp/out' /tmp git commit -m fixture",
     # Glued to the option, or between options, the redirection is stripped
     # before the option is read.
-    "env -S>/tmp/out 'git commit -m fixture'", "env -i >/tmp/out -S 'git commit -m fixture'",
+    "env -S>/tmp/out 'git commit -m fixture'",
+    "env -i >/tmp/out -S 'git commit -m fixture'",
     # GNU env re-parses the options an -S string supplies (#66), so a string
     # that starts with an option can supply another -S, which splits a later
     # word: a git word in any later string is refused.
-    "env -S '-S' 'git commit -m fixture'", "env -S'-S' 'git commit -m fixture'",
-    "env --split-string=-S 'git commit -m fixture'", "env --sp=-S 'git commit -m fixture'",
-    "env -iS '-S' 'git commit -m fixture'", "env -S '-S' -S 'git commit -m fixture'",
-    "env -S '-i -S' 'git commit -m fixture'", "env -S '-S' '/usr/bin/git commit -m fixture'",
+    "env -S '-S' 'git commit -m fixture'",
+    "env -S'-S' 'git commit -m fixture'",
+    "env --split-string=-S 'git commit -m fixture'",
+    "env --sp=-S 'git commit -m fixture'",
+    "env -iS '-S' 'git commit -m fixture'",
+    "env -S '-S' -S 'git commit -m fixture'",
+    "env -S '-i -S' 'git commit -m fixture'",
+    "env -S '-S' '/usr/bin/git commit -m fixture'",
     # Quote removal and \_ come before the word is read.
-    "env -S '-S' 'g\"i\"t commit -m fixture'", "env -S '-S' 'git\\_commit -m fixture'",
+    "env -S '-S' 'g\"i\"t commit -m fixture'",
+    "env -S '-S' 'git\\_commit -m fixture'",
     # A # in the word does not hide a git before it: env reads the rest as a
     # comment and still runs the alias commit.
     "env -S '-S' 'git -c alias.ci=commit ci -m fixture #c'",
@@ -592,80 +893,117 @@ env_refused = (
     # After an option-leading string GNU env keeps reading options from the
     # words after it, so a later -S splits its string although '-i' leaves no
     # value unresolved; its string may also be glued to the option.
-    "env -S '-i' -S 'git commit -m fixture'", "env -S '-i' --split-string='git commit -m fixture'",
-    "env -S '-i' --sp='git commit -m fixture'", "env -S '-i' -S'git commit -m fixture'",
+    "env -S '-i' -S 'git commit -m fixture'",
+    "env -S '-i' --split-string='git commit -m fixture'",
+    "env -S '-i' --sp='git commit -m fixture'",
+    "env -S '-i' -S'git commit -m fixture'",
     "env -S '-i' -iS'git commit -m fixture'",
     # env splits each glued layer again, short or long.
-    "env -S '-S' '-S-Sgit commit -m fixture'", "env -S '-i' '-S--split-string=git commit -m fixture'",
-    "env -S '-i' '--split-string=-Sgit commit -m fixture'", "env -S '-i' '--sp=--sp=git commit -m fixture'",
+    "env -S '-S' '-S-Sgit commit -m fixture'",
+    "env -S '-i' '-S--split-string=git commit -m fixture'",
+    "env -S '-i' '--split-string=-Sgit commit -m fixture'",
+    "env -S '-i' '--sp=--sp=git commit -m fixture'",
     # The glued layer can sit in the option-leading string itself, after any
     # word break, and no commit word need be visible.
-    "env -S '-Sgit -c alias.ci=commit ci -m fixture'", "env -S '-i -Sgit -c alias.ci=commit ci -m fixture'",
-    "env -S ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit -c alias.ci=commit ci -m fixture'",
-    "env -S '-S' ' -Sgit -c alias.ci=commit ci -m fixture'", "env -S '\\_-Sgit ci'",
+    "env -S '-Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S '-i -Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S ' -Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S '\\_-Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S '-S' ' -Sgit -c alias.ci=commit ci -m fixture'",
+    "env -S '\\_-Sgit ci'",
     # A string whose first word holds an expansion can supply that -S too,
     # from env's own ${NAME} (#69).
-    "X=-S env -S '${X}' 'git commit -m fixture'", "env -S '${X}' '-Sgit commit -m fixture'",
-    'env -S "$X" \'git commit -m fixture\'',
+    "X=-S env -S '${X}' 'git commit -m fixture'",
+    "env -S '${X}' '-Sgit commit -m fixture'",
+    "env -S \"$X\" 'git commit -m fixture'",
 )
 for command in env_refused:
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
-        check(f"{command} is refused", rc == 2 and "could not safely parse" in err,
-              f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is refused",
+            rc == 2 and "could not safely parse" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 # A -S string whose program this hook cannot read is judged on its commit, in
 # the string or after it, as after any such program.
 for command in (
-    'env -S "$CMD" commit -m fixture', 'env -S "$G commit" -m fixture', "env -S '${G} commit' -m fixture",
-    "env -S '-i' \"$G\" commit -m fixture", "env -S 'FOO=1' \"$G\" commit -m fixture",
+    'env -S "$CMD" commit -m fixture',
+    'env -S "$G commit" -m fixture',
+    "env -S '${G} commit' -m fixture",
+    "env -S '-i' \"$G\" commit -m fixture",
+    "env -S 'FOO=1' \"$G\" commit -m fixture",
     # In a later string env may split, a word holding env's own ${NAME} or the
     # shell's $ is such a program too (#69): a commit word after it in that
     # string, or a later word that is commit, is refused.
-    "env -S '-S' '${G} commit -m fixture'", "env -S >/tmp/out '${G} commit -m fixture'",
-    "env -S >/tmp/out '${G}' commit -m fixture", "env -S '-S' '-i ${G} commit -m fixture'",
+    "env -S '-S' '${G} commit -m fixture'",
+    "env -S >/tmp/out '${G} commit -m fixture'",
+    "env -S >/tmp/out '${G}' commit -m fixture",
+    "env -S '-S' '-i ${G} commit -m fixture'",
     "env -S '-S' \"$G commit -m fixture\"",
     # The shell removes a redirection glued to that commit word.
-    "env -S >/tmp/out '${G}' commit>/dev/null -m fixture", "env -S \"$CMD\" commit>/dev/null -m fixture",
+    "env -S >/tmp/out '${G}' commit>/dev/null -m fixture",
+    'env -S "$CMD" commit>/dev/null -m fixture',
     "env -S '-S' '${G}' 'commit'>/dev/null -m fixture",
     # The value can end in whitespace, so a commit glued after the expansion
     # can still be its own word once env splits the string.
-    "X='-Sgit ' env -S '${X}commit -m fixture'", "env -S '-S' '${G}commit -m fixture'",
-    "env -S \"$X\"commit -m fixture", "env -S '-S' \"$G\"commit -m fixture",
+    "X='-Sgit ' env -S '${X}commit -m fixture'",
+    "env -S '-S' '${G}commit -m fixture'",
+    'env -S "$X"commit -m fixture',
+    "env -S '-S' \"$G\"commit -m fixture",
     # Over-refusals: the last -S string env splits is `-i`, so env splits no
     # later word and expands no ${G} in it, looks for a program named `${G}
     # commit -m fixture` or `${G}`, and runs no git (GNU env 9.12 exits 127).
     # The hook does not follow which option a string supplies and reads every
     # later word as an -S string.
-    "env -S '-i' '${G} commit -m fixture'", "env -S '-S' '-i' '${G} commit -m fixture'",
-    "env -S '-i' '${G}' commit>/dev/null -m fixture", "env -S >/tmp/out '-i' '${G}' commit -m fixture",
+    "env -S '-i' '${G} commit -m fixture'",
+    "env -S '-S' '-i' '${G} commit -m fixture'",
+    "env -S '-i' '${G}' commit>/dev/null -m fixture",
+    "env -S >/tmp/out '-i' '${G}' commit -m fixture",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
-        check(f"{command} is refused as an indirect commit",
-              rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is refused as an indirect commit",
+            rc == 2 and "program name this hook cannot read" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 env_scanned = (
-    "env -v git commit -m fixture", "env - git commit -m fixture", "env --debug git commit -m fixture",
+    "env -v git commit -m fixture",
+    "env - git commit -m fixture",
+    "env --debug git commit -m fixture",
     "env --ignore-signal=PIPE git commit -m fixture",
     # A unique long-option prefix is that option.
-    "env --deb git commit -m fixture", "env --un=FOO git commit -m fixture", "env --un FOO git commit -m fixture",
-    "env --lis git commit -m fixture", "env --b git commit -m fixture", "env --ignore-e git commit -m fixture",
+    "env --deb git commit -m fixture",
+    "env --un=FOO git commit -m fixture",
+    "env --un FOO git commit -m fixture",
+    "env --lis git commit -m fixture",
+    "env --b git commit -m fixture",
+    "env --ignore-e git commit -m fixture",
     "env --ignore-s=PIPE git commit -m fixture",
     # The *-signal options take an =SIG: env runs the git after it.
-    "env --default-signal=INT git commit -m fixture", "env --block-signal=INT git commit -m fixture",
+    "env --default-signal=INT git commit -m fixture",
+    "env --block-signal=INT git commit -m fixture",
     "env -iv git commit -m fixture",
-    "env -iu NAME git commit -m fixture", "env -uNAME git commit -m fixture",
-    "env -iP /usr/bin git commit -m fixture", "env -S '' git commit -m fixture",
+    "env -iu NAME git commit -m fixture",
+    "env -uNAME git commit -m fixture",
+    "env -iP /usr/bin git commit -m fixture",
+    "env -S '' git commit -m fixture",
     # A string that is all comment adds no words: the git after it is env's.
     "env -S '# x' git commit -m fixture",
-    "env -a foo git commit -m fixture", "env -afoo git commit -m fixture", "env --argv0=foo git commit -m fixture",
-    'env -P "$(pwd)" git commit -m fixture', 'env -P "`pwd`" git commit -m fixture',
+    "env -a foo git commit -m fixture",
+    "env -afoo git commit -m fixture",
+    "env --argv0=foo git commit -m fixture",
+    'env -P "$(pwd)" git commit -m fixture',
+    'env -P "`pwd`" git commit -m fixture',
     # The substitution in a -C value is still read as a command of its own.
     'env -C "$(git commit -m fixture)" ls',
     # --help ends only its own command: the next one is read.
     "env --help; git commit -m fixture",
     # A quoted < or > in a value is part of the value, not a redirection.
     "env -u 'A>B' git commit -m fixture",
-    "env -a 'worker>log' git commit -m fixture", "env -a\"worker<log\" git commit -m fixture",
+    "env -a 'worker>log' git commit -m fixture",
+    'env -a"worker<log" git commit -m fixture',
     "env --argv0='worker>log' git commit -m fixture",
     # The later strings an option-leading -S string can split end with the
     # command: the next one is read.
@@ -674,111 +1012,168 @@ env_scanned = (
 for command in env_scanned:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{command} is scanned (expect {expected})",
-              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
-              f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is scanned (expect {expected})",
+            rc == expected
+            and "could not safely parse" not in err
+            and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 for command in (
     # A word that only contains git names no git.
-    "env -S 'python3 -u' legit.py", "env -S 'node' digit.js", "env -S 'printf %s' $HOME",
-    "env -S 'python3 legit.py'", "env -S 'node /src/digit.js'", "env -S 'git-lfs version'",
+    "env -S 'python3 -u' legit.py",
+    "env -S 'node' digit.js",
+    "env -S 'printf %s' $HOME",
+    "env -S 'python3 legit.py'",
+    "env -S 'node /src/digit.js'",
+    "env -S 'git-lfs version'",
     # An unquoted # that starts a word begins a comment: env runs only echo.
-    "env -S 'echo # git commit -m fixture'", "env -S '# git commit -m fixture'",
-    "env -S 'echo\t# git commit -m fixture'", "env -S >/tmp/out 'echo # git commit -m fixture'",
+    "env -S 'echo # git commit -m fixture'",
+    "env -S '# git commit -m fixture'",
+    "env -S 'echo\t# git commit -m fixture'",
+    "env -S >/tmp/out 'echo # git commit -m fixture'",
     # A -S string this hook cannot read, with no git or commit near it.
-    'env -S "$CMD" ls', 'env -S "$PY" script.py', 'env -S "${PY:-python3}" script.py',
-    'env -S "python3 $FLAGS" legit.py', 'env -S "$(command -v python3) -u" legit.py',
-    'env -S "echo $HOME"', 'env -S "echo $HOME" | grep x', "env -S 'FOO=1' \"$X\"",
-    "env -a foo git status", "env --env0-from /tmp/f git status", "env -x echo hi",
+    'env -S "$CMD" ls',
+    'env -S "$PY" script.py',
+    'env -S "${PY:-python3}" script.py',
+    'env -S "python3 $FLAGS" legit.py',
+    'env -S "$(command -v python3) -u" legit.py',
+    'env -S "echo $HOME"',
+    'env -S "echo $HOME" | grep x',
+    "env -S 'FOO=1' \"$X\"",
+    "env -a foo git status",
+    "env --env0-from /tmp/f git status",
+    "env -x echo hi",
     # A quoted < or > in an -a name is part of the name: git runs status.
-    "env -a 'worker>log' git status", "env --argv0='worker>log' git status",
-    'env -C "$(pwd)" git status', 'env -C "$(a)$(b)" git status',
+    "env -a 'worker>log' git status",
+    "env --argv0='worker>log' git status",
+    'env -C "$(pwd)" git status',
+    'env -C "$(a)$(b)" git status',
     # --help and --version print and exit: the git after them never runs.
-    "env --help git status", "env --version git commit -m fixture",
-    "env --he git status", "env --vers git commit -m fixture",
+    "env --help git status",
+    "env --version git commit -m fixture",
+    "env --he git status",
+    "env --vers git commit -m fixture",
     # -0 (--null) with a command makes both GNU env and macOS env exit 125
     # without running it, wherever -0 stands among the options.
-    "env -0 git commit -m fixture", "env --null git commit -m fixture", "env --n git commit -m fixture",
-    "env -i0v FOO=1 git commit -m fixture", "env -iu NAME -0 git commit -m fixture",
+    "env -0 git commit -m fixture",
+    "env --null git commit -m fixture",
+    "env --n git commit -m fixture",
+    "env -i0v FOO=1 git commit -m fixture",
+    "env -iu NAME -0 git commit -m fixture",
     # An =value on a long option that takes none makes GNU env exit 125, and
     # macOS env has no long options: the git after it never runs.
-    "env --debug=x git commit -m fixture", "env --ignore-environment=x git commit -m fixture",
-    "env --list-signal-handling=x git commit -m fixture", "env --deb=x git commit -m fixture",
+    "env --debug=x git commit -m fixture",
+    "env --ignore-environment=x git commit -m fixture",
+    "env --list-signal-handling=x git commit -m fixture",
+    "env --deb=x git commit -m fixture",
     "env --ignore-e=x git commit -m fixture",
     # A unique long-option prefix is that option.
-    "env --deb git status", "env --un=FOO git status", "env --lis git status", "env --block git status",
+    "env --deb git status",
+    "env --un=FOO git status",
+    "env --lis git status",
+    "env --block git status",
     "env --a foo git status",
     # A redirection after the program, or one before a value with no git
     # ahead of it, leaves nothing to refuse.
-    "env FOO=1 git status >out", "env -u FOO git status >out", "env -S 'python3 -u' legit.py >out",
-    "env -S >/tmp/out 'python3 -u' legit.py", "env -u >/tmp/out FOO python3 legit.py",
+    "env FOO=1 git status >out",
+    "env -u FOO git status >out",
+    "env -S 'python3 -u' legit.py >out",
+    "env -S >/tmp/out 'python3 -u' legit.py",
+    "env -u >/tmp/out FOO python3 legit.py",
     # A quoted < or > in a value is part of the value, not a redirection.
-    "env -u 'A>B' git status", 'env -u "A<B" git status',
+    "env -u 'A>B' git status",
+    'env -u "A<B" git status',
     # An option-leading -S string with no git word after it (#66), a word that
     # only contains git, or one in a comment. A commit word in a later string
     # is not read as a git one.
-    "env -S '-i' python3 legit.py", "env -S '-S' 'python3 -u' legit.py", "env -S '-S' legit.py",
-    "env -S '-S' 'echo # git commit -m fixture'", "env -S '-S' \"$X\"",
-    "env -S '-i' echo 'fix commit'", "env -S >/tmp/out 'echo commit'",
-    "env -S '-i' -u FOO python3 legit.py", "env -S '-i' --unset=FOO python3 legit.py",
-    "env -S '-Spython3 legit.py'", "env -S '-i -Spython3 legit.py'",
+    "env -S '-i' python3 legit.py",
+    "env -S '-S' 'python3 -u' legit.py",
+    "env -S '-S' legit.py",
+    "env -S '-S' 'echo # git commit -m fixture'",
+    "env -S '-S' \"$X\"",
+    "env -S '-i' echo 'fix commit'",
+    "env -S >/tmp/out 'echo commit'",
+    "env -S '-i' -u FOO python3 legit.py",
+    "env -S '-i' --unset=FOO python3 legit.py",
+    "env -S '-Spython3 legit.py'",
+    "env -S '-i -Spython3 legit.py'",
     # A string that starts with an expansion, with no git or commit word that
     # could follow it (#69): a commit inside a later word holding no $ is not
     # a commit word, nor is one before the $ word.
-    "env -S '${PY:-python3}' script.py", "env -S '${PY}' script.py -m 'fix commit'",
-    "env -S '-S' 'commit ${G}'", "env -S '${PY}' tool.py 'commit>x'",
+    "env -S '${PY:-python3}' script.py",
+    "env -S '${PY}' script.py -m 'fix commit'",
+    "env -S '-S' 'commit ${G}'",
+    "env -S '${PY}' tool.py 'commit>x'",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
-        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}"
+        )
 
 # A substitution executes even when its output is a quoted argument or an
 # assignment. Its quoting must be independent of the surrounding word.
 substitution_commits = (
-    ('quoted assignment', 'out="$(git commit -m fixture)"'),
-    ('quoted argument', 'echo "prefix $(git commit -m fixture) suffix"'),
-    ('inner quotes', 'out="$(git commit -m "inner message")"'),
-    ('nested quotes', 'out="$(echo "$(git commit -m fixture)")"'),
-    ('quoted function call', 'g() { git commit -m fixture; }; out="$(g)"'),
-    ('after quoted assignment', 'out="$(date)" git commit -m fixture'),
-    ('backtick assignment', 'out=`git commit -m fixture`'),
-    ('quoted backticks', 'echo "before `git commit -m fixture` after"'),
-    ('backtick function call', 'g() { git commit -m fixture; }; out=`g`'),
-    ('dollar substitution in backticks', 'out=`echo $(git commit -m fixture)`'),
-    ('nested escaped backticks', r'out=`echo \`git commit -m fixture\``'),
+    ("quoted assignment", 'out="$(git commit -m fixture)"'),
+    ("quoted argument", 'echo "prefix $(git commit -m fixture) suffix"'),
+    ("inner quotes", 'out="$(git commit -m "inner message")"'),
+    ("nested quotes", 'out="$(echo "$(git commit -m fixture)")"'),
+    ("quoted function call", 'g() { git commit -m fixture; }; out="$(g)"'),
+    ("after quoted assignment", 'out="$(date)" git commit -m fixture'),
+    ("backtick assignment", "out=`git commit -m fixture`"),
+    ("quoted backticks", 'echo "before `git commit -m fixture` after"'),
+    ("backtick function call", "g() { git commit -m fixture; }; out=`g`"),
+    ("dollar substitution in backticks", "out=`echo $(git commit -m fixture)`"),
+    ("nested escaped backticks", r"out=`echo \`git commit -m fixture\``"),
 )
 for label, command in substitution_commits:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
-              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{label} scans the {'credential' if expected else 'clean'} candidate",
+            rc == expected and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
+
 
 # Each surrounding legacy substitution removes one backslash escape layer.
 def legacy_substitution(command):
-    return '`' + command.replace('\\', '\\\\').replace('`', '\\`') + '`'
+    return "`" + command.replace("\\", "\\\\").replace("`", "\\`") + "`"
 
 
 nested_backtick_commits = []
 nested_backtick_prose = []
 for depth in (3, 4, 5):
-    executable = 'git commit -m fixture'
+    executable = "git commit -m fixture"
     prose = 'printf "%s" "\\`git commit -m fixture\\`"'
     for _ in range(depth):
-        executable = 'echo ' + legacy_substitution(executable)
-        prose = 'echo ' + legacy_substitution(prose)
-    nested_backtick_commits.extend((
-        (f'{depth}-level backticks', 'out=' + executable[5:]),
-        (f'{depth}-level quoted backticks', 'out="' + executable[5:] + '"'),
-        (f'commit after {depth + 1}-level backticks', 'out=' + legacy_substitution(prose) + '; git commit -m fixture'),
-    ))
-    nested_backtick_prose.extend((
-        (f'{depth}-level escaped backtick prose', 'out=' + prose[5:]),
-        (f'{depth}-level quoted backtick prose', 'out="' + prose[5:] + '"'),
-    ))
+        executable = "echo " + legacy_substitution(executable)
+        prose = "echo " + legacy_substitution(prose)
+    nested_backtick_commits.extend(
+        (
+            (f"{depth}-level backticks", "out=" + executable[5:]),
+            (f"{depth}-level quoted backticks", 'out="' + executable[5:] + '"'),
+            (
+                f"commit after {depth + 1}-level backticks",
+                "out=" + legacy_substitution(prose) + "; git commit -m fixture",
+            ),
+        )
+    )
+    nested_backtick_prose.extend(
+        (
+            (f"{depth}-level escaped backtick prose", "out=" + prose[5:]),
+            (f"{depth}-level quoted backtick prose", 'out="' + prose[5:] + '"'),
+        )
+    )
 for label, command in nested_backtick_commits:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
-              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{label} scans the {'credential' if expected else 'clean'} candidate",
+            rc == expected and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 for label, command in nested_backtick_prose:
     rc, err = check_hook(command, runner_repo)
     check(f"preserves {label}", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
@@ -786,118 +1181,285 @@ for label, command in nested_backtick_prose:
 # The extracted backtick body is parsed again: trailing slash pairs collapse,
 # while a final unpaired slash at end of that body stays literal.
 for slash_count in (5, 7):
-    actual_path = 'fixture' + '\\' * ((slash_count + 1) // 2)
-    raw_path = 'fixture' + '\\' * slash_count
-    slash_repo = repo({actual_path: GITHUB + '\n', raw_path: 'clean\n'})
-    slash_clean = repo({actual_path: 'clean\n', raw_path: 'clean\n'})
+    actual_path = "fixture" + "\\" * ((slash_count + 1) // 2)
+    raw_path = "fixture" + "\\" * slash_count
+    slash_repo = repo({actual_path: GITHUB + "\n", raw_path: "clean\n"})
+    slash_clean = repo({actual_path: "clean\n", raw_path: "clean\n"})
     for depth in (1, 2, 3, 4):
-        command = 'git commit -m fixture ' + raw_path
+        command = "git commit -m fixture " + raw_path
         for _ in range(depth):
-            command = 'echo ' + legacy_substitution(command)
+            command = "echo " + legacy_substitution(command)
         for directory, expected in ((slash_repo, 2), (slash_clean, 0)):
             rc, err = check_hook(command, directory)
-            check(f"{depth}-level backticks retain {slash_count}-slash path candidate ({expected})",
-                  rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+            check(
+                f"{depth}-level backticks retain {slash_count}-slash path candidate ({expected})",
+                rc == expected and (expected == 0 or "GitHub token" in err),
+                f"exit={rc} stderr={err.strip()[:160]}",
+            )
 
 # A case pattern's ')' ends the pattern, not its enclosing substitution.
 # These commands are parsed only; both fixture repositories are disposable.
 case_substitution_commits = (
-    ('quoted case arm', 'echo "$(case x in x) git commit -m fixture;; esac)"'),
-    ('case assignment', 'out="$(case x in x) git commit -m fixture;; esac)"'),
-    ('quoted case pattern', 'echo "$(case x in "x") git commit -m fixture;; esac)"'),
-    ('parenthesized case pattern', 'echo "$(case x in (x) git commit -m fixture;; esac)"'),
-    ('second case arm', 'echo "$(case x in y) :;; x) git commit -m fixture;; esac)"'),
-    ('nested case arms', 'echo "$(case x in x) case y in y) git commit -m fixture;; esac;; esac)"'),
-    ('case subject substitution', 'echo "$(case "$(printf x)" in x) git commit -m fixture;; esac)"'),
-    ('case pattern substitution', 'echo "$(case x in "$(printf x)") git commit -m fixture;; esac)"'),
-    ('conditional case', 'echo "$(if true; then case x in x) git commit -m fixture;; esac; fi)"'),
-    ('timed case', 'echo "$(time -p case x in x) git commit -m fixture;; esac)"'),
-    ('subshell in case arm', 'echo "$(case x in x) (git commit -m fixture);; esac)"'),
-    ('function in case arm', 'echo "$(case x in x) g() { git commit -m fixture; }; g;; esac)"'),
+    ("quoted case arm", 'echo "$(case x in x) git commit -m fixture;; esac)"'),
+    ("case assignment", 'out="$(case x in x) git commit -m fixture;; esac)"'),
+    ("quoted case pattern", 'echo "$(case x in "x") git commit -m fixture;; esac)"'),
+    (
+        "parenthesized case pattern",
+        'echo "$(case x in (x) git commit -m fixture;; esac)"',
+    ),
+    ("second case arm", 'echo "$(case x in y) :;; x) git commit -m fixture;; esac)"'),
+    (
+        "nested case arms",
+        'echo "$(case x in x) case y in y) git commit -m fixture;; esac;; esac)"',
+    ),
+    (
+        "case subject substitution",
+        'echo "$(case "$(printf x)" in x) git commit -m fixture;; esac)"',
+    ),
+    (
+        "case pattern substitution",
+        'echo "$(case x in "$(printf x)") git commit -m fixture;; esac)"',
+    ),
+    (
+        "conditional case",
+        'echo "$(if true; then case x in x) git commit -m fixture;; esac; fi)"',
+    ),
+    ("timed case", 'echo "$(time -p case x in x) git commit -m fixture;; esac)"'),
+    ("subshell in case arm", 'echo "$(case x in x) (git commit -m fixture);; esac)"'),
+    (
+        "function in case arm",
+        'echo "$(case x in x) g() { git commit -m fixture; }; g;; esac)"',
+    ),
     # Bash 3.2 needs the pattern's optional '(' in this unquoted substitution.
-    ('unquoted case substitution', 'out=$(case x in (x) git commit -m fixture;; esac)'),
-    ('backtick case substitution', 'out=`case x in x) git commit -m fixture;; esac`'),
+    ("unquoted case substitution", "out=$(case x in (x) git commit -m fixture;; esac)"),
+    ("backtick case substitution", "out=`case x in x) git commit -m fixture;; esac`"),
 )
 for label, command in case_substitution_commits:
-    syntax = subprocess.run(['/bin/bash', '-n'], input=command, text=True, capture_output=True)
+    syntax = subprocess.run(
+        ["/bin/bash", "-n"], input=command, text=True, capture_output=True
+    )
     check(f"{label} is valid Bash", syntax.returncode == 0, syntax.stderr)
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
-              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{label} scans the {'credential' if expected else 'clean'} candidate",
+            rc == expected and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 
 # The hook runs under Bash 3.2 even when the payload uses another shell's
 # compound-command syntax. Do not require the host to execute that payload.
 prefixed_case_commits = (
-    ('time option terminator', 'echo "$(time -- case x in x) git commit -m fixture;; esac)"'),
-    ('time format and terminator', 'echo "$(time -p -- case x in x) git commit -m fixture;; esac)"'),
-    ('repeated time terminators', 'echo "$(time -- -- case x in x) git commit -m fixture;; esac)"'),
-    ('repeated time format terminators', 'echo "$(time -p -- -- case x in x) git commit -m fixture;; esac)"'),
-    ('function keyword case body', 'echo "$(function f case x in x) git commit -m fixture;; esac; f)"'),
-    ('anonymous coproc case', 'echo "$(coproc case x in x) git commit -m fixture;; esac; wait)"'),
-    ('named coproc case', 'echo "$(coproc worker case x in x) git commit -m fixture;; esac; wait)"'),
-    ('quoted coproc name', 'echo "$(coproc "worker" case x in x) git commit -m fixture;; esac; wait)"'),
-    ('substituted coproc name', 'echo "$(coproc "$(printf worker)" case x in x) git commit -m fixture;; esac; wait)"'),
-    ('backtick coproc name', 'echo "$(coproc `printf worker` case x in x) git commit -m fixture;; esac; wait)"'),
-    ('timed coproc case', 'echo "$(time -p coproc worker case x in x) git commit -m fixture;; esac; wait)"'),
-    ('anonymous coproc brace group', 'echo "$(coproc { case x in x) git commit -m fixture;; esac; }; wait)"'),
-    ('anonymous coproc negated case', 'echo "$(coproc { ! case x in x) git commit -m fixture;; esac; }; wait)"'),
-    ('named coproc brace group', 'echo "$(coproc worker { case x in x) git commit -m fixture;; esac; }; wait)"'),
-    ('coproc case as condition', 'echo "$(coproc if ! case x in x) git commit -m fixture;; esac; then :; fi; wait)"'),
-    ('function brace case body', 'echo "$(function f { case x in x) git commit -m fixture;; esac; }; f)"'),
-    ('function conditional case body', 'echo "$(function f if ! case x in x) git commit -m fixture;; esac; then :; fi; f)"'),
-    ('positional loop case body', 'echo "$(set -- x; for item do case x in x) git commit -m fixture;; esac; done)"'),
-    ('positional select case body', 'echo "$(set -- x; select item do case x in x) git commit -m fixture;; esac; break; done <<<\'1\')"'),
-    ('anonymous coproc loop case', 'echo "$(set -- x; coproc for item do case x in x) git commit -m fixture;; esac; done; wait)"'),
-    ('named coproc loop case', 'echo "$(set -- x; coproc worker for item do case x in x) git commit -m fixture;; esac; done; wait)"'),
-    ('function loop case body', 'echo "$(function f for item do case x in x) git commit -m fixture;; esac; done; f x)"'),
+    (
+        "time option terminator",
+        'echo "$(time -- case x in x) git commit -m fixture;; esac)"',
+    ),
+    (
+        "time format and terminator",
+        'echo "$(time -p -- case x in x) git commit -m fixture;; esac)"',
+    ),
+    (
+        "repeated time terminators",
+        'echo "$(time -- -- case x in x) git commit -m fixture;; esac)"',
+    ),
+    (
+        "repeated time format terminators",
+        'echo "$(time -p -- -- case x in x) git commit -m fixture;; esac)"',
+    ),
+    (
+        "function keyword case body",
+        'echo "$(function f case x in x) git commit -m fixture;; esac; f)"',
+    ),
+    (
+        "anonymous coproc case",
+        'echo "$(coproc case x in x) git commit -m fixture;; esac; wait)"',
+    ),
+    (
+        "named coproc case",
+        'echo "$(coproc worker case x in x) git commit -m fixture;; esac; wait)"',
+    ),
+    (
+        "quoted coproc name",
+        'echo "$(coproc "worker" case x in x) git commit -m fixture;; esac; wait)"',
+    ),
+    (
+        "substituted coproc name",
+        'echo "$(coproc "$(printf worker)" case x in x) git commit -m fixture;; esac; wait)"',
+    ),
+    (
+        "backtick coproc name",
+        'echo "$(coproc `printf worker` case x in x) git commit -m fixture;; esac; wait)"',
+    ),
+    (
+        "timed coproc case",
+        'echo "$(time -p coproc worker case x in x) git commit -m fixture;; esac; wait)"',
+    ),
+    (
+        "anonymous coproc brace group",
+        'echo "$(coproc { case x in x) git commit -m fixture;; esac; }; wait)"',
+    ),
+    (
+        "anonymous coproc negated case",
+        'echo "$(coproc { ! case x in x) git commit -m fixture;; esac; }; wait)"',
+    ),
+    (
+        "named coproc brace group",
+        'echo "$(coproc worker { case x in x) git commit -m fixture;; esac; }; wait)"',
+    ),
+    (
+        "coproc case as condition",
+        'echo "$(coproc if ! case x in x) git commit -m fixture;; esac; then :; fi; wait)"',
+    ),
+    (
+        "function brace case body",
+        'echo "$(function f { case x in x) git commit -m fixture;; esac; }; f)"',
+    ),
+    (
+        "function conditional case body",
+        'echo "$(function f if ! case x in x) git commit -m fixture;; esac; then :; fi; f)"',
+    ),
+    (
+        "positional loop case body",
+        'echo "$(set -- x; for item do case x in x) git commit -m fixture;; esac; done)"',
+    ),
+    (
+        "positional select case body",
+        "echo \"$(set -- x; select item do case x in x) git commit -m fixture;; esac; break; done <<<'1')\"",
+    ),
+    (
+        "anonymous coproc loop case",
+        'echo "$(set -- x; coproc for item do case x in x) git commit -m fixture;; esac; done; wait)"',
+    ),
+    (
+        "named coproc loop case",
+        'echo "$(set -- x; coproc worker for item do case x in x) git commit -m fixture;; esac; done; wait)"',
+    ),
+    (
+        "function loop case body",
+        'echo "$(function f for item do case x in x) git commit -m fixture;; esac; done; f x)"',
+    ),
 )
 for label, command in prefixed_case_commits:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
-              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{label} scans the {'credential' if expected else 'clean'} candidate",
+            rc == expected and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 
 # Parentheses in a parameter expansion's pattern/default are data; nested
 # command and process substitutions there still execute and must be scanned.
 parameter_substitution_commits = (
-    ('parameter removal pattern', 'echo "$(v=x; : ${v%)}; git commit -m fixture)"'),
-    ('parameter prefix pattern', 'echo "$(v=x; : ${v#(}; git commit -m fixture)"'),
-    ('parameter default word', 'echo "$(unset v; : ${v:-)}; git commit -m fixture)"'),
-    ('nested parameter default', 'echo "$(unset v w; : ${v:-${w:-)}}; git commit -m fixture)"'),
-    ('quoted brace in default', 'echo "$(unset v; : ${v:-"}")}; git commit -m fixture)"'),
-    ('escaped brace in default', r'echo "$(unset v; : ${v:-\})}; git commit -m fixture)"'),
-    ('substitution in parameter default', 'echo "$(unset v; : ${v:-$(git commit -m fixture)})"'),
-    ('process substitution in default', 'echo "$(unset v; : ${v:-<(git commit -m fixture)}; wait)"'),
-    ('backticks in parameter default', 'echo "$(unset v; : ${v:-`git commit -m fixture`})"'),
+    ("parameter removal pattern", 'echo "$(v=x; : ${v%)}; git commit -m fixture)"'),
+    ("parameter prefix pattern", 'echo "$(v=x; : ${v#(}; git commit -m fixture)"'),
+    ("parameter default word", 'echo "$(unset v; : ${v:-)}; git commit -m fixture)"'),
+    (
+        "nested parameter default",
+        'echo "$(unset v w; : ${v:-${w:-)}}; git commit -m fixture)"',
+    ),
+    (
+        "quoted brace in default",
+        'echo "$(unset v; : ${v:-"}")}; git commit -m fixture)"',
+    ),
+    (
+        "escaped brace in default",
+        r'echo "$(unset v; : ${v:-\})}; git commit -m fixture)"',
+    ),
+    (
+        "substitution in parameter default",
+        'echo "$(unset v; : ${v:-$(git commit -m fixture)})"',
+    ),
+    (
+        "process substitution in default",
+        'echo "$(unset v; : ${v:-<(git commit -m fixture)}; wait)"',
+    ),
+    (
+        "backticks in parameter default",
+        'echo "$(unset v; : ${v:-`git commit -m fixture`})"',
+    ),
 )
 for label, command in parameter_substitution_commits:
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{label} scans the {'credential' if expected else 'clean'} candidate",
-              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{label} scans the {'credential' if expected else 'clean'} candidate",
+            rc == expected and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 
 for label, command in (
-    ('case arm prose', 'echo "$(case x in x) printf "%s" "git commit -m fixture";; esac)"'),
-    ('arguments after case substitution', 'echo "$(case x in x) printf x;; esac)" git commit -m fixture'),
-    ('case words as arguments', 'echo "$(echo case; echo esac)" git commit -m fixture'),
-    ('case after keyword argument', 'echo "$(echo then case x in x)" git commit -m fixture'),
-    ('coproc words as arguments', 'echo "$(echo coproc worker case)" git commit -m fixture'),
-    ('coproc command arguments', 'echo "$(coproc printf "%s" case; wait)" git commit -m fixture'),
-    ('coproc external time arguments', 'echo "$(coproc time -p case x in x) git commit -m fixture;; esac; wait)"'),
-    ('uninvoked function brace case', 'echo "$(function f { case x in x) git commit -m fixture;; esac; })"'),
-    ('case in loop values', 'echo "$(for item in case; do :; done)" git commit -m fixture'),
-    ('case as loop variable', 'echo "$(set -- x; for case do :; done)" git commit -m fixture'),
-    ('time option with command arguments', 'echo "$(time -- echo case)" git commit -m fixture'),
-    ('option-looking command after time', 'echo "$(time -- -p case x in x) git commit -m fixture;; esac)"'),
-    ('option-looking command after repeated time terminators', 'echo "$(time -- -- -p case x in x) git commit -m fixture;; esac)"'),
-    ('third time terminator is a command', 'echo "$(time -- -- -- case x in x) git commit -m fixture;; esac)"'),
-    ('function keyword used as a name', 'function case { git commit -m fixture; }; :'),
-    ('arguments after parameter pattern', 'echo "$(v=x; : ${v%)})" git commit -m fixture'),
-    ('quoted parameter brace prose', 'echo "$(unset v; : ${v:-"}")})" git commit -m fixture'),
-    ('case keyword as pattern', 'echo "$(case case in x) :;; case) printf x;; esac)" git commit -m fixture'),
-    ('quoted esac pattern', 'echo "$(case esac in "esac") printf x;; esac)" git commit -m fixture'),
-    ('empty case', 'echo "$(case x in esac)" git commit -m fixture'),
+    (
+        "case arm prose",
+        'echo "$(case x in x) printf "%s" "git commit -m fixture";; esac)"',
+    ),
+    (
+        "arguments after case substitution",
+        'echo "$(case x in x) printf x;; esac)" git commit -m fixture',
+    ),
+    ("case words as arguments", 'echo "$(echo case; echo esac)" git commit -m fixture'),
+    (
+        "case after keyword argument",
+        'echo "$(echo then case x in x)" git commit -m fixture',
+    ),
+    (
+        "coproc words as arguments",
+        'echo "$(echo coproc worker case)" git commit -m fixture',
+    ),
+    (
+        "coproc command arguments",
+        'echo "$(coproc printf "%s" case; wait)" git commit -m fixture',
+    ),
+    (
+        "coproc external time arguments",
+        'echo "$(coproc time -p case x in x) git commit -m fixture;; esac; wait)"',
+    ),
+    (
+        "uninvoked function brace case",
+        'echo "$(function f { case x in x) git commit -m fixture;; esac; })"',
+    ),
+    (
+        "case in loop values",
+        'echo "$(for item in case; do :; done)" git commit -m fixture',
+    ),
+    (
+        "case as loop variable",
+        'echo "$(set -- x; for case do :; done)" git commit -m fixture',
+    ),
+    (
+        "time option with command arguments",
+        'echo "$(time -- echo case)" git commit -m fixture',
+    ),
+    (
+        "option-looking command after time",
+        'echo "$(time -- -p case x in x) git commit -m fixture;; esac)"',
+    ),
+    (
+        "option-looking command after repeated time terminators",
+        'echo "$(time -- -- -p case x in x) git commit -m fixture;; esac)"',
+    ),
+    (
+        "third time terminator is a command",
+        'echo "$(time -- -- -- case x in x) git commit -m fixture;; esac)"',
+    ),
+    ("function keyword used as a name", "function case { git commit -m fixture; }; :"),
+    (
+        "arguments after parameter pattern",
+        'echo "$(v=x; : ${v%)})" git commit -m fixture',
+    ),
+    (
+        "quoted parameter brace prose",
+        'echo "$(unset v; : ${v:-"}")})" git commit -m fixture',
+    ),
+    (
+        "case keyword as pattern",
+        'echo "$(case case in x) :;; case) printf x;; esac)" git commit -m fixture',
+    ),
+    (
+        "quoted esac pattern",
+        'echo "$(case esac in "esac") printf x;; esac)" git commit -m fixture',
+    ),
+    ("empty case", 'echo "$(case x in esac)" git commit -m fixture'),
 ):
     rc, err = check_hook(command, runner_repo)
     check(f"preserves {label}", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
@@ -905,44 +1467,64 @@ for label, command in (
 # The function inliner supports brace bodies. Other compound bodies are read
 # conservatively, just as the existing `f() case ...` spelling is, so neither
 # spelling may hide a potential commit by restoring the surrounding quote.
-for prefix in ('f()', 'function f'):
+for prefix in ("f()", "function f"):
     command = 'echo "$(' + prefix + ' case x in x) git commit -m fixture;; esac)"'
     rc, err = check_hook(command, runner_repo)
-    check("non-brace case function bodies remain conservatively scanned",
-          rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "non-brace case function bodies remain conservatively scanned",
+        rc == 2 and "GitHub token" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 for label, command in (
-    ('single-quoted substitution', "echo '$(git commit -m fixture)'"),
-    ('single-quoted backticks', "echo '`git commit -m fixture`'"),
-    ('escaped dollar', r'echo "\$(git commit -m fixture)"'),
-    ('escaped backticks', r'echo "\`git commit -m fixture\`"'),
-    ('arguments after quoted substitution', 'echo "$(date)" git commit -m fixture'),
-    ('arguments after backticks', 'echo `date` git commit -m fixture'),
-    ('inner quoted prose', 'echo "$(printf "%s" "git commit -m fixture")"'),
-    ('backtick quoted prose', 'echo `printf "%s" "git commit -m fixture"`'),
-    ('uninvoked quoted function', 'g() { out="$(git commit -m fixture)"; }'),
+    ("single-quoted substitution", "echo '$(git commit -m fixture)'"),
+    ("single-quoted backticks", "echo '`git commit -m fixture`'"),
+    ("escaped dollar", r'echo "\$(git commit -m fixture)"'),
+    ("escaped backticks", r'echo "\`git commit -m fixture\`"'),
+    ("arguments after quoted substitution", 'echo "$(date)" git commit -m fixture'),
+    ("arguments after backticks", "echo `date` git commit -m fixture"),
+    ("inner quoted prose", 'echo "$(printf "%s" "git commit -m fixture")"'),
+    ("backtick quoted prose", 'echo `printf "%s" "git commit -m fixture"`'),
+    ("uninvoked quoted function", 'g() { out="$(git commit -m fixture)"; }'),
 ):
     rc, err = check_hook(command, runner_repo)
     check(f"preserves {label}", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
-for command in ('"$(command -v git)" commit -m fixture', '`which git` commit -m fixture'):
+for command in (
+    '"$(command -v git)" commit -m fixture',
+    "`which git` commit -m fixture",
+):
     rc, err = check_hook(command, runner_clean)
-    check("refuses a program name produced by a substitution", rc == 2 and "program name this hook cannot read" in err,
-          f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "refuses a program name produced by a substitution",
+        rc == 2 and "program name this hook cannot read" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # The common last-word cat heredoc supplies data to its surrounding command.
 # Apostrophes, quotes and backticks in that body must not corrupt shell state.
-message_body = "A user's \"quoted\" note with `git` commit prose\n$GIT commit is documentation\n"
-for prefix in ('git commit -m ', 'echo ', 'gh pr create --body '):
-    command = prefix + '"$(cat <<\'EOF\'\n' + message_body + 'EOF\n)"'
-    for directory, expected in ((runner_repo, 2 if prefix.startswith('git') else 0), (runner_clean, 0)):
+message_body = (
+    'A user\'s "quoted" note with `git` commit prose\n$GIT commit is documentation\n'
+)
+for prefix in ("git commit -m ", "echo ", "gh pr create --body "):
+    command = prefix + "\"$(cat <<'EOF'\n" + message_body + 'EOF\n)"'
+    for directory, expected in (
+        (runner_repo, 2 if prefix.startswith("git") else 0),
+        (runner_clean, 0),
+    ):
         rc, err = check_hook(command, directory)
-        check(f"quoted heredoc data for {prefix.strip()} preserves its candidate", rc == expected,
-              f"exit={rc} stderr={err.strip()[:160]}")
-for prefix in ('eval ', 'bash -c ', 'sh -c ', 'source '):
-    command = prefix + '"$(cat <<\'EOF\'\n$GIT commit -m fixture\nEOF\n)"'
+        check(
+            f"quoted heredoc data for {prefix.strip()} preserves its candidate",
+            rc == expected,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
+for prefix in ("eval ", "bash -c ", "sh -c ", "source "):
+    command = prefix + "\"$(cat <<'EOF'\n$GIT commit -m fixture\nEOF\n)\""
     rc, err = check_hook(command, runner_clean)
-    check(f"{prefix.strip()} still reads executable heredoc output", rc == 2,
-          f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{prefix.strip()} still reads executable heredoc output",
+        rc == 2,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # A quoted substitution in a global option cannot end the subcommand scan.
 for command, expected in (
@@ -950,42 +1532,54 @@ for command, expected in (
     ('git --git-dir="$(echo .git)" commit -m fixture', 2),
     ('git -C "$(pwd)" status', 0),
     ('git -C "$(pwd)""$(printf /child)" commit -m fixture', 2),
-    ('echo "$(cat <<\'EOF\'\n$GIT commit -m x\nEOF\n)" | bash', 2),
-    ('echo "$(cat <<\'EOF\' | sh\n$GIT commit -m x\nEOF\n)"', 2),
+    ("echo \"$(cat <<'EOF'\n$GIT commit -m x\nEOF\n)\" | bash", 2),
+    ("echo \"$(cat <<'EOF' | sh\n$GIT commit -m x\nEOF\n)\"", 2),
 ):
     rc, err = check_hook(command, runner_repo)
-    check("substitution context preserves repository and execution boundaries", rc == expected,
-          f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "substitution context preserves repository and execution boundaries",
+        rc == expected,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Quoted message substitutions cannot hide later candidate-changing flags.
 subst_auto_repo = repo({"tracked.txt": "clean\n"})
 commit_seed(subst_auto_repo)
-Path(subst_auto_repo, 'tracked.txt').write_text(f"{GITHUB}\n")
-for tail, expected in (('', 0), (' -a', 2), (' tracked.txt', 2)):
+Path(subst_auto_repo, "tracked.txt").write_text(f"{GITHUB}\n")
+for tail, expected in (("", 0), (" -a", 2), (" tracked.txt", 2)):
     rc, err = check_hook('git commit -m "$(printf message)"' + tail, subst_auto_repo)
-    check(f"message substitution preserves trailing candidate args {tail!r}", rc == expected,
-          f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"message substitution preserves trailing candidate args {tail!r}",
+        rc == expected,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Function argument collection stops at substitution boundaries. The words
 # after a message substitution still belong to that call: losing -a or a
 # pathspec would scan the empty index instead of tracked worktree changes.
 for wrapper, invocation in (
-    ('g() { git commit "$@"; }; ', 'g -m '),
-    ('g() { git commit -m "$1" "$2"; }; ', 'g '),
+    ('g() { git commit "$@"; }; ', "g -m "),
+    ('g() { git commit -m "$1" "$2"; }; ', "g "),
 ):
-    for message in ('"$(printf message)"', '"`printf message`"', '`printf message`'):
-        for tail in (' -a', ' tracked.txt'):
+    for message in ('"$(printf message)"', '"`printf message`"', "`printf message`"):
+        for tail in (" -a", " tracked.txt"):
             command = wrapper + invocation + message + tail
             rc, err = check_hook(command, subst_auto_repo)
-            check("function substitutions retain candidate-changing trailing arguments",
-                  rc == 2 and "Blocked:" in err, f"exit={rc} stderr={err.strip()[:160]}")
+            check(
+                "function substitutions retain candidate-changing trailing arguments",
+                rc == 2 and "Blocked:" in err,
+                f"exit={rc} stderr={err.strip()[:160]}",
+            )
 for command in (
     'g() { echo "$@"; }; g "$(printf message)" -a',
     'g() { git -C "$1" status; }; g "$(pwd)"',
 ):
     rc, err = check_hook(command, runner_repo)
-    check("unplaced substitution arguments preserve non-committing function bodies",
-          rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "unplaced substitution arguments preserve non-committing function bodies",
+        rc == 0,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # --- a commit reached through a group, a function, or a substitution --------
 # A brace group runs where it stands, and a call runs its function's body with
@@ -994,94 +1588,233 @@ for command in (
 for label, command in (
     ("commit inside a brace group", "{ git commit -m x; }"),
     ("commit inside a nested brace group", "{ { git commit -m x; } }"),
-    ("commit through a wrapper that forwards its arguments", 'g() { git "$@"; }; g commit -m x'),
+    (
+        "commit through a wrapper that forwards its arguments",
+        'g() { git "$@"; }; g commit -m x',
+    ),
     ("commit inside a called function", "f() { git add -A && git commit -m wip; }; f"),
     ("commit in a body defined over several lines", "f()\n{\n  git commit -m x\n}\nf"),
     ("commit in a function-keyword body", "function f { git commit -m x; }; f"),
     # "$1" standing where the subcommand goes is refused unread unless the call's
     # word is put in its place.
     ("commit through positional parameters", 'c() { git "$1" -m "$2"; }; c commit msg'),
-    ("commit through two wrappers", 'a() { git "$@"; }; b() { a commit "$@"; }; b -m x'),
+    (
+        "commit through two wrappers",
+        'a() { git "$@"; }; b() { a commit "$@"; }; b -m x',
+    ),
     # `command` inside the body reaches the real git, not the function again.
-    ("commit through a function named git", 'git() { command git "$@"; }; git commit -m x'),
+    (
+        "commit through a function named git",
+        'git() { command git "$@"; }; git commit -m x',
+    ),
     ("commit through a wrapper behind time", 'g() { git "$@"; }; time g commit -m x'),
     # `}` closes a body after fi as well as after a separator; after an ordinary
     # word it is only an argument.
-    ("commit in a body closed straight after fi", "f() { if true; then git commit -m x; fi }; f"),
-    ("commit after a brace that is only an argument", "f() { echo }; git commit -m x; }; f"),
+    (
+        "commit in a body closed straight after fi",
+        "f() { if true; then git commit -m x; fi }; f",
+    ),
+    (
+        "commit after a brace that is only an argument",
+        "f() { echo }; git commit -m x; }; f",
+    ),
     # Leaning the other way: a `}` that is only an argument still ends the body,
     # so what follows it is read as though it ran even with no call.
     ("commit after an argument brace, uncalled", "f() { echo }; git commit -m x; }"),
     # Nor does a quoted or escaped brace open a group inside it, which would let
     # the body's real close pair with that and run on past the commit.
-    ("commit after a body holding a quoted brace", 'f() { if "{"; then :; fi; }; git commit -m x; echo "}"'),
-    ("commit after a body holding an escaped brace", 'f() { if \\{; then :; fi; }; git commit -m x; echo \\}'),
+    (
+        "commit after a body holding a quoted brace",
+        'f() { if "{"; then :; fi; }; git commit -m x; echo "}"',
+    ),
+    (
+        "commit after a body holding an escaped brace",
+        "f() { if \\{; then :; fi; }; git commit -m x; echo \\}",
+    ),
     # A body that ends straight after `]]` must not swallow the commands after it.
-    ("commit after a body closed by ]]", 'is_clean() { [[ -z "$(git status --porcelain)" ]] }\ngit add -A && git commit -m wip\nfunction cleanup { rm -f tmp; }'),
+    (
+        "commit after a body closed by ]]",
+        'is_clean() { [[ -z "$(git status --porcelain)" ]] }\ngit add -A && git commit -m wip\nfunction cleanup { rm -f tmp; }',
+    ),
     # A heredoc's prose is parsed as commands, and its braces must not pair with
     # real ones across a commit.
-    ("commit between two heredocs of JavaScript", "cat > a.js <<'EOF'\nfunction init() {\n  if (!ready) { return }\n  start();\n}\nEOF\ngit add a.js && git commit -m init\ncat > b.js <<'EOF'\nmodule.exports = {\n  a: 1,\n};\nEOF"),
-    ("commit after a body that holds a heredoc", "f() { cat <<EOF\n{\nEOF\n}\ngit commit -m x\ncat <<EOF\n}\nEOF"),
+    (
+        "commit between two heredocs of JavaScript",
+        "cat > a.js <<'EOF'\nfunction init() {\n  if (!ready) { return }\n  start();\n}\nEOF\ngit add a.js && git commit -m init\ncat > b.js <<'EOF'\nmodule.exports = {\n  a: 1,\n};\nEOF",
+    ),
+    (
+        "commit after a body that holds a heredoc",
+        "f() { cat <<EOF\n{\nEOF\n}\ngit commit -m x\ncat <<EOF\n}\nEOF",
+    ),
     ("commit through ${1}", 'c() { git "${1}" -m x; }; c commit'),
     # Unquoted, a parameter splits into words, and the words are what run.
-    ("commit through an unquoted parameter", 'step() { echo ">> $1"; $1; }; step "git commit -m wip"'),
+    (
+        "commit through an unquoted parameter",
+        'step() { echo ">> $1"; $1; }; step "git commit -m wip"',
+    ),
     ("commit through an empty unquoted parameter", 'c() { git $1 commit -m x; }; c ""'),
-    ("commit through an unquoted $@", 'run() { echo "+ $*"; $@; }; run "git commit -m x"'),
+    (
+        "commit through an unquoted $@",
+        'run() { echo "+ $*"; $@; }; run "git commit -m x"',
+    ),
     ("commit through an unquoted slice", 'f() { git ${@:2}; }; f x "commit -m y"'),
-    ("commit through an unquoted $*", 'run() { echo "+ $*"; $*; }; run git commit -m x'),
+    (
+        "commit through an unquoted $*",
+        'run() { echo "+ $*"; $*; }; run git commit -m x',
+    ),
     ("commit through an unquoted ${*}", 'run() { ${*}; }; run "git commit -m x"'),
     # A redirection is removed before the call's words become its parameters,
     # wherever it stands, operator and target alike.
-    ("commit through a wrapper after a redirection", 'g() { git "$@"; }; g > /dev/null commit -m x'),
-    ("commit through a wrapper after an attached redirection", 'g() { git "$@"; }; g >/dev/null commit -m x'),
-    ("commit through a wrapper after a duplicated descriptor", 'g() { git "$@"; }; g 2>&1 commit -m x'),
-    ("commit through a wrapper after a redirection to an expansion", 'g() { git "$@"; }; g >"$log" commit -m x'),
-    ("commit through a wrapper with a redirection glued to a word", 'g() { git "$@"; }; g commit>/dev/null -m x'),
-    ("commit through a wrapper followed by redirections", 'g() { git "$@"; }; g commit -m x >/dev/null 2>&1'),
-    ("commit through git past a redirection, its definition uncertain", '( git() { :; } ); git >/dev/null commit -m x'),
+    (
+        "commit through a wrapper after a redirection",
+        'g() { git "$@"; }; g > /dev/null commit -m x',
+    ),
+    (
+        "commit through a wrapper after an attached redirection",
+        'g() { git "$@"; }; g >/dev/null commit -m x',
+    ),
+    (
+        "commit through a wrapper after a duplicated descriptor",
+        'g() { git "$@"; }; g 2>&1 commit -m x',
+    ),
+    (
+        "commit through a wrapper after a redirection to an expansion",
+        'g() { git "$@"; }; g >"$log" commit -m x',
+    ),
+    (
+        "commit through a wrapper with a redirection glued to a word",
+        'g() { git "$@"; }; g commit>/dev/null -m x',
+    ),
+    (
+        "commit through a wrapper followed by redirections",
+        'g() { git "$@"; }; g commit -m x >/dev/null 2>&1',
+    ),
+    (
+        "commit through git past a redirection, its definition uncertain",
+        "( git() { :; } ); git >/dev/null commit -m x",
+    ),
     # An expanded name given to unset may be any function's.
-    ("commit through git after an expanded unset -f", 'git() { :; }; x=git; unset -f "$x"; git commit -m x'),
-    ("commit through git after an unquoted expanded unset", 'git() { :; }; x=git; unset $x; git commit -m x'),
+    (
+        "commit through git after an expanded unset -f",
+        'git() { :; }; x=git; unset -f "$x"; git commit -m x',
+    ),
+    (
+        "commit through git after an unquoted expanded unset",
+        "git() { :; }; x=git; unset $x; git commit -m x",
+    ),
     # A function inside the body has positional parameters of its own.
-    ("commit through a function defined inside another", 'outer() { inner() { git "$@"; }; inner commit -m x; }; outer status'),
-    ("commit through a function-keyword function inside another", 'outer() { function inner { git "$@"; }; inner commit -m x; }; outer status'),
+    (
+        "commit through a function defined inside another",
+        'outer() { inner() { git "$@"; }; inner commit -m x; }; outer status',
+    ),
+    (
+        "commit through a function-keyword function inside another",
+        'outer() { function inner { git "$@"; }; inner commit -m x; }; outer status',
+    ),
     # Inlining is bounded, but not so tightly that ordinary helper calls use it up.
-    ("commit after sixteen helper calls", 'run() { "$@"; }; ' + "run true; " * 16 + "run git commit -m x"),
-    ("commit through a slice of the arguments", 'in_repo() { git -C "$1" "${@:2}"; }; in_repo . commit -m x'),
+    (
+        "commit after sixteen helper calls",
+        'run() { "$@"; }; ' + "run true; " * 16 + "run git commit -m x",
+    ),
+    (
+        "commit through a slice of the arguments",
+        'in_repo() { git -C "$1" "${@:2}"; }; in_repo . commit -m x',
+    ),
     # The recursion bound is a depth, not a count: a wrapper called twenty times,
     # or one called after a recursive helper, is still inlined and scanned.
-    ("commit through a wrapper on its twenty-first call", 'g() { git "$@"; }; ' + "g status; " * 20 + "g commit -m x"),
-    ("commit through a wrapper after a recursive helper", 'f() { f; }; f; g() { git "$@"; }; g commit -m x'),
+    (
+        "commit through a wrapper on its twenty-first call",
+        'g() { git "$@"; }; ' + "g status; " * 20 + "g commit -m x",
+    ),
+    (
+        "commit through a wrapper after a recursive helper",
+        'f() { f; }; f; g() { git "$@"; }; g commit -m x',
+    ),
     # Depth counts one function inside its own body, not nesting in general.
-    ("commit through nine nested wrappers", "".join(f'a{i}() {{ a{i + 1} "$@"; }}; ' for i in range(1, 9)) + 'a9() { git "$@"; }; a1 commit -m x'),
+    (
+        "commit through nine nested wrappers",
+        "".join(f'a{i}() {{ a{i + 1} "$@"; }}; ' for i in range(1, 9))
+        + 'a9() { git "$@"; }; a1 commit -m x',
+    ),
     # A body that goes on after a nested call keeps its own end in step, so the
     # recursion in it still stops at its depth instead of running to the call cap.
-    ("commit through a wrapper after recursion with a call before it", 'f() { g; f; }; g() { :; }; f; h() { git "$@"; }; h commit -m x'),
+    (
+        "commit through a wrapper after recursion with a call before it",
+        'f() { g; f; }; g() { :; }; f; h() { git "$@"; }; h commit -m x',
+    ),
     # A definition replaces an earlier one only where it certainly runs in this
     # shell. Everywhere else the earlier body may still be the one called.
-    ("commit through a function shadowed only in a subshell", "f() { git commit -m x; }; ( f() { echo safe; } ); f"),
-    ("commit through a function shadowed only in an untaken branch", "f() { git commit -m x; }; if false; then f() { echo safe; }; fi; f"),
+    (
+        "commit through a function shadowed only in a subshell",
+        "f() { git commit -m x; }; ( f() { echo safe; } ); f",
+    ),
+    (
+        "commit through a function shadowed only in an untaken branch",
+        "f() { git commit -m x; }; if false; then f() { echo safe; }; fi; f",
+    ),
     # The same, where the shadowing definition is not the first command inside.
-    ("commit through a function shadowed later in an untaken branch", "f() { git commit -m x; }; if false; then :; f() { echo safe; }; fi; f"),
-    ("commit through a function shadowed mid-subshell", "f() { git commit -m x; }; ( :; f() { echo safe; }; : ); f"),
-    ("commit through a function shadowed only behind &&", "f() { git commit -m x; }; false && f() { echo safe; }; f"),
-    ("commit through a function shadowed only in a pipeline", "f() { git commit -m x; }; f() { echo safe; } | cat; f"),
-    ("commit through a function shadowed only by an uncalled one", "f() { git commit -m x; }; g() { f() { echo safe; }; }; false && g; f"),
+    (
+        "commit through a function shadowed later in an untaken branch",
+        "f() { git commit -m x; }; if false; then :; f() { echo safe; }; fi; f",
+    ),
+    (
+        "commit through a function shadowed mid-subshell",
+        "f() { git commit -m x; }; ( :; f() { echo safe; }; : ); f",
+    ),
+    (
+        "commit through a function shadowed only behind &&",
+        "f() { git commit -m x; }; false && f() { echo safe; }; f",
+    ),
+    (
+        "commit through a function shadowed only in a pipeline",
+        "f() { git commit -m x; }; f() { echo safe; } | cat; f",
+    ),
+    (
+        "commit through a function shadowed only by an uncalled one",
+        "f() { git commit -m x; }; g() { f() { echo safe; }; }; false && g; f",
+    ),
     # And a git function defined only in a subshell leaves git itself to run.
-    ("commit after a git function defined in a subshell", "( git() { :; } ); git commit -m x"),
+    (
+        "commit after a git function defined in a subshell",
+        "( git() { :; } ); git commit -m x",
+    ),
     # A newline after && or || continues the command, so the definition on the
     # next line is still conditional; a comment before that newline too.
-    ("commit through a function shadowed after && and a newline", "f() { git commit -m x; }; false &&\nf() { echo safe; }; f"),
-    ("commit through a function shadowed after && and a comment", "f() { git commit -m x; }; false && # why\nf() { echo safe; }; f"),
+    (
+        "commit through a function shadowed after && and a newline",
+        "f() { git commit -m x; }; false &&\nf() { echo safe; }; f",
+    ),
+    (
+        "commit through a function shadowed after && and a comment",
+        "f() { git commit -m x; }; false && # why\nf() { echo safe; }; f",
+    ),
     # A function-shaped line in a heredoc is text, not a definition.
-    ("commit through a function shadowed only in heredoc text", "f() { git commit -m x; }; cat <<'EOF'\nf() { echo safe; }\nEOF\nf"),
+    (
+        "commit through a function shadowed only in heredoc text",
+        "f() { git commit -m x; }; cat <<'EOF'\nf() { echo safe; }\nEOF\nf",
+    ),
     # A brace group can be conditional, backgrounded or piped.
-    ("commit through a function shadowed in a conditional group", "f() { git commit -m x; }; false && { :; f() { echo safe; }; }; f"),
-    ("commit through a function shadowed in a piped group", "f() { git commit -m x; }; { :; f() { echo safe; }; } | cat; f"),
+    (
+        "commit through a function shadowed in a conditional group",
+        "f() { git commit -m x; }; false && { :; f() { echo safe; }; }; f",
+    ),
+    (
+        "commit through a function shadowed in a piped group",
+        "f() { git commit -m x; }; { :; f() { echo safe; }; } | cat; f",
+    ),
     # unset removes the function, and the program of that name runs instead.
-    ("commit after a git function is unset with -f", "git() { :; }; unset -f git; git commit -m x"),
-    ("commit after a git function is unset by name", "git() { :; }; unset git; git commit -m x"),
-    ("commit after a git function is unset through builtin", "git() { :; }; builtin unset -f git; git commit -m x"),
+    (
+        "commit after a git function is unset with -f",
+        "git() { :; }; unset -f git; git commit -m x",
+    ),
+    (
+        "commit after a git function is unset by name",
+        "git() { :; }; unset git; git commit -m x",
+    ),
+    (
+        "commit after a git function is unset through builtin",
+        "git() { :; }; builtin unset -f git; git commit -m x",
+    ),
     # A trailing comment is not a pathspec: read as one, it made the scan look
     # at files the commit never takes, and let the staged ones through.
     ("commit with a trailing comment", "git commit -m x # note"),
@@ -1092,14 +1825,29 @@ for label, command in (
     # reserved one, and a body never closes outside the region that holds it:
     # here the unmatched { of a heredoc line paired with the } that `g }`
     # copied into g's body, and the commit after the heredoc went unread.
-    ("commit after a call that passes a brace", "g() { echo \"$@\"; }; g }; cat <<EOF\nfoo() {\nEOF\ngit commit -m x"),
-    ("commit with an apostrophe in a trailing comment", "git commit -m x # don't forget"),
+    (
+        "commit after a call that passes a brace",
+        'g() { echo "$@"; }; g }; cat <<EOF\nfoo() {\nEOF\ngit commit -m x',
+    ),
+    (
+        "commit with an apostrophe in a trailing comment",
+        "git commit -m x # don't forget",
+    ),
     # Recursion is read several levels deep, where arguments can shift into
     # place: the second level of this one commits.
-    ("commit reached at the second level of a recursion", 'f() { git "$1" -m x; f "$2" "$3"; }; f status commit'),
-    ("commit through a wrapper after a recursive countdown", 'countdown() { [ "$1" -le 0 ] && return; countdown $(( $1 - 1 )); }; countdown 3; g() { git "$@"; }; g commit -m x'),
+    (
+        "commit reached at the second level of a recursion",
+        'f() { git "$1" -m x; f "$2" "$3"; }; f status commit',
+    ),
+    (
+        "commit through a wrapper after a recursive countdown",
+        'countdown() { [ "$1" -le 0 ] && return; countdown $(( $1 - 1 )); }; countdown 3; g() { git "$@"; }; g commit -m x',
+    ),
     # The rest of an assignment's word is still the assignment.
-    ("commit behind an assignment glued to a substitution", "out=$(date)x git commit -m x"),
+    (
+        "commit behind an assignment glued to a substitution",
+        "out=$(date)x git commit -m x",
+    ),
     # An assignment's substitution leaves the next word a command.
     ("commit behind an assignment's substitution", "out=$(date) git commit -m x"),
     ("commit inside an assignment's substitution", "x=$(git commit -m y)"),
@@ -1115,7 +1863,7 @@ for label, command in (
     ("commit after a redirection with a separate target", "git > out.txt commit -m x"),
     ("commit after a descriptor duplication", "git 2>&1 commit -m x"),
     ("commit after an input redirection", "git </dev/null commit -m x"),
-    ("commit after -C and a redirection", 'git -C . 2>/dev/null commit -m x'),
+    ("commit after -C and a redirection", "git -C . 2>/dev/null commit -m x"),
     # A word glued to a redirection is still a word: commit>x runs commit.
     ("commit glued to a redirection", "git commit>out.txt -m x"),
     ("commit through a function named exec", 'exec() { git "$@"; }; exec commit -m x'),
@@ -1129,63 +1877,120 @@ for label, command in (
     ("commit after a glued clobber redirection", "git >|out.txt commit -m x"),
     # &> and &>> redirect both streams; the & is not a background job.
     ("commit after an &> redirection", "git &>out.txt commit -m x"),
-    ("commit after an &>> redirection with a separate target", "git &>> out.txt commit -m x"),
+    (
+        "commit after an &>> redirection with a separate target",
+        "git &>> out.txt commit -m x",
+    ),
     ("commit after a {varname} descriptor redirection", "git {fd}>out commit -m x"),
     # A redirection before the program is removed and the rest read as usual.
     ("commit after exec and a redirection", "exec 3>&1 git commit -m x"),
     ("commit after a redirection before git", ">/dev/null git commit -m x"),
-    ("commit after a redirection straight after &&", "true &&>/dev/null git commit -m x"),
-    ("commit after a redirection with a separate target before git", "2> /dev/null git commit -m x"),
+    (
+        "commit after a redirection straight after &&",
+        "true &&>/dev/null git commit -m x",
+    ),
+    (
+        "commit after a redirection with a separate target before git",
+        "2> /dev/null git commit -m x",
+    ),
     ("commit after a program glued to a redirection", "git>/dev/null commit -m x"),
     ("commit behind exec -a with its name attached", "exec -afoo git commit -m x"),
     ("commit behind exec -la with its name attached", "exec -lafoo git commit -m x"),
-    ("commit behind exec -a with an attached name ending in a", "exec -afooa git commit -m x"),
+    (
+        "commit behind exec -a with an attached name ending in a",
+        "exec -afooa git commit -m x",
+    ),
     ("commit behind a cluster of exec's c and l", "exec -clc git commit -m x"),
-    ("commit behind a long cluster ending in an attached name", "exec -lllclcafoo git commit -m x"),
-    ("commit behind exec past an exec function that may be unset", "exec() { :; }; unset -f exec; exec git commit -m x"),
+    (
+        "commit behind a long cluster ending in an attached name",
+        "exec -lllclcafoo git commit -m x",
+    ),
+    (
+        "commit behind exec past an exec function that may be unset",
+        "exec() { :; }; unset -f exec; exec git commit -m x",
+    ),
     ("commit after a separate <<- target", "git <<- EOF commit -m x\nEOF"),
     ("commit after a separate <<- target before git", "<<- EOF git commit -m x\nEOF"),
     # A function's arguments lose their redirections too, so none narrows the scan to a path.
-    ("commit through a function with an &> redirection", 'g() { git "$@"; }; g commit -m x &>/dev/null'),
-    ("commit through a function with a separate &> target", 'g() { git "$@"; }; g commit -m x &> /dev/null'),
-    ("commit through a function with a separate >| target", 'g() { git "$@"; }; g commit -m x >| /dev/null'),
-    ("commit through a function with a {varname} redirection", 'g() { git "$@"; }; g commit -m x {fd}>/dev/null'),
-    ("commit through a function after a closed descriptor", 'g() { git "$@"; }; g 2>&- commit -m x'),
-    ("commit after -C's glued path runs into an &> redirection", "git -C.&>/dev/null commit -m x"),
+    (
+        "commit through a function with an &> redirection",
+        'g() { git "$@"; }; g commit -m x &>/dev/null',
+    ),
+    (
+        "commit through a function with a separate &> target",
+        'g() { git "$@"; }; g commit -m x &> /dev/null',
+    ),
+    (
+        "commit through a function with a separate >| target",
+        'g() { git "$@"; }; g commit -m x >| /dev/null',
+    ),
+    (
+        "commit through a function with a {varname} redirection",
+        'g() { git "$@"; }; g commit -m x {fd}>/dev/null',
+    ),
+    (
+        "commit through a function after a closed descriptor",
+        'g() { git "$@"; }; g 2>&- commit -m x',
+    ),
+    (
+        "commit after -C's glued path runs into an &> redirection",
+        "git -C.&>/dev/null commit -m x",
+    ),
     # A redirection with a quoted part is still removed by bash, so the word
     # after it, or after its separate target, is the subcommand.
     ("commit after a quoted redirection target", 'git >"/tmp/out" commit -m x'),
     # command and builtin skip functions, so they reach the builtin exec even
     # when a function of that name exists.
-    ("commit behind command exec past a function named exec", "exec() { :; }; command exec git commit -m x"),
-    ("commit behind builtin exec past a function named exec", "exec() { :; }; builtin exec git commit -m x"),
+    (
+        "commit behind command exec past a function named exec",
+        "exec() { :; }; command exec git commit -m x",
+    ),
+    (
+        "commit behind builtin exec past a function named exec",
+        "exec() { :; }; builtin exec git commit -m x",
+    ),
 ):
     rc, err = check_hook(command, continued_commit_repo)
-    check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label} scans the staged credential",
+        rc == 2 and "GitHub token" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 # A quoted or escaped word before a redirection is a call word, not a file
 # descriptor (#68): `f '5'>/dev/null commit` passes 5 and commit, and `f
 # ''>/dev/null commit` an empty word and commit, so "$2" is commit.
 for command in (
-    "f() { git \"$2\" -m x; }; f '5'>/dev/null commit", "f() { git \"$2\" -m x; }; f \"5\">/dev/null commit",
-    "f() { git \"$2\" -m x; }; f \\5>/dev/null commit", "f() { git \"$2\" -m x; }; f '5'> /dev/null commit",
-    "f() { git \"$2\" -m x; }; f ''>/dev/null commit", "f() { git \"$2\" -m x; }; f '{fd}'>/dev/null commit",
-    "f() { git \"$2\" -m x; }; h() { f '5'>/dev/null commit; }; h", "f() { git \"$2\" -m x; }; f 5 commit",
+    "f() { git \"$2\" -m x; }; f '5'>/dev/null commit",
+    'f() { git "$2" -m x; }; f "5">/dev/null commit',
+    'f() { git "$2" -m x; }; f \\5>/dev/null commit',
+    "f() { git \"$2\" -m x; }; f '5'> /dev/null commit",
+    "f() { git \"$2\" -m x; }; f ''>/dev/null commit",
+    "f() { git \"$2\" -m x; }; f '{fd}'>/dev/null commit",
+    "f() { git \"$2\" -m x; }; h() { f '5'>/dev/null commit; }; h",
+    'f() { git "$2" -m x; }; f 5 commit',
 ):
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{command} is scanned (expect {expected})",
-              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
-              f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is scanned (expect {expected})",
+            rc == expected
+            and "could not safely parse" not in err
+            and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 # An unquoted number or {name} before it is a descriptor, removed with the
 # redirection: "$2" is empty here and git runs no commit, as in bash. Nor
 # does it where the empty word kept before the redirection is "$1".
 for command in (
-    "f() { git \"$2\" -m x; }; f 5>/dev/null commit", "f() { git \"$2\" -m x; }; f {fd}>/dev/null commit",
+    'f() { git "$2" -m x; }; f 5>/dev/null commit',
+    'f() { git "$2" -m x; }; f {fd}>/dev/null commit',
     "f() { git \"$1\" -m x; }; f ''>/dev/null commit",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
-        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}"
+        )
 # A quoted < or > in that prefix is part of the word, which ends at the first
 # unquoted one: `f '5>x'>/dev/null` passes 5>x, not 5, so the commit is not
 # read as limited to a file named 5 (the pathspec 5>x, whose > the git
@@ -1202,16 +2007,21 @@ for command in (
         rc, err = check_hook(command, directory)
         check(f"{command} is refused", rc == 2, f"exit={rc} stderr={err.strip()[:160]}")
 for command in (
-    "f() { git \"$2\" -m x; }; f 'a<b'> /dev/null commit", "f() { git \"$2\" -m x; }; f \"a>b\">/dev/null commit",
+    "f() { git \"$2\" -m x; }; f 'a<b'> /dev/null commit",
+    'f() { git "$2" -m x; }; f "a>b">/dev/null commit',
     "f() { git \"$2\" -m x; }; h() { f 'a<b'> /dev/null commit; }; h",
     # A quoted > with no unquoted one after it is no redirection at all.
-    "f() { git \"$2\" -m x; }; f \"$X>\" commit",
+    'f() { git "$2" -m x; }; f "$X>" commit',
 ):
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{command} is scanned (expect {expected})",
-              rc == expected and "could not safely parse" not in err and (expected == 0 or "GitHub token" in err),
-              f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is scanned (expect {expected})",
+            rc == expected
+            and "could not safely parse" not in err
+            and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 
 # A clean index, so a refusal below cannot be a credential that was found.
 plain = repo({"README.md": "# hello\n"})
@@ -1219,61 +2029,180 @@ plain = repo({"README.md": "# hello\n"})
 # or builtin. Substitution redirections truncate the call words used to inline
 # its body; those words must not silently clear the fallback as a non-commit.
 uncertain_substitution_commands = (
-    ("unset git with a process substitution", "git() { :; }; unset -f git; git > >(cat) commit -m x"),
-    ("unset git with a command substitution", "git() { :; }; unset -f git; git > $(echo f) commit -m x"),
-    ("unset git with a glued process target", "git() { :; }; unset -f git; git> >(cat) commit -m x"),
-    ("unset git with a glued command target", "git() { :; }; unset -f git; git >$(echo f) commit -m x"),
-    ("unset git with a target suffix", "git() { :; }; unset -f git; git >$(echo f).txt commit -m x"),
-    ("unset git with a nested target", "git() { :; }; unset -f git; git > $(echo $(echo f)) commit -m x"),
-    ("unset git with a target pipeline", "git() { :; }; unset -f git; git > >(cat | cat) commit -m x"),
-    ("unset git with a target separator", "git() { :; }; unset -f git; git > >(cat; cat) commit -m x"),
-    ("unset git with an alias after the target", "git() { :; }; unset -f git; git > >(cat) -c alias.ci=commit ci -m x"),
-    ("unset git with alias config before the target", "git() { :; }; unset -f git; git -c alias.ci=commit > $(echo f) ci -m x"),
-    ("unset git with -C before the target", "git() { :; }; unset -f git; git -C . > >(cat) commit -m x"),
-    ("unset git with a target before -C", "git() { :; }; unset -f git; git > $(echo f) -C . commit -m x"),
-    ("unset git with a target where -C takes its value", "git() { :; }; unset -f git; git -C > >(cat) . commit -m x"),
-    ("unset git with a redirection after commit", "git() { :; }; unset -f git; git commit > $(echo f) -m x"),
-    ("unset git with a glued program", "git() { :; }; unset -f git; git>$(echo f) commit -m x"),
-    ("unset exec with git before a process target", "exec() { :; }; unset -f exec; exec git > >(cat) commit -m x"),
-    ("unset exec with git before a command target", "exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x"),
-    ("unset exec with git after a process target", "exec() { :; }; unset -f exec; exec > >(cat) git commit -m x"),
-    ("unset exec with git after a command target", "exec() { :; }; unset -f exec; exec > $(echo f) git commit -m x"),
-    ("unset exec with an option cluster", "exec() { :; }; unset -f exec; exec -clc git > >(cat) commit -m x"),
-    ("unset exec with a separate argv0", "exec() { :; }; unset -f exec; exec -a foo git > $(echo f) commit -m x"),
-    ("unset exec with an attached argv0", "exec() { :; }; unset -f exec; exec -afoo git> >(cat) commit -m x"),
-    ("unset exec with a target before argv0", "exec() { :; }; unset -f exec; exec > $(echo f) -a foo git commit -m x"),
-    ("unset exec with an alias commit", "exec() { :; }; unset -f exec; exec git > >(cat | cat) -c alias.ci=commit ci -m x"),
-    ("unset exec with a git-commit argv0", "exec() { :; }; unset -f exec; exec -a git-commit git > $(echo f) -m x"),
-    ("git unset through an expanded name", 'git() { :; }; n=git; unset -f "$n"; git > >(cat) commit -m x'),
-    ("git defined in an untaken branch", "if false; then git() { :; }; fi; git > $(echo f) commit -m x"),
+    (
+        "unset git with a process substitution",
+        "git() { :; }; unset -f git; git > >(cat) commit -m x",
+    ),
+    (
+        "unset git with a command substitution",
+        "git() { :; }; unset -f git; git > $(echo f) commit -m x",
+    ),
+    (
+        "unset git with a glued process target",
+        "git() { :; }; unset -f git; git> >(cat) commit -m x",
+    ),
+    (
+        "unset git with a glued command target",
+        "git() { :; }; unset -f git; git >$(echo f) commit -m x",
+    ),
+    (
+        "unset git with a target suffix",
+        "git() { :; }; unset -f git; git >$(echo f).txt commit -m x",
+    ),
+    (
+        "unset git with a nested target",
+        "git() { :; }; unset -f git; git > $(echo $(echo f)) commit -m x",
+    ),
+    (
+        "unset git with a target pipeline",
+        "git() { :; }; unset -f git; git > >(cat | cat) commit -m x",
+    ),
+    (
+        "unset git with a target separator",
+        "git() { :; }; unset -f git; git > >(cat; cat) commit -m x",
+    ),
+    (
+        "unset git with an alias after the target",
+        "git() { :; }; unset -f git; git > >(cat) -c alias.ci=commit ci -m x",
+    ),
+    (
+        "unset git with alias config before the target",
+        "git() { :; }; unset -f git; git -c alias.ci=commit > $(echo f) ci -m x",
+    ),
+    (
+        "unset git with -C before the target",
+        "git() { :; }; unset -f git; git -C . > >(cat) commit -m x",
+    ),
+    (
+        "unset git with a target before -C",
+        "git() { :; }; unset -f git; git > $(echo f) -C . commit -m x",
+    ),
+    (
+        "unset git with a target where -C takes its value",
+        "git() { :; }; unset -f git; git -C > >(cat) . commit -m x",
+    ),
+    (
+        "unset git with a redirection after commit",
+        "git() { :; }; unset -f git; git commit > $(echo f) -m x",
+    ),
+    (
+        "unset git with a glued program",
+        "git() { :; }; unset -f git; git>$(echo f) commit -m x",
+    ),
+    (
+        "unset exec with git before a process target",
+        "exec() { :; }; unset -f exec; exec git > >(cat) commit -m x",
+    ),
+    (
+        "unset exec with git before a command target",
+        "exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x",
+    ),
+    (
+        "unset exec with git after a process target",
+        "exec() { :; }; unset -f exec; exec > >(cat) git commit -m x",
+    ),
+    (
+        "unset exec with git after a command target",
+        "exec() { :; }; unset -f exec; exec > $(echo f) git commit -m x",
+    ),
+    (
+        "unset exec with an option cluster",
+        "exec() { :; }; unset -f exec; exec -clc git > >(cat) commit -m x",
+    ),
+    (
+        "unset exec with a separate argv0",
+        "exec() { :; }; unset -f exec; exec -a foo git > $(echo f) commit -m x",
+    ),
+    (
+        "unset exec with an attached argv0",
+        "exec() { :; }; unset -f exec; exec -afoo git> >(cat) commit -m x",
+    ),
+    (
+        "unset exec with a target before argv0",
+        "exec() { :; }; unset -f exec; exec > $(echo f) -a foo git commit -m x",
+    ),
+    (
+        "unset exec with an alias commit",
+        "exec() { :; }; unset -f exec; exec git > >(cat | cat) -c alias.ci=commit ci -m x",
+    ),
+    (
+        "unset exec with a git-commit argv0",
+        "exec() { :; }; unset -f exec; exec -a git-commit git > $(echo f) -m x",
+    ),
+    (
+        "git unset through an expanded name",
+        'git() { :; }; n=git; unset -f "$n"; git > >(cat) commit -m x',
+    ),
+    (
+        "git defined in an untaken branch",
+        "if false; then git() { :; }; fi; git > $(echo f) commit -m x",
+    ),
 )
 for label, command in uncertain_substitution_commands:
-    syntax = subprocess.run(["/bin/bash", "-n", "-c", command], capture_output=True, text=True)
+    syntax = subprocess.run(
+        ["/bin/bash", "-n", "-c", command], capture_output=True, text=True
+    )
     check(f"{label} has valid shell syntax", syntax.returncode == 0, syntax.stderr)
-    for state, directory in (("staged credential", continued_commit_repo), ("clean index", plain)):
+    for state, directory in (
+        ("staged credential", continued_commit_repo),
+        ("clean index", plain),
+    ):
         rc, err = check_hook(command, directory)
-        check(f"refuses {label} with a {state}", rc == 2 and "Blocked:" in err,
-              f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"refuses {label} with a {state}",
+            rc == 2 and "Blocked:" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 
 # Read-only prefixes are identified by the regular git/exec parser, not by a
 # search for a safe word that might instead be an option value or an argument.
 for label, command in (
     ("certain git no-op", "git() { :; }; git > >(cat) commit -m x"),
     ("certain exec no-op", "exec() { :; }; exec git > $(echo f) commit -m x"),
-    ("unset git log before a command target", "git() { :; }; unset -f git; git log -1 > $(echo f)"),
-    ("unset git status before a process target", "git() { :; }; unset -f git; git status > >(cat)"),
-    ("unset git log after ordinary redirection", "git() { :; }; unset -f git; git >/dev/null log -1 > $(echo f)"),
+    (
+        "unset git log before a command target",
+        "git() { :; }; unset -f git; git log -1 > $(echo f)",
+    ),
+    (
+        "unset git status before a process target",
+        "git() { :; }; unset -f git; git status > >(cat)",
+    ),
+    (
+        "unset git log after ordinary redirection",
+        "git() { :; }; unset -f git; git >/dev/null log -1 > $(echo f)",
+    ),
     ("unset git log after -C", 'git() { :; }; unset -f git; git -C "$d" log > >(cat)'),
-    ("unset git log after --no-pager", "git() { :; }; unset -f git; git --no-pager log --grep commit > $(echo f)"),
-    ("unset exec running echo", "exec() { :; }; unset -f exec; exec echo safe > $(echo f)"),
-    ("unset exec redirecting before echo", "exec() { :; }; unset -f exec; exec > >(cat) echo safe"),
-    ("unset exec running git log", "exec() { :; }; unset -f exec; exec git log -1 > $(echo f)"),
-    ("unset exec with options running git log", "exec() { :; }; unset -f exec; exec -cl -a foo git log -1 > >(cat)"),
-    ("read-only call followed by another command", "git() { :; }; unset -f git; git log > $(echo f); echo commit"),
+    (
+        "unset git log after --no-pager",
+        "git() { :; }; unset -f git; git --no-pager log --grep commit > $(echo f)",
+    ),
+    (
+        "unset exec running echo",
+        "exec() { :; }; unset -f exec; exec echo safe > $(echo f)",
+    ),
+    (
+        "unset exec redirecting before echo",
+        "exec() { :; }; unset -f exec; exec > >(cat) echo safe",
+    ),
+    (
+        "unset exec running git log",
+        "exec() { :; }; unset -f exec; exec git log -1 > $(echo f)",
+    ),
+    (
+        "unset exec with options running git log",
+        "exec() { :; }; unset -f exec; exec -cl -a foo git log -1 > >(cat)",
+    ),
+    (
+        "read-only call followed by another command",
+        "git() { :; }; unset -f git; git log > $(echo f); echo commit",
+    ),
 ):
     rc, err = check_hook(command, continued_commit_repo)
-    check(f"preserves {label} with substitution redirection", rc == 0,
-          f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"preserves {label} with substitution redirection",
+        rc == 0,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Words spelling read-only verbs do not clear unresolved subcommands.
 for command in (
@@ -1283,15 +2212,23 @@ for command in (
     "exec() { :; }; unset -f exec; exec -a git-commit git log > $(echo f)",
 ):
     rc, err = check_hook(command, plain)
-    check("read-only words do not hide an unresolved committing fallback", rc == 2 and "Blocked:" in err,
-          f"command={command} exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "read-only words do not hide an unresolved committing fallback",
+        rc == 2 and "Blocked:" in err,
+        f"command={command} exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # A commit inside the target is read once, even if the outer git call is
 # already recognized as read-only. Replaying the complete tail would count it
 # twice and falsely reject its clean candidate.
-rc, err = check_hook("git() { :; }; unset -f git; git log > $(git commit -m x; echo f)", plain)
-check("a clean commit inside a read-only fallback target is counted once", rc == 0,
-      f"exit={rc} stderr={err.strip()[:160]}")
+rc, err = check_hook(
+    "git() { :; }; unset -f git; git log > $(git commit -m x; echo f)", plain
+)
+check(
+    "a clean commit inside a read-only fallback target is counted once",
+    rc == 0,
+    f"exit={rc} stderr={err.strip()[:160]}",
+)
 
 # Seventy calls to a sixty-word body add more tokens than inlining may, so the
 # calls after them are past the budget.
@@ -1302,13 +2239,25 @@ BUDGET_SPENT = "h() { : " + " ".join(f"w{i}" for i in range(60)) + "; }; " + "h;
 for label, command in (
     ("git process target", "git() { :; }; unset -f git; git > >(cat) commit -m x"),
     ("git command target", "git() { :; }; unset -f git; git > $(echo f) commit -m x"),
-    ("exec process target", "exec() { :; }; unset -f exec; exec git > >(cat) commit -m x"),
-    ("exec command target", "exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x"),
+    (
+        "exec process target",
+        "exec() { :; }; unset -f exec; exec git > >(cat) commit -m x",
+    ),
+    (
+        "exec command target",
+        "exec() { :; }; unset -f exec; exec git > $(echo f) commit -m x",
+    ),
 ):
-    for state, directory in (("staged credential", continued_commit_repo), ("clean index", plain)):
+    for state, directory in (
+        ("staged credential", continued_commit_repo),
+        ("clean index", plain),
+    ):
         rc, err = check_hook(BUDGET_SPENT + command, directory)
-        check(f"refuses uncertain {label} past the inlining budget with a {state}",
-              rc == 2 and "Blocked:" in err, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"refuses uncertain {label} past the inlining budget with a {state}",
+            rc == 2 and "Blocked:" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 for command in (
     "git() { :; }; unset -f git; git log -1 > $(echo f)",
     "exec() { :; }; unset -f exec; exec git log -1 > >(cat)",
@@ -1316,105 +2265,340 @@ for command in (
     "exec() { :; }; unset -f exec; exec echo safe > $(echo f)",
 ):
     rc, err = check_hook(BUDGET_SPENT + command, continued_commit_repo)
-    check("preserves safe substitution calls past the inlining budget", rc == 0,
-          f"command={command} exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "preserves safe substitution calls past the inlining budget",
+        rc == 0,
+        f"command={command} exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # The wrapper gets the verdict its body would get written out, so what is
 # refused inline is refused through the call too.
 for label, command, reason in (
-    ("a wrapper adding -c before a commit", 'GC() { git -c user.name=x "$@"; }; GC commit -q -m y', "could not safely parse"),
+    (
+        "a wrapper adding -c before a commit",
+        'GC() { git -c user.name=x "$@"; }; GC commit -q -m y',
+        "could not safely parse",
+    ),
     # A token does not record which of its > were quoted, so a -C value holding
     # one is not cut there: the path cannot be read, and the commit is refused.
-    ("a -C path holding a quoted > before a redirection", 'git -C"/tmp/clean>dirty">/dev/null commit -m x', "could not safely parse"),
+    (
+        "a -C path holding a quoted > before a redirection",
+        'git -C"/tmp/clean>dirty">/dev/null commit -m x',
+        "could not safely parse",
+    ),
     # Nor is a redirection with a quoted part stepped over: a quoted > at its
     # end is part of a file name, not an operator waiting for a target.
-    ("a redirection target ending in a quoted >", 'sink=out; git >"${sink}>" commit -m x', "could not safely parse"),
+    (
+        "a redirection target ending in a quoted >",
+        'sink=out; git >"${sink}>" commit -m x',
+        "could not safely parse",
+    ),
     # When the last > may be quoted, the next word may be git's own option
     # rather than a target, so a commit anywhere after it is refused.
-    ("a quoted > before git's own options", 'sink=/tmp/out; git >"${sink}>" -C . commit -m x', "could not safely parse"),
+    (
+        "a quoted > before git's own options",
+        'sink=/tmp/out; git >"${sink}>" -C . commit -m x',
+        "could not safely parse",
+    ),
     # Where a redirection is not followed, a commit after it is refused.
     # Run as git-commit, git commits whatever its arguments say.
-    ("git run by exec under a git- name", "exec -a git-commit git -m x", "could not safely parse"),
-    ("an alias commit after a redirection before git", ">/dev/null git -c alias.ci=commit ci -m x", "sets git configuration"),
-    ("git run by exec under an attached git- name", "exec -agit-commit git -m x", "could not safely parse"),
-    ("git run by exec under a git- name after a c and l cluster", "exec -clca git-commit git -m x", "could not safely parse"),
-    ("git glued to a redirection run by exec under a git- name", "exec -a git-commit git>/dev/null -m x", "could not safely parse"),
-    ("git run by exec under a git- name with a path", "exec -a /usr/libexec/git-core/git-commit /usr/bin/git -m x", "could not safely parse"),
-    ("an expanded program run by exec under a git- name", 'g=/usr/bin/git; exec -a git-commit "$g" -m x', "could not safely parse"),
-    ("a redirection where -C's path should be", "git -C >out . commit -m x", "could not safely parse"),
-    ("a commit after a process substitution target", "git > >(cat) commit -m x", "could not safely parse"),
+    (
+        "git run by exec under a git- name",
+        "exec -a git-commit git -m x",
+        "could not safely parse",
+    ),
+    (
+        "an alias commit after a redirection before git",
+        ">/dev/null git -c alias.ci=commit ci -m x",
+        "sets git configuration",
+    ),
+    (
+        "git run by exec under an attached git- name",
+        "exec -agit-commit git -m x",
+        "could not safely parse",
+    ),
+    (
+        "git run by exec under a git- name after a c and l cluster",
+        "exec -clca git-commit git -m x",
+        "could not safely parse",
+    ),
+    (
+        "git glued to a redirection run by exec under a git- name",
+        "exec -a git-commit git>/dev/null -m x",
+        "could not safely parse",
+    ),
+    (
+        "git run by exec under a git- name with a path",
+        "exec -a /usr/libexec/git-core/git-commit /usr/bin/git -m x",
+        "could not safely parse",
+    ),
+    (
+        "an expanded program run by exec under a git- name",
+        'g=/usr/bin/git; exec -a git-commit "$g" -m x',
+        "could not safely parse",
+    ),
+    (
+        "a redirection where -C's path should be",
+        "git -C >out . commit -m x",
+        "could not safely parse",
+    ),
+    (
+        "a commit after a process substitution target",
+        "git > >(cat) commit -m x",
+        "could not safely parse",
+    ),
     # An operator inside the substitution does not end the command around it.
-    ("a commit after a process substitution holding a pipe", "git > >(cat | cat) commit -m x", "could not safely parse"),
-    ("a commit after a process substitution holding a ;", "git > >(cat; cat) commit -m x", "could not safely parse"),
-    ("a commit after a process substitution holding &&", "git > >(cat && cat) commit -m x", "could not safely parse"),
+    (
+        "a commit after a process substitution holding a pipe",
+        "git > >(cat | cat) commit -m x",
+        "could not safely parse",
+    ),
+    (
+        "a commit after a process substitution holding a ;",
+        "git > >(cat; cat) commit -m x",
+        "could not safely parse",
+    ),
+    (
+        "a commit after a process substitution holding &&",
+        "git > >(cat && cat) commit -m x",
+        "could not safely parse",
+    ),
     # Git's subcommand can be spelled many ways, so git itself is refused there.
-    ("a read-only git after a process substitution target", "git > >(cat) log -1", "could not safely parse"),
-    ("an alias commit after a process substitution target", "git > >(cat) -c alias.ci=commit ci -m x", "could not safely parse"),
-    ("an alias commit after a redirection where -C's path should be", "git -C >/dev/null . -c alias.ci=commit ci -m x", "could not safely parse"),
-    ("git after a process substitution target before the program", "> >(cat) git -c alias.ci=commit ci -m x", "could not safely parse"),
-    ("git after exec -a whose name is a redirection", "exec -a >/dev/null git-commit git -m x", "could not safely parse"),
-    ("a commit after a command substitution target", "git > $(echo f) commit -m x", "could not safely parse"),
-    ("git after a command substitution target before the program", "> $(echo f) git commit -m x", "could not safely parse"),
-    ("a commit through a function after a process substitution target", 'g() { git "$@"; }; g > >(cat) commit -m x', "unquoted expansion"),
-    ("a commit through a function after a command substitution target", 'g() { git "$@"; }; g > $(echo f) commit -m x', "unquoted expansion"),
-    ("git after a redirection and exec -a under a git- name", "exec >/dev/null -a git-commit git -m x", "could not safely parse"),
-    ("git after a quoted redirection before the program", 'sink=/dev/null; >"${sink}>" git log -1', "could not safely parse"),
-    ("git glued to a redirection whose target is the next word", "git> /dev/null commit -m x", "could not safely parse"),
-    ("git glued to a command substitution target", "git>$(echo f) commit -m x", "could not safely parse"),
+    (
+        "a read-only git after a process substitution target",
+        "git > >(cat) log -1",
+        "could not safely parse",
+    ),
+    (
+        "an alias commit after a process substitution target",
+        "git > >(cat) -c alias.ci=commit ci -m x",
+        "could not safely parse",
+    ),
+    (
+        "an alias commit after a redirection where -C's path should be",
+        "git -C >/dev/null . -c alias.ci=commit ci -m x",
+        "could not safely parse",
+    ),
+    (
+        "git after a process substitution target before the program",
+        "> >(cat) git -c alias.ci=commit ci -m x",
+        "could not safely parse",
+    ),
+    (
+        "git after exec -a whose name is a redirection",
+        "exec -a >/dev/null git-commit git -m x",
+        "could not safely parse",
+    ),
+    (
+        "a commit after a command substitution target",
+        "git > $(echo f) commit -m x",
+        "could not safely parse",
+    ),
+    (
+        "git after a command substitution target before the program",
+        "> $(echo f) git commit -m x",
+        "could not safely parse",
+    ),
+    (
+        "a commit through a function after a process substitution target",
+        'g() { git "$@"; }; g > >(cat) commit -m x',
+        "unquoted expansion",
+    ),
+    (
+        "a commit through a function after a command substitution target",
+        'g() { git "$@"; }; g > $(echo f) commit -m x',
+        "unquoted expansion",
+    ),
+    (
+        "git after a redirection and exec -a under a git- name",
+        "exec >/dev/null -a git-commit git -m x",
+        "could not safely parse",
+    ),
+    (
+        "git after a quoted redirection before the program",
+        'sink=/dev/null; >"${sink}>" git log -1',
+        "could not safely parse",
+    ),
+    (
+        "git glued to a redirection whose target is the next word",
+        "git> /dev/null commit -m x",
+        "could not safely parse",
+    ),
+    (
+        "git glued to a command substitution target",
+        "git>$(echo f) commit -m x",
+        "could not safely parse",
+    ),
     # Among commit's own arguments, &> is refused as > always was.
-    ("an &> redirection glued to commit", "git commit&>/dev/null -m x", "could not safely parse"),
-    ("two redirections in one word with a quoted target", 'sink=/dev/null; git 2>"$sink"> /dev/null commit -m x', "could not safely parse"),
+    (
+        "an &> redirection glued to commit",
+        "git commit&>/dev/null -m x",
+        "could not safely parse",
+    ),
+    (
+        "two redirections in one word with a quoted target",
+        'sink=/dev/null; git 2>"$sink"> /dev/null commit -m x',
+        "could not safely parse",
+    ),
     # A word glued to a redirection whose target is the next word is not cut:
     # the target, here a file named commit, would be read as the subcommand.
-    ("a -C value glued to a redirection with a separate target", "git -C.> commit commit -m x", "could not safely parse"),
-    ("a wrapper passed an unquoted -C expansion", 'g() { git "$@"; }; g -C $d log', "unquoted expansion"),
+    (
+        "a -C value glued to a redirection with a separate target",
+        "git -C.> commit commit -m x",
+        "could not safely parse",
+    ),
+    (
+        "a wrapper passed an unquoted -C expansion",
+        'g() { git "$@"; }; g -C $d log',
+        "unquoted expansion",
+    ),
     # After `shift` the call's words no longer line up with $1 and "$@", so they
     # are left unresolved and the parse cannot identify the subcommand.
-    ("a wrapper that shifts its arguments", 'f() { local r=$1; shift; git -C "$r" "$@"; }; f /repo commit -m x', "unquoted expansion"),
+    (
+        "a wrapper that shifts its arguments",
+        'f() { local r=$1; shift; git -C "$r" "$@"; }; f /repo commit -m x',
+        "unquoted expansion",
+    ),
     # Left unresolved, an unquoted $@ can split like any unquoted expansion,
     # whether git reads it or another call passes it on.
-    ("a wrapper that shifts its arguments, unquoted", 'f() { shift; git $@; }; f x commit -m y', "unquoted expansion"),
-    ("a wrapper that shifts and passes its arguments on, unquoted", 'f() { shift; g $@; }; g() { git -C "$1" "$2"; }; f x /repo commit', "could not safely parse"),
-    ("a wrapper that shifts its arguments into a message, unquoted", 'f() { shift; git commit -m $@; }; f y x -a', "could not safely parse"),
-    ("a wrapper that resets its arguments with set --", 'f() { set -- commit -m x; git "$@"; }; f status', "unquoted expansion"),
-    ("a wrapper that resets its arguments with set", 'f() { set commit -m x; git "$@"; }; f status', "unquoted expansion"),
+    (
+        "a wrapper that shifts its arguments, unquoted",
+        "f() { shift; git $@; }; f x commit -m y",
+        "unquoted expansion",
+    ),
+    (
+        "a wrapper that shifts and passes its arguments on, unquoted",
+        'f() { shift; g $@; }; g() { git -C "$1" "$2"; }; f x /repo commit',
+        "could not safely parse",
+    ),
+    (
+        "a wrapper that shifts its arguments into a message, unquoted",
+        "f() { shift; git commit -m $@; }; f y x -a",
+        "could not safely parse",
+    ),
+    (
+        "a wrapper that resets its arguments with set --",
+        'f() { set -- commit -m x; git "$@"; }; f status',
+        "unquoted expansion",
+    ),
+    (
+        "a wrapper that resets its arguments with set",
+        'f() { set commit -m x; git "$@"; }; f status',
+        "unquoted expansion",
+    ),
     # A bare - or +, and words after options, reset them too.
-    ("a wrapper that resets its arguments with set -", 'f() { set - commit -m x; git "$1" "$2" "$3"; }; f status', "could not safely parse"),
-    ("a wrapper that resets its arguments with set +", 'f() { set + commit -m x; git "$1" "$2" "$3"; }; f status', "could not safely parse"),
-    ("a wrapper that resets its arguments after an option", 'f() { set -e commit -m x; git "$@"; }; f status', "unquoted expansion"),
+    (
+        "a wrapper that resets its arguments with set -",
+        'f() { set - commit -m x; git "$1" "$2" "$3"; }; f status',
+        "could not safely parse",
+    ),
+    (
+        "a wrapper that resets its arguments with set +",
+        'f() { set + commit -m x; git "$1" "$2" "$3"; }; f status',
+        "could not safely parse",
+    ),
+    (
+        "a wrapper that resets its arguments after an option",
+        'f() { set -e commit -m x; git "$@"; }; f status',
+        "unquoted expansion",
+    ),
     # After a bare -, even a word spelled like an option is a parameter, and a
     # bare -- clears them. Reading the call's words instead would pass a
     # pathspec the real commit never gets, and scan too little.
-    ("a wrapper that resets its arguments to an option-like word", 'f() { set - --amend; git commit -m x "$@"; }; f -- other.txt', "could not safely parse"),
-    ("a wrapper that clears its arguments", 'f() { set --; git commit -m x "$@"; }; f -- other.txt', "could not safely parse"),
+    (
+        "a wrapper that resets its arguments to an option-like word",
+        'f() { set - --amend; git commit -m x "$@"; }; f -- other.txt',
+        "could not safely parse",
+    ),
+    (
+        "a wrapper that clears its arguments",
+        'f() { set --; git commit -m x "$@"; }; f -- other.txt',
+        "could not safely parse",
+    ),
     # A word that can split moves every parameter after it, so what lands in
     # "$2" or in a slice is unknown.
-    ("a parameter after a word that can split", 'run_in() { git -C "$1" "$2"; }; run_in $d status', "could not safely parse"),
-    ("a slice after a word that can split", 'f() { git "${@:2}"; }; f $x commit -m x', "unquoted expansion"),
+    (
+        "a parameter after a word that can split",
+        'run_in() { git -C "$1" "$2"; }; run_in $d status',
+        "could not safely parse",
+    ),
+    (
+        "a slice after a word that can split",
+        'f() { git "${@:2}"; }; f $x commit -m x',
+        "unquoted expansion",
+    ),
     # An expansion passed to an unquoted parameter can split, however the call
     # quoted it, and so move every parameter of the call it is passed on to.
-    ("an unquoted parameter given a quoted expansion", 'f() { g $1; }; g() { git -C "$1" "$2"; }; f "$x"', "could not safely parse"),
+    (
+        "an unquoted parameter given a quoted expansion",
+        'f() { g $1; }; g() { git -C "$1" "$2"; }; f "$x"',
+        "could not safely parse",
+    ),
     # A command that mentions IFS may have changed how a parameter splits, so an
     # unquoted one is not resolved, and a literal holding commit is refused.
-    ("a wrapper that changes IFS before an unquoted parameter", 'f() { IFS=:; git $1; }; f commit:-m:x', "unquoted expansion"),
-    ("a wrapper that changes IFS before an unquoted $@", 'f() { IFS=X; git $@; }; f commitX-mXx', "unquoted expansion"),
-    ("a wrapper that changes IFS and runs its parameter", 'f() { IFS=:; $1; }; f git:commit:-m:x', "unquoted expansion"),
-    ("a wrapper that changes IFS and runs its parameter as the program", 'f() { IFS=:; $1 commit -m x; }; f env:git', "program name this hook cannot read"),
+    (
+        "a wrapper that changes IFS before an unquoted parameter",
+        "f() { IFS=:; git $1; }; f commit:-m:x",
+        "unquoted expansion",
+    ),
+    (
+        "a wrapper that changes IFS before an unquoted $@",
+        "f() { IFS=X; git $@; }; f commitX-mXx",
+        "unquoted expansion",
+    ),
+    (
+        "a wrapper that changes IFS and runs its parameter",
+        "f() { IFS=:; $1; }; f git:commit:-m:x",
+        "unquoted expansion",
+    ),
+    (
+        "a wrapper that changes IFS and runs its parameter as the program",
+        "f() { IFS=:; $1 commit -m x; }; f env:git",
+        "program name this hook cannot read",
+    ),
     # IFS is looked for as the shell reads the words, escapes and quotes removed.
-    ("a wrapper naming IFS through escapes", 'g() { :; printf -v I\\F\\S :; git $1; }; g commit:-m:x', "unquoted expansion"),
-    ("a wrapper naming IFS through quotes", 'g() { :; printf -v "I"FS :; git $1; }; g commit:-m:x', "unquoted expansion"),
+    (
+        "a wrapper naming IFS through escapes",
+        "g() { :; printf -v I\\F\\S :; git $1; }; g commit:-m:x",
+        "unquoted expansion",
+    ),
+    (
+        "a wrapper naming IFS through quotes",
+        'g() { :; printf -v "I"FS :; git $1; }; g commit:-m:x',
+        "unquoted expansion",
+    ),
     # A body that multiplies its arguments stops being inlined at the token
     # budget, and is then judged as a program name this hook cannot read.
-    ("a wrapper that doubles its arguments", 'f() { f "$@" "$@"; }; f commit -m x', "program name this hook cannot read"),
+    (
+        "a wrapper that doubles its arguments",
+        'f() { f "$@" "$@"; }; f commit -m x',
+        "program name this hook cannot read",
+    ),
     # Past the token budget a body is no longer read, but it may still not say
     # commit, and nothing it reaches through another function may either.
-    ("a committing function called past the token budget", BUDGET_SPENT + 'c() { git commit -m x; }; c', "program name this hook cannot read"),
-    ("a function reaching a commit through another, past the token budget", BUDGET_SPENT + 'g() { git commit -m x; }; c() { g; }; c', "program name this hook cannot read"),
-    ("a function committing through a variable, past the token budget", BUDGET_SPENT + 'c() { "$GIT" commit -m x; }; c', "program name this hook cannot read"),
+    (
+        "a committing function called past the token budget",
+        BUDGET_SPENT + "c() { git commit -m x; }; c",
+        "program name this hook cannot read",
+    ),
+    (
+        "a function reaching a commit through another, past the token budget",
+        BUDGET_SPENT + "g() { git commit -m x; }; c() { g; }; c",
+        "program name this hook cannot read",
+    ),
+    (
+        "a function committing through a variable, past the token budget",
+        BUDGET_SPENT + 'c() { "$GIT" commit -m x; }; c',
+        "program name this hook cannot read",
+    ),
 ):
     # Bounded, because an unbounded inliner does not fail this case: it hangs.
     rc, err = check_hook(command, plain, timeout=60)
-    check(f"{label} is refused", rc == 2 and reason in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label} is refused",
+        rc == 2 and reason in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # A program name this hook cannot read, followed by `commit` where git reads its
 # subcommand. It may be git, carrying its own -C or -c, so there is nothing to
@@ -1424,19 +2608,35 @@ for label, command in (
     ("a quoted variable naming git", '"$g" commit -m x'),
     ("a defaulted expansion naming git", "${GIT:-git} commit -m x"),
     ("a command substitution naming git", "$(echo git) commit -m x"),
-    ("a substitution naming git, then a global option", "$(command -v git) -C . commit -m x"),
+    (
+        "a substitution naming git, then a global option",
+        "$(command -v git) -C . commit -m x",
+    ),
     ("a substitution glued to the rest of the name", '$(dirname "$x")/git commit -m x'),
     ("two substitutions forming the name", "$(a)$(b) commit"),
     ("a variable naming git, then a flag", "$g --no-pager commit -m x"),
     # git's own options may take the next word as their value. No assignment
     # is visible, which would refuse them on its own (#71).
-    ("a variable naming git, then an option and its value", "$g --git-dir .git commit -m x"),
-    ("a variable naming git, then --work-tree and its value", "$g --work-tree . commit -m x"),
-    ("a variable naming git, then --config-env and its value", "$g --config-env user.name=HOME commit -m x"),
+    (
+        "a variable naming git, then an option and its value",
+        "$g --git-dir .git commit -m x",
+    ),
+    (
+        "a variable naming git, then --work-tree and its value",
+        "$g --work-tree . commit -m x",
+    ),
+    (
+        "a variable naming git, then --config-env and its value",
+        "$g --config-env user.name=HOME commit -m x",
+    ),
 ):
     rc, err = check_hook(command, plain)
     check(f"{label} is refused", rc == 2, f"exit={rc}")
-    check(f"{label} names the unreadable program", "program name this hook cannot read" in err, f"stderr={err.strip()[:160]}")
+    check(
+        f"{label} names the unreadable program",
+        "program name this hook cannot read" in err,
+        f"stderr={err.strip()[:160]}",
+    )
 
 # A variable the same command visibly assigns a git, /git or commit word to,
 # read as an env -S string reads a word, is read as that value where it names
@@ -1446,120 +2646,232 @@ for label, command in (
 # on a clean index too. A program word whose expansions are all quoted is one
 # word, refused only for a git mark and only when it may end in git or /git.
 for command in (
-    "X='-Sgit commit' env -S '${X} -m x'", "export X='-Sgit commit'; env -S '${X} -m x'",
-    "C='git commit'; $C -m x", "C='git commit'; ${C} -m x", "C='git commit'; \"$C\" -m x",
-    "G=git; $G commit -m x", "G=git; \"$G\" -c alias.ci=commit ci", "G=/usr/bin/git; $G -c alias.ci=commit ci",
-    "declare C='git commit'; $C -m x", "declare -x C='git commit'; $C -m x", 'declare "C=git commit"; $C -m x',
-    "typeset C='git commit'; $C -m x", "readonly C='git commit'; $C -m x", "local C='git commit'; $C -m x",
-    "C[0]='git commit'; $C -m x", "C+='git commit'; $C -m x", "C=(git log); ${C[@]} -c alias.ci=commit ci",
+    "X='-Sgit commit' env -S '${X} -m x'",
+    "export X='-Sgit commit'; env -S '${X} -m x'",
+    "C='git commit'; $C -m x",
+    "C='git commit'; ${C} -m x",
+    "C='git commit'; \"$C\" -m x",
+    "G=git; $G commit -m x",
+    'G=git; "$G" -c alias.ci=commit ci',
+    "G=/usr/bin/git; $G -c alias.ci=commit ci",
+    "declare C='git commit'; $C -m x",
+    "declare -x C='git commit'; $C -m x",
+    'declare "C=git commit"; $C -m x',
+    "typeset C='git commit'; $C -m x",
+    "readonly C='git commit'; $C -m x",
+    "local C='git commit'; $C -m x",
+    "C[0]='git commit'; $C -m x",
+    "C+='git commit'; $C -m x",
+    "C=(git log); ${C[@]} -c alias.ci=commit ci",
     # A prefix assignment, also one whose name a later command expands.
-    "C='git commit' true; $C -m x", "X='-Sgit commit' true; env -S '${X} -m x'",
+    "C='git commit' true; $C -m x",
+    "X='-Sgit commit' true; env -S '${X} -m x'",
     # Inside a function body, or passed to one.
-    "f() { C='git commit'; }; f; $C -m x", "f() { $1 -m x; }; C='git commit'; f \"$C\"",
+    "f() { C='git commit'; }; f; $C -m x",
+    "f() { $1 -m x; }; C='git commit'; f \"$C\"",
     # Behind command, exec or time.
-    "C='git commit'; command $C -m x", "C='git commit'; exec $C -m x", "C='git commit'; time $C -m x",
+    "C='git commit'; command $C -m x",
+    "C='git commit'; exec $C -m x",
+    "C='git commit'; time $C -m x",
     # Behind env, in an env -S string led by an option or an assignment, and in
     # a later string an option-leading one lets env split.
-    "X='-Sgit commit'; env $X -m x", "X='-S# git commit'; env $X -m x",
-    "X=git; env -S 'FOO=1 ${X}' -c alias.ci=commit ci", "X='git commit'; env -S '-i' '${X} -m x'",
-    "X='git commit'; env -S '-S' '${X} -m x'", "X='-iSgit -c alias.ci=commit ci'; env -S '${X}'",
+    "X='-Sgit commit'; env $X -m x",
+    "X='-S# git commit'; env $X -m x",
+    "X=git; env -S 'FOO=1 ${X}' -c alias.ci=commit ci",
+    "X='git commit'; env -S '-i' '${X} -m x'",
+    "X='git commit'; env -S '-S' '${X} -m x'",
+    "X='-iSgit -c alias.ci=commit ci'; env -S '${X}'",
     "X='git commit'; env -S \"$X\" -m x",
     # A commit word alone marks a name, and so does a glued -S layer.
-    "X='commit -m x'; env -S '${G} ${X}'", "X=-Sgit; env $X -c alias.ci=commit ci",
+    "X='commit -m x'; env -S '${G} ${X}'",
+    "X=-Sgit; env $X -c alias.ci=commit ci",
     # A value that expands a marked name, and a name holding an S.
-    "G='git commit'; C=$G; $C -m x", "G='git commit'; C=\"$G\"; \"$C\" -m x", "CMDS='git commit'; $CMDS -m x",
+    "G='git commit'; C=$G; $C -m x",
+    'G=\'git commit\'; C="$G"; "$C" -m x',
+    "CMDS='git commit'; $CMDS -m x",
     # A quoted word that may still end in git or /git, one a command
     # substitution continues, and an unquoted one, which can split.
-    "G=git; \"/usr/bin/$G\" -c alias.ci=commit ci", "G=git; \"${G:-${H}}\" -c alias.ci=commit ci",
-    "G=git; \"${G}it\" -c alias.ci=commit ci",
-    "G=git; \"$G/bin$(true)\" -c alias.ci=commit ci", "D='git commit -m'; $D/run", "C=commit; $C -m x",
+    'G=git; "/usr/bin/$G" -c alias.ci=commit ci',
+    'G=git; "${G:-${H}}" -c alias.ci=commit ci',
+    'G=git; "${G}it" -c alias.ci=commit ci',
+    'G=git; "$G/bin$(true)" -c alias.ci=commit ci',
+    "D='git commit -m'; $D/run",
+    "C=commit; $C -m x",
     # A value's quotes are dropped, and a word starts after =, S, \ and _ too; a
     # later git value turns a commit mark into a git one.
-    "C=\"'git'\"; \"$C\" -c alias.ci=commit ci", "X=--split-string=git; env $X -c alias.ci=commit ci",
-    "X='-S\\_git'; env $X -c alias.ci=commit ci", "C=commit; C=git; \"$C\" -c alias.ci=commit ci",
+    'C="\'git\'"; "$C" -c alias.ci=commit ci',
+    "X=--split-string=git; env $X -c alias.ci=commit ci",
+    "X='-S\\_git'; env $X -c alias.ci=commit ci",
+    'C=commit; C=git; "$C" -c alias.ci=commit ci',
     # Over-refusals: the value is not followed further than its words, so a
     # read-only git through a marked name is refused too, as are an unquoted
     # path under a directory named git, a program that is not git with a commit
     # word, and a word that assigns nothing.
-    "G=git; $G log", "g=git; $g --git-dir .git log --grep commit", "X='git log'; env -S '${X}'",
-    "ROOT=~/src/git; $ROOT/configure", "CZ='cz commit'; $CZ", "echo C=git; $C status",
+    "G=git; $G log",
+    "g=git; $g --git-dir .git log --grep commit",
+    "X='git log'; env -S '${X}'",
+    "ROOT=~/src/git; $ROOT/configure",
+    "CZ='cz commit'; $CZ",
+    "echo C=git; $C status",
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
-        check(f"{command} is refused through its visible assignment",
-              rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is refused through its visible assignment",
+            rc == 2 and "program name this hook cannot read" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 # The refusal does not claim a commit that is not there.
-for command in ("G=git; $G log", "G=/usr/local/git; \"$G\" status", "X='git log'; env -S '${X}'"):
+for command in (
+    "G=git; $G log",
+    'G=/usr/local/git; "$G" status',
+    "X='git log'; env -S '${X}'",
+):
     rc, err = check_hook(command, runner_clean)
-    check(f"{command} names the assigned variable",
-          rc == 2 and "assigns a value holding git or commit" in err and "`commit` follows" not in err,
-          f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{command} names the assigned variable",
+        rc == 2
+        and "assigns a value holding git or commit" in err
+        and "`commit` follows" not in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 for command in (
     # No visible assignment, or one to another name, keeps today's verdict.
-    "env -S '${PY:-python3}' script.py", '"$CMD" -m x', "$C -m x", "Y='git commit'; $C -m x",
+    "env -S '${PY:-python3}' script.py",
+    '"$CMD" -m x',
+    "$C -m x",
+    "Y='git commit'; $C -m x",
     # A value naming no git or commit word.
-    "PY=python3; $PY script.py", "X=-i env -S '${X} python3 legit.py'", "X=legit.py; env -S 'python3 ${X}'",
+    "PY=python3; $PY script.py",
+    "X=-i env -S '${X} python3 legit.py'",
+    "X=legit.py; env -S 'python3 ${X}'",
     "D=digit; $D commit.txt",
     # A marked name that is not a program word, or one in single quotes.
-    "C='git commit'; echo $C", "C='git commit'; echo \"$C\" | wc -c", "C='git commit'; '$C' -m x",
-    "C='git commit'; '$C>x' -m x", "MSG='fix commit'; git log --grep \"$MSG\"",
+    "C='git commit'; echo $C",
+    "C='git commit'; echo \"$C\" | wc -c",
+    "C='git commit'; '$C' -m x",
+    "C='git commit'; '$C>x' -m x",
+    "MSG='fix commit'; git log --grep \"$MSG\"",
     # A quoted program word that cannot end in git or /git: its last expansion
     # is followed by plain text that cannot end it so, or holds only a commit
     # mark, which never makes one word git.
-    'KIND=commit; "./scripts/$KIND.sh"', 'step=commit; "$SCRIPTS/$step"', 'X=commit; ./run-"$X".sh',
-    'G=/usr/local/git; "${G}/bin/tool"', 'PREFIX=/opt/homebrew/opt/git; "$PREFIX/bin/git-credential-osxkeychain" get',
-    'ROOT=~/src/git; "$ROOT/configure"', 'G=git; "$G.sh"', 'S=commit; "$S" -m x',
+    'KIND=commit; "./scripts/$KIND.sh"',
+    'step=commit; "$SCRIPTS/$step"',
+    'X=commit; ./run-"$X".sh',
+    'G=/usr/local/git; "${G}/bin/tool"',
+    'PREFIX=/opt/homebrew/opt/git; "$PREFIX/bin/git-credential-osxkeychain" get',
+    'ROOT=~/src/git; "$ROOT/configure"',
+    'G=git; "$G.sh"',
+    'S=commit; "$S" -m x',
     # A longer name that starts with a marked one is another name.
-    "G=git; $GIT_DIR/bin/tool", "G=git; ${GIT_DIR}/bin/tool",
+    "G=git; $GIT_DIR/bin/tool",
+    "G=git; ${GIT_DIR}/bin/tool",
     # IFS is not read: a value is marked by its own words alone.
-    'while IFS= read -r l; do echo "$l"; done < f; D=~/github/x; "$D/run"', "IFS=,; X=legit.py; $X",
+    'while IFS= read -r l; do echo "$l"; done < f; D=~/github/x; "$D/run"',
+    "IFS=,; X=legit.py; $X",
     # A later word env -S may split, which holds only a commit mark.
     'MSG="fix commit"; env -S \'${PY:-python3}\' script.py --msg "$MSG"',
     'MSG="fix commit"; env -S \'${PY:-python3}\' script.py --msg "${MSG}"',
 ):
     for directory in (runner_repo, runner_clean):
         rc, err = check_hook(command, directory)
-        check(f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is preserved", rc == 0, f"exit={rc} stderr={err.strip()[:160]}"
+        )
 # Past 16 marks a word is split at every $ and each name looked up instead of
 # matched as a pattern, with the same verdicts.
 MANY_MARKS = "; ".join(f"M{i}=git" for i in range(20))
 for command, expected in (
-    (f"{MANY_MARKS}; $M19 -c alias.ci=commit ci", 2), (f"{MANY_MARKS}; \"${{M1}}\" log", 2),
-    (f"{MANY_MARKS}; \"$M3/bin/tool\"", 0), (f"{MANY_MARKS}; $M log", 0), (f"{MANY_MARKS}; $M1x log", 0),
-    (f"{MANY_MARKS}; M1$N log", 0), (f"{MANY_MARKS}; S=commit; \"$S\" -m x", 0),
+    (f"{MANY_MARKS}; $M19 -c alias.ci=commit ci", 2),
+    (f'{MANY_MARKS}; "${{M1}}" log', 2),
+    (f'{MANY_MARKS}; "$M3/bin/tool"', 0),
+    (f"{MANY_MARKS}; $M log", 0),
+    (f"{MANY_MARKS}; $M1x log", 0),
+    (f"{MANY_MARKS}; M1$N log", 0),
+    (f'{MANY_MARKS}; S=commit; "$S" -m x', 0),
 ):
     rc, err = check_hook(command, runner_clean)
-    check(f"with 20 marks, {command[-28:]} exits {expected}", rc == expected, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"with 20 marks, {command[-28:]} exits {expected}",
+        rc == expected,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 # The marks are keyed like function names: a variable the hook inherits under a
 # mark's key names no mark of its own.
-rc, err = check_hook("G=git; true; $C -m x", runner_clean, env={**os.environ, "_cc_var_C": "0"})
-check("an inherited mark key marks nothing", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
-rc, err = check_hook(f"{MANY_MARKS}; $C -m x", runner_clean, env={**os.environ, "_cc_var_C": "0"})
-check("an inherited mark key marks nothing past 16 marks", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+rc, err = check_hook(
+    "G=git; true; $C -m x", runner_clean, env={**os.environ, "_cc_var_C": "0"}
+)
+check(
+    "an inherited mark key marks nothing",
+    rc == 0,
+    f"exit={rc} stderr={err.strip()[:160]}",
+)
+rc, err = check_hook(
+    f"{MANY_MARKS}; $C -m x", runner_clean, env={**os.environ, "_cc_var_C": "0"}
+)
+check(
+    "an inherited mark key marks nothing past 16 marks",
+    rc == 0,
+    f"exit={rc} stderr={err.strip()[:160]}",
+)
 # A marked name changes nothing about a git named outright.
-for command in ("G=git; git commit -m x", "C='git commit' git commit -m x", "MSG='fix commit'; git commit -m \"$MSG\""):
+for command in (
+    "G=git; git commit -m x",
+    "C='git commit' git commit -m x",
+    "MSG='fix commit'; git commit -m \"$MSG\"",
+):
     for directory, expected in ((runner_repo, 2), (runner_clean, 0)):
         rc, err = check_hook(command, directory)
-        check(f"{command} is scanned (expect {expected})",
-              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} is scanned (expect {expected})",
+            rc == expected and (expected == 0 or "GitHub token" in err),
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 
 # A heredoc fed to a literal cat or tee is only written, so its body is not read
 # as commands, and a line in it that names git through a variable is no refusal.
 for label, command in (
-    ("a script written through a heredoc", "cat > r.sh <<'X'\n$GIT commit -m release\nX"),
-    ("a Makefile written through a heredoc", "cat > Makefile <<'X'\nrelease:\n\t$(GIT) commit -am rel\nX"),
-    ("a script with -c written through a heredoc", "cat > s.sh <<'X'\ngit -c user.name=bot commit -m x\nX"),
+    (
+        "a script written through a heredoc",
+        "cat > r.sh <<'X'\n$GIT commit -m release\nX",
+    ),
+    (
+        "a Makefile written through a heredoc",
+        "cat > Makefile <<'X'\nrelease:\n\t$(GIT) commit -am rel\nX",
+    ),
+    (
+        "a script with -c written through a heredoc",
+        "cat > s.sh <<'X'\ngit -c user.name=bot commit -m x\nX",
+    ),
     ("a script written through tee", "tee r.sh <<'X'\n$GIT commit -m release\nX"),
-    ("a <<- body whose terminator is tab-indented", "cat > t.sh <<-'X'\n\t$GIT commit -m x\n\tX"),
-    ("two heredocs opened on one line", "cat > a <<'A' > b <<\\B\n$GIT commit -m a\nA\n$GIT commit -m b\nB"),
+    (
+        "a <<- body whose terminator is tab-indented",
+        "cat > t.sh <<-'X'\n\t$GIT commit -m x\n\tX",
+    ),
+    (
+        "two heredocs opened on one line",
+        "cat > a <<'A' > b <<\\B\n$GIT commit -m a\nA\n$GIT commit -m b\nB",
+    ),
     # bash reads the whole word as the delimiter, not its identifier prefix.
-    ("a delimiter that is not an identifier", "cat > d.sh <<'A-B'\n$GIT commit -m x\nA-B"),
+    (
+        "a delimiter that is not an identifier",
+        "cat > d.sh <<'A-B'\n$GIT commit -m x\nA-B",
+    ),
     # The skip is counted in characters, as the tokenizer reads them.
     # Those words only count at a command's start, not in a body's prose.
-    ("a body whose prose names hash, enable and alias", "cat > m.txt <<'X'\nrecord the commit hash; enable it with an alias\n$GIT commit -m x\nX"),
+    (
+        "a body whose prose names hash, enable and alias",
+        "cat > m.txt <<'X'\nrecord the commit hash; enable it with an alias\n$GIT commit -m x\nX",
+    ),
     # The shape agents write: a variable, a directory, then the file.
-    ("a file written after an assignment and mkdir", "S=/tmp/x\nmkdir -p \"$S\"\ncat > \"$S/m.txt\" <<'X'\n$GIT commit -m x\nX"),
-    ("a multibyte body, then a read-only command", "cat > k.md <<'EOF'\n한국어 본문 예시\n$GIT commit -m x\nEOF\ngit status"),
+    (
+        "a file written after an assignment and mkdir",
+        'S=/tmp/x\nmkdir -p "$S"\ncat > "$S/m.txt" <<\'X\'\n$GIT commit -m x\nX',
+    ),
+    (
+        "a multibyte body, then a read-only command",
+        "cat > k.md <<'EOF'\n한국어 본문 예시\n$GIT commit -m x\nEOF\ngit status",
+    ),
 ):
     rc, err = check_hook(command, plain)
     check(f"{label} is not refused", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
@@ -1570,87 +2882,203 @@ for label, command in (
 for label, command in (
     ("a heredoc fed to bash", "bash <<'X'\n$GIT commit -m x\nX"),
     ("a heredoc piped to sh", "cat <<'X' | sh\n$GIT commit -m x\nX"),
-    ("a heredoc written into a process substitution", "cat <<'X' > >(sh)\n$GIT commit -m x\nX"),
-    ("a heredoc written to a duplicated descriptor", "cat <<'X' >&3\n$GIT commit -m x\nX"),
-    ("a heredoc inside a substitution that eval runs", "eval $(cat <<'X'\n$GIT commit -m x\nX\n)"),
-    ("a heredoc fed to a function named cat", "cat() { bash; }; cat <<'X'\n$GIT commit -m x\nX"),
-    ("a heredoc after PATH is changed", "PATH=/tmp/bin:$PATH; cat <<'X'\n$GIT commit -m x\nX"),
+    (
+        "a heredoc written into a process substitution",
+        "cat <<'X' > >(sh)\n$GIT commit -m x\nX",
+    ),
+    (
+        "a heredoc written to a duplicated descriptor",
+        "cat <<'X' >&3\n$GIT commit -m x\nX",
+    ),
+    (
+        "a heredoc inside a substitution that eval runs",
+        "eval $(cat <<'X'\n$GIT commit -m x\nX\n)",
+    ),
+    (
+        "a heredoc fed to a function named cat",
+        "cat() { bash; }; cat <<'X'\n$GIT commit -m x\nX",
+    ),
+    (
+        "a heredoc after PATH is changed",
+        "PATH=/tmp/bin:$PATH; cat <<'X'\n$GIT commit -m x\nX",
+    ),
     ("a heredoc glued to its command word", "cat<<'X'\n$GIT commit -m x\nX"),
-    ("a heredoc behind an assignment prefix", "LC_ALL=C cat <<'X'\n$GIT commit -m x\nX"),
+    (
+        "a heredoc behind an assignment prefix",
+        "LC_ALL=C cat <<'X'\n$GIT commit -m x\nX",
+    ),
     # No terminator means the parse may disagree with bash about where it ends.
     ("an unterminated heredoc", "cat > u.sh <<'X'\n$GIT commit -m x"),
     # An arithmetic shift is not a heredoc, and y is no delimiter.
     ("an arithmetic shift", "(( x << y ))\n$GIT commit -m x\ny"),
     # An unquoted delimiter leaves the body's substitutions to run, even for cat.
-    ("a heredoc whose unquoted body substitutes a command", "cat > o.txt <<EOF\n$($GIT commit -m x)\nEOF"),
+    (
+        "a heredoc whose unquoted body substitutes a command",
+        "cat > o.txt <<EOF\n$($GIT commit -m x)\nEOF",
+    ),
     # A group, loop or branch can pipe the whole body onward after its end.
-    ("a heredoc inside a group piped to bash", "{\ncat <<'EOF'\n$GIT commit -m x\nEOF\n} | bash"),
-    ("a heredoc inside a loop piped to sh", "for i in 1; do cat <<'EOF'\n$GIT commit -m x\nEOF\ndone | sh"),
+    (
+        "a heredoc inside a group piped to bash",
+        "{\ncat <<'EOF'\n$GIT commit -m x\nEOF\n} | bash",
+    ),
+    (
+        "a heredoc inside a loop piped to sh",
+        "for i in 1; do cat <<'EOF'\n$GIT commit -m x\nEOF\ndone | sh",
+    ),
     # exec can point the command's own output at a shell.
-    ("a heredoc after exec redirects the output", "exec > >(bash)\ncat <<'EOF'\n$GIT commit -m x\nEOF"),
+    (
+        "a heredoc after exec redirects the output",
+        "exec > >(bash)\ncat <<'EOF'\n$GIT commit -m x\nEOF",
+    ),
     # A body that is read may open a heredoc of its own, which then runs in the
     # outer body's context: substituted by an unquoted outer, or fed onward.
-    ("a quoted heredoc inside an unquoted outer body", "cat <<OUTER\ncat <<'INNER'\n$($GIT commit -m x)\nINNER\nOUTER"),
-    ("a quoted heredoc inside a body piped to bash", "bash <<'OUTER' | bash\ncat <<'INNER'\n$GIT commit -m x\nINNER\nOUTER"),
+    (
+        "a quoted heredoc inside an unquoted outer body",
+        "cat <<OUTER\ncat <<'INNER'\n$($GIT commit -m x)\nINNER\nOUTER",
+    ),
+    (
+        "a quoted heredoc inside a body piped to bash",
+        "bash <<'OUTER' | bash\ncat <<'INNER'\n$GIT commit -m x\nINNER\nOUTER",
+    ),
     # bash removes a backslash inside a double-quoted delimiter, so E\OF ends it.
-    ("a double-quoted delimiter holding a backslash", 'cat <<"E\\\\OF"\nbody\nE\\OF\n$GIT commit -m x\nE\\\\OF'),
+    (
+        "a double-quoted delimiter holding a backslash",
+        'cat <<"E\\\\OF"\nbody\nE\\OF\n$GIT commit -m x\nE\\\\OF',
+    ),
     # Quote state can drift from the shell's: a quote in a comment inside a
     # double-quoted substitution closes nothing for zsh or bash 5, which run
     # this body through eval, but it did close the string here.
-    ("a heredoc inside a double-quoted substitution whose comment holds a quote", 'eval "$( # "\ncat <<\'Y\'\n$GIT commit -m x\nY\n)"'),
+    (
+        "a heredoc inside a double-quoted substitution whose comment holds a quote",
+        'eval "$( # "\ncat <<\'Y\'\n$GIT commit -m x\nY\n)"',
+    ),
     # A backtick substitution is not tracked, so a heredoc inside one runs.
-    ("a heredoc inside a backtick substitution that eval runs", "eval `\ncat <<'X'\n$GIT commit -m x\nX\n`"),
+    (
+        "a heredoc inside a backtick substitution that eval runs",
+        "eval `\ncat <<'X'\n$GIT commit -m x\nX\n`",
+    ),
     # Only a prefix of plain words and separators is trusted, so even a closed
     # subshell before the heredoc keeps its body read.
     ("a heredoc after a subshell", "(true)\ncat > f.sh <<'X'\n$GIT commit -m x\nX"),
     # hash -p points cat at another program without a function, alias or PATH.
-    ("a heredoc fed to cat after hash -p", "hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    (
+        "a heredoc fed to cat after hash -p",
+        "hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX",
+    ),
     # Mid-word, << is not an operator: here it is a default value, and the
     # command after it runs.
     ("a << inside a parameter expansion", 'cat ${v:-<<"X"}\n$GIT commit -m x\nX}'),
     # However hash is spelled or reached, it can repoint cat.
-    ("a heredoc fed to cat after builtin hash", "builtin hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
-    ("a heredoc fed to cat after a quoted hash", "'hash' -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
-    ("a heredoc fed to cat after a hash named by a variable", "h=hash; $h -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
-    ("a << after a space inside a parameter expansion", "cat ${v:- <<'X'}\n$GIT commit -m x\nX}"),
+    (
+        "a heredoc fed to cat after builtin hash",
+        "builtin hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX",
+    ),
+    (
+        "a heredoc fed to cat after a quoted hash",
+        "'hash' -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX",
+    ),
+    (
+        "a heredoc fed to cat after a hash named by a variable",
+        "h=hash; $h -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX",
+    ),
+    (
+        "a << after a space inside a parameter expansion",
+        "cat ${v:- <<'X'}\n$GIT commit -m x\nX}",
+    ),
     # A prefix word the hook does not read as a program keeps the body read.
-    ("a heredoc in a negated group piped to bash", "! {\ncat <<'X'\n$GIT commit -m x\nX\n} | bash"),
-    ("a heredoc fed to cat after time hash", "time hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
-    ("a heredoc fed to cat after a redirected hash", ">/dev/null hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    (
+        "a heredoc in a negated group piped to bash",
+        "! {\ncat <<'X'\n$GIT commit -m x\nX\n} | bash",
+    ),
+    (
+        "a heredoc fed to cat after time hash",
+        "time hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX",
+    ),
+    (
+        "a heredoc fed to cat after a redirected hash",
+        ">/dev/null hash -p /bin/bash cat\ncat <<'X'\n$GIT commit -m x\nX",
+    ),
     # cat<<B is a heredoc to the shell; left unnoted, it hides where its body
     # ends, and a later cat <<'C' inside it would look top-level.
-    ("a heredoc after one glued to its command", "cat <<'A'; cat<<B\ndata\nA\ncat <<'C'\n$($GIT commit -m x)\nC\nB"),
+    (
+        "a heredoc after one glued to its command",
+        "cat <<'A'; cat<<B\ndata\nA\ncat <<'C'\n$($GIT commit -m x)\nC\nB",
+    ),
     # PATH can be set by a builtin that names it, and zsh's rehash applies it.
-    ("a heredoc fed to cat after read sets PATH", "read -r PATH <<< /tmp/evil; rehash; cat <<'X'\n$GIT commit -m x\nX"),
-    ("a heredoc fed to cat after printf -v sets PATH", "printf -v PATH %s /tmp/evil\ncat <<'X'\n$GIT commit -m x\nX"),
+    (
+        "a heredoc fed to cat after read sets PATH",
+        "read -r PATH <<< /tmp/evil; rehash; cat <<'X'\n$GIT commit -m x\nX",
+    ),
+    (
+        "a heredoc fed to cat after printf -v sets PATH",
+        "printf -v PATH %s /tmp/evil\ncat <<'X'\n$GIT commit -m x\nX",
+    ),
     # zsh can autoload a function named cat from FPATH; only programs on a
     # short list may run before a skipped heredoc, and autoload is not one.
-    ("a heredoc fed to cat after FPATH and autoload", "FPATH=/tmp/fns; autoload cat; cat <<'X'\n$GIT commit -m x\nX"),
-    ("a heredoc fed to cat after autoload alone", "autoload cat\ncat <<'X'\n$GIT commit -m x\nX"),
+    (
+        "a heredoc fed to cat after FPATH and autoload",
+        "FPATH=/tmp/fns; autoload cat; cat <<'X'\n$GIT commit -m x\nX",
+    ),
+    (
+        "a heredoc fed to cat after autoload alone",
+        "autoload cat\ncat <<'X'\n$GIT commit -m x\nX",
+    ),
     # A ${ opened after the heredoc on its line can span lines, and what runs
     # inside it is not a body.
-    ("a parameter expansion spanning lines after the heredoc", "cat <<'X' ${v:-\n$($GIT commit -m x >&2)\nX\n}\nactual body\nX"),
+    (
+        "a parameter expansion spanning lines after the heredoc",
+        "cat <<'X' ${v:-\n$($GIT commit -m x >&2)\nX\n}\nactual body\nX",
+    ),
     # A string that spans lines is where a drifted quote state shows, so a
     # heredoc after one is read even when, as here, nothing would run it.
-    ("a heredoc after a string that spans lines", 'echo "a\nb"\ncat > f.sh <<\'X\'\n$GIT commit -m x\nX'),
+    (
+        "a heredoc after a string that spans lines",
+        "echo \"a\nb\"\ncat > f.sh <<'X'\n$GIT commit -m x\nX",
+    ),
 ):
     rc, err = check_hook(command, plain)
-    check(f"{label} is still read and refused", rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label} is still read and refused",
+        rc == 2 and "program name this hook cannot read" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # What follows a skipped body is read from the right place, with a credential
 # staged, so a commit there is scanned.
 for label, command in (
     ("commit after a skipped body", "cat > a.txt <<'EOF'\nhello\nEOF\ngit commit -m x"),
-    ("commit after a skipped multibyte body", "cat > k.md <<'EOF'\n한국어 본문입니다 — 예시\nEOF\ngit commit -m x"),
-    ("commit after a skipped <<- body", "cat > t.txt <<-'EOF'\n\tbody\n\tEOF\ngit commit -m x"),
-    ("commit after two skipped bodies", "cat > a <<'A' > b <<\"B\"\na\nA\nb\nB\ngit commit -m x"),
-    ("commit after a line that only starts with the delimiter", "cat > a <<'EOF'\nEOFX\nEOF\ngit commit -m x"),
-    ("commit on the line that opens the heredoc", "cat > a <<'EOF'; git commit -m x\nbody\nEOF"),
-    ("commit after a delimiter that is not an identifier", "cat <<\\A-B\nx\nA-B\ngit commit -m x\nA"),
+    (
+        "commit after a skipped multibyte body",
+        "cat > k.md <<'EOF'\n한국어 본문입니다 — 예시\nEOF\ngit commit -m x",
+    ),
+    (
+        "commit after a skipped <<- body",
+        "cat > t.txt <<-'EOF'\n\tbody\n\tEOF\ngit commit -m x",
+    ),
+    (
+        "commit after two skipped bodies",
+        "cat > a <<'A' > b <<\"B\"\na\nA\nb\nB\ngit commit -m x",
+    ),
+    (
+        "commit after a line that only starts with the delimiter",
+        "cat > a <<'EOF'\nEOFX\nEOF\ngit commit -m x",
+    ),
+    (
+        "commit on the line that opens the heredoc",
+        "cat > a <<'EOF'; git commit -m x\nbody\nEOF",
+    ),
+    (
+        "commit after a delimiter that is not an identifier",
+        "cat <<\\A-B\nx\nA-B\ngit commit -m x\nA",
+    ),
     ("commit after a here-string", "cat <<<EOF\ngit commit -m x"),
 ):
     rc, err = check_hook(command, continued_commit_repo)
-    check(f"{label} scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label} scans the staged credential",
+        rc == 2 and "GitHub token" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Recursion is bounded: the hook must return, not inline forever.
 try:
@@ -1662,21 +3090,41 @@ except subprocess.TimeoutExpired:
 # Recursion in a long command must stay cheap: it once ran on to the token
 # budget, copying the token list at every call, and took 11 s here against the
 # hook's 10 s timeout, where it fails open.
-long_recursion = "echo " + " ".join(f"w{i}" for i in range(1500)) + "\na() { b; }; b() { a; }; a"
+long_recursion = (
+    "echo " + " ".join(f"w{i}" for i in range(1500)) + "\na() { b; }; b() { a; }; a"
+)
 try:
     rc, _ = check_hook(long_recursion, plain, timeout=10)
-    check("recursion in a long command finishes within the hook timeout", rc == 0, f"exit={rc}")
+    check(
+        "recursion in a long command finishes within the hook timeout",
+        rc == 0,
+        f"exit={rc}",
+    )
 except subprocess.TimeoutExpired:
-    check("recursion in a long command finishes within the hook timeout", False, "timed out")
+    check(
+        "recursion in a long command finishes within the hook timeout",
+        False,
+        "timed out",
+    )
 
 # Many ordinary calls in a long command must stay cheap too: when each one
 # copied the token list, 1500 of them took 18 s under bash 3.2.
-many_calls = "echo " + " ".join(f"w{i}" for i in range(400)) + "\nh() { :; }; " + "h; " * 1500
+many_calls = (
+    "echo " + " ".join(f"w{i}" for i in range(400)) + "\nh() { :; }; " + "h; " * 1500
+)
 try:
     rc, _ = check_hook(many_calls, plain, timeout=10)
-    check("many calls in a long command finish within the hook timeout", rc == 0, f"exit={rc}")
+    check(
+        "many calls in a long command finish within the hook timeout",
+        rc == 0,
+        f"exit={rc}",
+    )
 except subprocess.TimeoutExpired:
-    check("many calls in a long command finish within the hook timeout", False, "timed out")
+    check(
+        "many calls in a long command finish within the hook timeout",
+        False,
+        "timed out",
+    )
 
 # Calls to the oldest name used to scan every later definition. Exercise
 # lookup repeatedly with a bounded definition/token count: thousands of distinct
@@ -1686,73 +3134,135 @@ except subprocess.TimeoutExpired:
 # lookup takes 3.12 s for the same 500 definitions and 3,000 calls.
 distinct_functions = "".join(f"f{i}() {{ :; }};\n" for i in range(500))
 lookup_workload = distinct_functions + "f0;\n" * 3000
-for label, directory, expected in (("clean", plain, 0), ("credential", continued_commit_repo, 2)):
+for label, directory, expected in (
+    ("clean", plain, 0),
+    ("credential", continued_commit_repo, 2),
+):
     try:
-        rc, err = check_hook(lookup_workload + "git commit -m fixture", directory, timeout=10)
-        check(f"3,000 calls among 500 definitions reach the {label} scan within 10 s",
-              rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc}")
+        rc, err = check_hook(
+            lookup_workload + "git commit -m fixture", directory, timeout=10
+        )
+        check(
+            f"3,000 calls among 500 definitions reach the {label} scan within 10 s",
+            rc == expected and (expected == 0 or "GitHub token" in err),
+            f"exit={rc}",
+        )
     except subprocess.TimeoutExpired:
-        check(f"3,000 calls among 500 definitions reach the {label} scan within 10 s", False, "timed out")
+        check(
+            f"3,000 calls among 500 definitions reach the {label} scan within 10 s",
+            False,
+            "timed out",
+        )
 
 # Indexing must retain exact names and all possibly active definitions. Unusual
 # but valid Bash function names must not alias identifier/encoded names.
 for label, command, expected in (
     ("punctuated name", "a-b() { git commit -m fixture; }; a-b", 2),
     ("distinct punctuation", "a-b() { git commit -m fixture; }; a_b() { :; }; a-b", 2),
-    ("punctuated redefinition", "a-b() { git commit -m fixture; }; a-b() { :; }; a-b", 0),
-    ("uncertain punctuated redefinition", "a-b() { git commit -m fixture; }; ( a-b() { :; } ); a-b", 2),
-    ("unset git after many definitions", distinct_functions + "git() { :; }; unset -f git; git commit -m fixture", 2),
+    (
+        "punctuated redefinition",
+        "a-b() { git commit -m fixture; }; a-b() { :; }; a-b",
+        0,
+    ),
+    (
+        "uncertain punctuated redefinition",
+        "a-b() { git commit -m fixture; }; ( a-b() { :; } ); a-b",
+        2,
+    ),
+    (
+        "unset git after many definitions",
+        distinct_functions + "git() { :; }; unset -f git; git commit -m fixture",
+        2,
+    ),
 ):
     rc, err = check_hook(command, continued_commit_repo)
-    check(f"function index preserves {label}", rc == expected, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"function index preserves {label}",
+        rc == expected,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Imported variables must not seed the private name index or be interpreted as
 # arithmetic. The marker is synthetic and the payload is never executed.
 with tempfile.TemporaryDirectory() as tmp:
     marker = Path(tmp, "lookup-marker")
-    for value in ("0", "000000008", "99999999999999999999999999999", f"a[$(touch {marker})]"):
+    for value in (
+        "0",
+        "000000008",
+        "99999999999999999999999999999",
+        f"a[$(touch {marker})]",
+    ):
         env = dict(os.environ, _cc_func_l_git=value, _cc_func_l_f=value)
-        rc, err = check_hook("f() { :; }; git commit -m fixture", continued_commit_repo, env=env)
-        check("imported function index cannot hide a commit", rc == 2 and "GitHub token" in err, f"exit={rc}")
+        rc, err = check_hook(
+            "f() { :; }; git commit -m fixture", continued_commit_repo, env=env
+        )
+        check(
+            "imported function index cannot hide a commit",
+            rc == 2 and "GitHub token" in err,
+            f"exit={rc}",
+        )
     check("function lookup never evaluates imported index text", not marker.exists())
 
 # The tokenizer reads bytes whatever the caller's locale, because under a
 # multibyte one each character read walks the command from its start: this
 # 22 KB command took 6 s under en_US.UTF-8 and 1 s under C.
 UTF8 = dict(os.environ)
-UTF8["LC_ALL"] = UTF8["LANG"] = "en_US.UTF-8" if os.uname().sysname == "Darwin" else "C.UTF-8"
+UTF8["LC_ALL"] = UTF8["LANG"] = (
+    "en_US.UTF-8" if os.uname().sysname == "Darwin" else "C.UTF-8"
+)
 long_line = "echo " + " ".join(f"word{i}" for i in range(2600))
 try:
     rc, _ = check_hook(long_line, plain, env=UTF8, timeout=4)
-    check("a long command under a UTF-8 locale finishes in bytes' time", rc == 0, f"exit={rc}")
+    check(
+        "a long command under a UTF-8 locale finishes in bytes' time",
+        rc == 0,
+        f"exit={rc}",
+    )
 except subprocess.TimeoutExpired:
-    check("a long command under a UTF-8 locale finishes in bytes' time", False, "timed out")
+    check(
+        "a long command under a UTF-8 locale finishes in bytes' time",
+        False,
+        "timed out",
+    )
 # Reading bytes must not change what a multibyte command means.
 for label, command in (
     ("commit whose message is multibyte", 'git commit -m "한국어 메시지 ✓"'),
-    ("commit after a skipped multibyte body", "cat > k.md <<'EOF'\n한국어 본문입니다 — 예시\nEOF\ngit commit -m x"),
+    (
+        "commit after a skipped multibyte body",
+        "cat > k.md <<'EOF'\n한국어 본문입니다 — 예시\nEOF\ngit commit -m x",
+    ),
     ("commit after a multibyte word in a chain", 'echo "한글" && git commit -m x'),
 ):
     rc, err = check_hook(command, continued_commit_repo, env=UTF8)
-    check(f"{label}, under a UTF-8 locale, scans the staged credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label}, under a UTF-8 locale, scans the staged credential",
+        rc == 2 and "GitHub token" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 # The quoted-prefix offset of a call word is a byte count, and the word is cut
 # in bytes under either locale: counted as characters, `'éé'>x` was cut past
 # the >, and commit was read as the redirection's target (#68).
 for command in (
-    "f() { git \"$2\" -m x; }; f 'éé'>x commit", "f() { git \"$2\" -m x; }; f 'é<b'>/dev/null commit",
+    "f() { git \"$2\" -m x; }; f 'éé'>x commit",
+    "f() { git \"$2\" -m x; }; f 'é<b'>/dev/null commit",
 ):
     for locale_env in (dict(os.environ, LC_ALL="C"), UTF8):
         rc, err = check_hook(command, runner_repo, env=locale_env)
-        check(f"{command} under LC_ALL={locale_env['LC_ALL']} scans the staged credential",
-              rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{command} under LC_ALL={locale_env['LC_ALL']} scans the staged credential",
+            rc == 2 and "GitHub token" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 
 # Large input must still reach the real commit after it before the harness's
 # 10 s timeout. A data-only heredoc can be skipped, but a body piped to node
 # cannot, and a long quoted word used to spend 13 s in the per-byte loop on
 # Linux. Assert the credential finding, not just exit 2 (also a syntax error).
-large_js = "class Example {\n" + "".join(
-    f"  method{i}() {{ return this.value + {i}; }}\n" for i in range(1400)
-) + "}\n"
+large_js = (
+    "class Example {\n"
+    + "".join(f"  method{i}() {{ return this.value + {i}; }}\n" for i in range(1400))
+    + "}\n"
+)
 large_inputs = (
     ("61KB executable heredoc", "cat <<'EOF' | node\n" + large_js + "EOF\n"),
     ("60KB quoted word", 'echo "' + "x" * 60000 + '" >/dev/null\n'),
@@ -1774,10 +3284,23 @@ for locale in ("C", UTF8["LC_ALL"]):
     env = dict(os.environ, LC_ALL=locale)
     for label, prefix in large_inputs:
         try:
-            rc, err = check_hook(prefix + "git commit -m fixture", continued_commit_repo, env=env, timeout=10)
-            check(f"{label} reaches credential scan within 10 s under {locale}", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+            rc, err = check_hook(
+                prefix + "git commit -m fixture",
+                continued_commit_repo,
+                env=env,
+                timeout=10,
+            )
+            check(
+                f"{label} reaches credential scan within 10 s under {locale}",
+                rc == 2 and "GitHub token" in err,
+                f"exit={rc} stderr={err.strip()[:160]}",
+            )
         except subprocess.TimeoutExpired:
-            check(f"{label} reaches credential scan within 10 s under {locale}", False, "timed out")
+            check(
+                f"{label} reaches credential scan within 10 s under {locale}",
+                False,
+                "timed out",
+            )
 
 # A run of simple references is appended in one step (#72). What follows the
 # run, and what the run marks the word as, must read as it did byte by byte.
@@ -1790,7 +3313,11 @@ for command, expected in (
     ('git "$a$b" -m fixture', "could not safely parse"),
 ):
     rc, err = check_hook(command, continued_commit_repo)
-    check(f"{command} after a reference run is refused", rc == 2 and expected in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{command} after a reference run is refused",
+        rc == 2 and expected in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Put syntax at and around byte-window edges. The filler is an ordinary word,
 # so it is read rather than skipped as a comment or a safe heredoc. Each form
@@ -1806,15 +3333,23 @@ boundary_forms = (
     ("substitution closer", "echo $(printf git) commit -m prose", ")"),
     # A run of simple references is read in one step; the `$` that ends it
     # must still open the substitution, wherever the window cuts the run.
-    ("reference run before substitution", "echo $ab$cd$(printf git) commit -m prose", "$cd"),
-    ("quoted reference run before substitution", 'echo "$ab$cd$(printf git)" commit -m prose', "$cd"),
+    (
+        "reference run before substitution",
+        "echo $ab$cd$(printf git) commit -m prose",
+        "$cd",
+    ),
+    (
+        "quoted reference run before substitution",
+        'echo "$ab$cd$(printf git)" commit -m prose',
+        "$cd",
+    ),
     ("redirection operator", "echo text 2>&1", ">&"),
     ("heredoc operator", "cat > note.txt <<'EOF'\n$GIT commit -m prose\nEOF", "<<"),
     ("multibyte word", 'echo "한국어 ✓"', "한국어"),
 )
 for edge in (1023, 1024, 1025, 2047, 2048, 2049):
     for label, fragment, marker in boundary_forms:
-        marker_pos = len(fragment[:fragment.index(marker)].encode())
+        marker_pos = len(fragment[: fragment.index(marker)].encode())
         # Closing-quote markers include the preceding word to select the
         # second quote; position the quote itself, rather than that word.
         if label.startswith("closing"):
@@ -1822,7 +3357,11 @@ for edge in (1023, 1024, 1025, 2047, 2048, 2049):
         command = "echo " + "x" * (edge - len("echo ; ") - marker_pos) + "; " + fragment
         for suffix, expected in (("", 0), ("\ngit commit -m fixture", 2)):
             rc, err = check_hook(command + suffix, continued_commit_repo, env=UTF8)
-            check(f"{label} at byte {edge}, {'commit' if suffix else 'prose'}", rc == expected and (expected == 0 or "GitHub token" in err), f"exit={rc} stderr={err.strip()[:160]}")
+            check(
+                f"{label} at byte {edge}, {'commit' if suffix else 'prose'}",
+                rc == expected and (expected == 0 or "GitHub token" in err),
+                f"exit={rc} stderr={err.strip()[:160]}",
+            )
 
 # Losing quote removal or backslash continuation at an edge must not hide a
 # program/subcommand that really spells git commit. A multibyte pathspec must
@@ -1833,34 +3372,68 @@ for edge in (1023, 1024, 1025):
     for label, fragment, marker, directory in (
         ("quoted program", '"gi"t commit -m fixture', '"', continued_commit_repo),
         ("escaped program", "g\\it commit -m fixture", "\\", continued_commit_repo),
-        ("continued program", "gi\\\nt commit -m fixture", "\\\n", continued_commit_repo),
+        (
+            "continued program",
+            "gi\\\nt commit -m fixture",
+            "\\\n",
+            continued_commit_repo,
+        ),
         ("escaped subcommand", "git co\\mmit -m fixture", "\\", continued_commit_repo),
-        ("multibyte pathspec", f"git commit -m fixture -- '{unicode_name}'", unicode_name, unicode_commit_repo),
+        (
+            "multibyte pathspec",
+            f"git commit -m fixture -- '{unicode_name}'",
+            unicode_name,
+            unicode_commit_repo,
+        ),
     ):
-        marker_pos = len(fragment[:fragment.index(marker)].encode())
+        marker_pos = len(fragment[: fragment.index(marker)].encode())
         command = "echo " + "x" * (edge - len("echo ; ") - marker_pos) + "; " + fragment
         rc, err = check_hook(command, directory, env=UTF8)
-        check(f"{label} at byte {edge} scans the credential", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+        check(
+            f"{label} at byte {edge} scans the credential",
+            rc == 2 and "GitHub token" in err,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
 
 # Comment and safe-heredoc skips move the cursor beyond its current window;
 # the next words must be read from their new position, with bytes unchanged.
 for label, command in (
     ("long comment jump", "# " + "x" * 5000 + "\ngit commit -m fixture"),
-    ("long skipped heredoc jump", "cat > note.txt <<'EOF'\n" + "x" * 5000 + "\nEOF\ngit commit -m fixture"),
-    ("single-quoted multibyte span", "echo '" + "한글 ✓ " * 400 + "'\ngit commit -m fixture"),
+    (
+        "long skipped heredoc jump",
+        "cat > note.txt <<'EOF'\n" + "x" * 5000 + "\nEOF\ngit commit -m fixture",
+    ),
+    (
+        "single-quoted multibyte span",
+        "echo '" + "한글 ✓ " * 400 + "'\ngit commit -m fixture",
+    ),
 ):
     rc, err = check_hook(command, continued_commit_repo, env=UTF8)
-    check(f"{label} reaches the credential scan", rc == 2 and "GitHub token" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label} reaches the credential scan",
+        rc == 2 and "GitHub token" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # The token budget is what bounds functions that multiply their arguments in a
 # cycle: each is only one deep in its own body, so the recursion bound lets all
 # three through eight times over, and without the budget this ran past 30 s.
-doubling_cycle = 'a() { b "$@" "$@"; }; b() { c "$@" "$@"; }; c() { a "$@" "$@"; }; a commit -m x'
+doubling_cycle = (
+    'a() { b "$@" "$@"; }; b() { c "$@" "$@"; }; c() { a "$@" "$@"; }; a commit -m x'
+)
 try:
     rc, err = check_hook(doubling_cycle, plain, timeout=10)
-    check("a cycle of doubling functions is refused within the hook timeout", rc == 2 and "program name this hook cannot read" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        "a cycle of doubling functions is refused within the hook timeout",
+        rc == 2 and "program name this hook cannot read" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 except subprocess.TimeoutExpired:
-    check("a cycle of doubling functions is refused within the hook timeout", False, "timed out")
+    check(
+        "a cycle of doubling functions is refused within the hook timeout",
+        False,
+        "timed out",
+    )
 
 # --- honours git -C so the right repo is scanned ----------------------------
 dirty = repo({"config.txt": f"{GITHUB}\n"})
@@ -1873,7 +3446,11 @@ rc, err = check_hook(
     clean,
 )
 check("multiple git commit segments are rejected", rc == 2, f"exit={rc}")
-check("multiple commit rejection is explained", "single git commit" in err, f"stderr={err.strip()[:160]}")
+check(
+    "multiple commit rejection is explained",
+    "single git commit" in err,
+    f"stderr={err.strip()[:160]}",
+)
 
 # Command-supplied Git config must not be propagated into the guard's own Git
 # process, where config keys such as diff.external can execute code.
@@ -1900,7 +3477,14 @@ textconv_repo = repo(
 )
 textconv_command, textconv_marker = marker_command(textconv_repo, "repo-textconv")
 subprocess.run(
-    ["git", "-C", textconv_repo, "config", "diff.marker.textconv", str(textconv_command)],
+    [
+        "git",
+        "-C",
+        textconv_repo,
+        "config",
+        "diff.marker.textconv",
+        str(textconv_command),
+    ],
     check=True,
 )
 rc, _ = check_hook("git commit -m x", textconv_repo)
@@ -1912,7 +3496,9 @@ space_parent = tempfile.mkdtemp(prefix="staged secret parent ")
 space_repo = str(Path(space_parent, "repo with spaces"))
 Path(space_repo).mkdir()
 subprocess.run(["git", "-C", space_repo, "init", "-q"], check=True)
-subprocess.run(["git", "-C", space_repo, "config", "user.email", "t@example.invalid"], check=True)
+subprocess.run(
+    ["git", "-C", space_repo, "config", "user.email", "t@example.invalid"], check=True
+)
 subprocess.run(["git", "-C", space_repo, "config", "user.name", "t"], check=True)
 Path(space_repo, "config.txt").write_text(f"{GITHUB}\n")
 subprocess.run(["git", "-C", space_repo, "add", "-A"], check=True)
@@ -1921,7 +3507,11 @@ check("quoted git -C path with whitespace is scanned", rc == 2, f"exit={rc}")
 
 rc, err = check_hook('git -C "$repo" commit -m x', clean)
 check("dynamic git -C path is blocked instead of mis-scanned", rc == 2, f"exit={rc}")
-check("unsafe commit form explains the parse failure", "could not safely parse" in err, f"stderr={err.strip()[:160]}")
+check(
+    "unsafe commit form explains the parse failure",
+    "could not safely parse" in err,
+    f"stderr={err.strip()[:160]}",
+)
 
 # --- a refusal must name the reason it was actually refused for -------------
 # An unquoted expansion can carry extra words, so a command that never mentions
@@ -1930,28 +3520,60 @@ check("unsafe commit form explains the parse failure", "could not safely parse" 
 # not there. Refusal stays; only the advice changes, so each case below asserts
 # BOTH that it is still blocked and that the message points at quoting.
 for label, command in (
-    ("read-only log behind an unquoted path", "repo=/tmp; git -C $repo log --oneline -1"),
-    ("read-only status behind an unquoted path", "repo=/tmp; git -C $repo status --porcelain"),
-    ("a git call inside a loop over unquoted words", "for d in a b; do git -C /tmp/$d status -s; done"),
-    ("an expansion standing where the subcommand goes", "sub=log; git $sub --oneline -1"),
+    (
+        "read-only log behind an unquoted path",
+        "repo=/tmp; git -C $repo log --oneline -1",
+    ),
+    (
+        "read-only status behind an unquoted path",
+        "repo=/tmp; git -C $repo status --porcelain",
+    ),
+    (
+        "a git call inside a loop over unquoted words",
+        "for d in a b; do git -C /tmp/$d status -s; done",
+    ),
+    (
+        "an expansion standing where the subcommand goes",
+        "sub=log; git $sub --oneline -1",
+    ),
 ):
     rc, err = check_hook(command, clean)
     check(f"{label} is still refused", rc == 2, f"exit={rc}")
-    check(f"{label} is not called a commit", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
-    check(f"{label} advises quoting", "unquoted expansion" in err, f"stderr={err.strip()[:160]}")
+    check(
+        f"{label} is not called a commit",
+        "could not safely parse" not in err,
+        f"stderr={err.strip()[:160]}",
+    )
+    check(
+        f"{label} advises quoting",
+        "unquoted expansion" in err,
+        f"stderr={err.strip()[:160]}",
+    )
 
 # The same shape with the expansion quoted carries no extra words, so the
 # subcommand is trustworthy and a read-only call must pass untouched.
 rc, err = check_hook('repo=/tmp; git -C "$repo" status --porcelain', clean)
-check("a quoted expansion leaves a read-only call alone", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+check(
+    "a quoted expansion leaves a read-only call alone",
+    rc == 0,
+    f"exit={rc} stderr={err.strip()[:160]}",
+)
 
 # A quoted expansion AS the subcommand is a different case: it cannot split,
 # but it still resolves to a word this hook never sees, so it is refused -- and
 # telling it to quote would send it in a circle. It keeps the parse message.
 rc, err = check_hook('sub=log; git "$sub" --oneline -1', clean)
 check("a quoted expansion as the subcommand is still refused", rc == 2, f"exit={rc}")
-check("a quoted expansion as the subcommand is not told to quote", "unquoted expansion" not in err, f"stderr={err.strip()[:160]}")
-check("a quoted expansion as the subcommand keeps the parse message", "could not safely parse" in err, f"stderr={err.strip()[:160]}")
+check(
+    "a quoted expansion as the subcommand is not told to quote",
+    "unquoted expansion" not in err,
+    f"stderr={err.strip()[:160]}",
+)
+check(
+    "a quoted expansion as the subcommand keeps the parse message",
+    "could not safely parse" in err,
+    f"stderr={err.strip()[:160]}",
+)
 
 # A real commit keeps the parse message: quoting is not the fix there. Both
 # halves are asserted -- a message with exit 0 would be a hook that fails open.
@@ -1978,7 +3600,11 @@ for label, command in (
     ("-S before -m", "git commit -S -m x"),
 ):
     rc, err = check_hook(command, dirty)
-    check(f"{label} is parsed, not refused", "could not safely parse" not in err, f"stderr={err.strip()[:160]}")
+    check(
+        f"{label} is parsed, not refused",
+        "could not safely parse" not in err,
+        f"stderr={err.strip()[:160]}",
+    )
     check(f"{label} still scans the staged credential", rc == 2, f"exit={rc}")
 
 rc, _ = check_hook("git commit -q -m docs", clean)
@@ -1995,15 +3621,30 @@ for label, command in (
     ("an unknown flag", "git commit --not-a-real-flag -m x"),
 ):
     rc, err = check_hook(command, dirty)
-    check(f"{label} is still refused", rc == 2 and "could not safely parse" in err, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label} is still refused",
+        rc == 2 and "could not safely parse" in err,
+        f"exit={rc} stderr={err.strip()[:160]}",
+    )
 
 # Working-tree diffs must not invoke repository-configured clean filters. The
 # guard blocks these commit forms before content inspection instead.
-filter_all_repo = repo({".gitattributes": "tracked.txt filter=marker\n", "tracked.txt": "clean\n"})
+filter_all_repo = repo(
+    {".gitattributes": "tracked.txt filter=marker\n", "tracked.txt": "clean\n"}
+)
 commit_seed(filter_all_repo)
-filter_all_command, filter_all_marker = marker_command(filter_all_repo, "commit-all-clean-filter")
+filter_all_command, filter_all_marker = marker_command(
+    filter_all_repo, "commit-all-clean-filter"
+)
 subprocess.run(
-    ["git", "-C", filter_all_repo, "config", "filter.marker.clean", str(filter_all_command)],
+    [
+        "git",
+        "-C",
+        filter_all_repo,
+        "config",
+        "filter.marker.clean",
+        str(filter_all_command),
+    ],
     check=True,
 )
 Path(filter_all_repo, "tracked.txt").write_text(f"{GITHUB}\n")
@@ -2011,17 +3652,30 @@ rc, _ = check_hook("git commit -am x", filter_all_repo)
 check("git commit -a blocks an active clean filter", rc == 2, f"exit={rc}")
 check("git commit -a does not execute the clean filter", not filter_all_marker.exists())
 
-filter_path_repo = repo({".gitattributes": "tracked.txt filter=marker\n", "tracked.txt": "clean\n"})
+filter_path_repo = repo(
+    {".gitattributes": "tracked.txt filter=marker\n", "tracked.txt": "clean\n"}
+)
 commit_seed(filter_path_repo)
-filter_path_command, filter_path_marker = marker_command(filter_path_repo, "pathspec-clean-filter")
+filter_path_command, filter_path_marker = marker_command(
+    filter_path_repo, "pathspec-clean-filter"
+)
 subprocess.run(
-    ["git", "-C", filter_path_repo, "config", "filter.marker.clean", str(filter_path_command)],
+    [
+        "git",
+        "-C",
+        filter_path_repo,
+        "config",
+        "filter.marker.clean",
+        str(filter_path_command),
+    ],
     check=True,
 )
 Path(filter_path_repo, "tracked.txt").write_text(f"{GITHUB}\n")
 rc, _ = check_hook("git commit tracked.txt -m x", filter_path_repo)
 check("pathspec commit blocks an active clean filter", rc == 2, f"exit={rc}")
-check("pathspec commit does not execute the clean filter", not filter_path_marker.exists())
+check(
+    "pathspec commit does not execute the clean filter", not filter_path_marker.exists()
+)
 
 # Attribute inspection must stay bounded as candidate counts grow. A PATH shim
 # observes the real hook-to-Git process boundary and forwards every invocation.
@@ -2047,9 +3701,15 @@ with tempfile.TemporaryDirectory() as wrapper_dir:
     wrapper_env = dict(os.environ)
     wrapper_env["PATH"] = wrapper_dir + os.pathsep + wrapper_env["PATH"]
     rc, _ = check_hook("git commit -am x", batch_repo, env=wrapper_env)
-    check_attr_calls = count_file.read_text().splitlines() if count_file.exists() else []
+    check_attr_calls = (
+        count_file.read_text().splitlines() if count_file.exists() else []
+    )
 check("multiple candidates still block a credential", rc == 2, f"exit={rc}")
-check("multiple candidates use one batch attribute query", len(check_attr_calls) == 1, f"calls={len(check_attr_calls)}")
+check(
+    "multiple candidates use one batch attribute query",
+    len(check_attr_calls) == 1,
+    f"calls={len(check_attr_calls)}",
+)
 
 # A parent-only signal must interrupt the hook's wait, reap the attribute child,
 # and remove both hook-owned temporary files within the hook timeout.
@@ -2076,7 +3736,9 @@ with tempfile.TemporaryDirectory() as wrapper_dir, tempfile.TemporaryDirectory()
     wrapper_env = dict(os.environ)
     wrapper_env["PATH"] = wrapper_dir + os.pathsep + wrapper_env["PATH"]
     wrapper_env["TMPDIR"] = hook_tmpdir
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git commit -am x"}})
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "git commit -am x"}}
+    )
     proc = subprocess.Popen(
         ["/bin/bash", HOOK],
         stdin=subprocess.PIPE,
@@ -2122,7 +3784,11 @@ with tempfile.TemporaryDirectory() as wrapper_dir, tempfile.TemporaryDirectory()
 check("termination reaches attribute inspection", reached_attribute_query)
 check("parent-only SIGTERM exits the hook promptly", parent_exited)
 check("parent-only SIGTERM reaps the attribute child", not child_alive)
-check("termination removes candidate and attribute temp files", not leftovers, f"leftovers={len(leftovers)}")
+check(
+    "termination removes candidate and attribute temp files",
+    not leftovers,
+    f"leftovers={len(leftovers)}",
+)
 
 # `commit -a` includes unstaged modifications to tracked files.
 auto_repo = repo({"tracked.txt": "clean\n"})
@@ -2152,7 +3818,9 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("empty stdin", ""),
 ):
-    proc = subprocess.run(["/bin/bash", HOOK], input=payload, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["/bin/bash", HOOK], input=payload, capture_output=True, text=True
+    )
     check(f"fail-open: {label}", proc.returncode == 0, f"exit={proc.returncode}")
 
 # --- not a git repository at all --------------------------------------------
@@ -2161,7 +3829,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("outside a repository passes", rc == 0, f"exit={rc}")
 
 DISABLE_VAR = "CC_GUARD_DISABLE_STAGED_SECRET"
-BLOCKING = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}})
+BLOCKING = json.dumps(
+    {"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}
+)
 SAFE = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls -la /tmp"}})
 dirty = repo({"config.txt": f"{GITHUB}\n"})
 

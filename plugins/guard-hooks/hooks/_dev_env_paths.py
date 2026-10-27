@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
 """Match operator-designated development paths; never read dotenv contents."""
+
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import stat
 import sys
+from pathlib import Path
 
-ENV = re.compile(r'''(^|[/\s"'=])(\.env(?:\.[A-Za-z0-9-]+)*)(?=[^A-Za-z0-9_.-]|$)''', re.I)
+ENV = re.compile(
+    r"""(^|[/\s"'=])(\.env(?:\.[A-Za-z0-9-]+)*)(?=[^A-Za-z0-9_.-]|$)""", re.I
+)
 NAME = re.compile(r"\.env(?:\.[A-Za-z0-9-]+)*", re.I)
-TEMPLATES = {".env.example", ".env.sample", ".env.template", ".env.dist", ".env.default", ".env.defaults"}
-UNSAFE = re.compile(r'''[\x00-\x1f\x7f*?\[\]{}$`\\;|&<>()='"^#~]''')
+TEMPLATES = {
+    ".env.example",
+    ".env.sample",
+    ".env.template",
+    ".env.dist",
+    ".env.default",
+    ".env.defaults",
+}
+UNSAFE = re.compile(r"""[\x00-\x1f\x7f*?\[\]{}$`\\;|&<>()='"^#~]""")
 TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "Grep", "Glob"}
 
 
@@ -20,9 +30,15 @@ def references(text):
 
 
 def literal_path(value):
-    return (isinstance(value, str) and value.startswith("/") and not value.startswith("//")
-            and os.path.normpath(value) == value and not UNSAFE.search(value)
-            and NAME.fullmatch(Path(value).name) and Path(value).name.lower() not in TEMPLATES)
+    return (
+        isinstance(value, str)
+        and value.startswith("/")
+        and not value.startswith("//")
+        and os.path.normpath(value) == value
+        and not UNSAFE.search(value)
+        and NAME.fullmatch(Path(value).name)
+        and Path(value).name.lower() not in TEMPLATES
+    )
 
 
 def no_symlinks(value, directory=False):
@@ -68,8 +84,13 @@ def should_abstain(data):
             return False
         if not value.startswith("/"):
             cwd = data.get("cwd", "")
-            if (not isinstance(cwd, str) or not cwd.startswith("/") or cwd.startswith("//")
-                    or os.path.normpath(cwd) != cwd or not no_symlinks(cwd, directory=True)):
+            if (
+                not isinstance(cwd, str)
+                or not cwd.startswith("/")
+                or cwd.startswith("//")
+                or os.path.normpath(cwd) != cwd
+                or not no_symlinks(cwd, directory=True)
+            ):
                 return False
             value = os.path.normpath(os.path.join(cwd, value))
         if value not in allowed:

@@ -67,33 +67,76 @@ def check(label, condition, detail=""):
 if HAVE_GITLEAKS:
     # --- the case the hook exists for: a token in stdout is replaced ---
     code, out, err = run(bash_payload(f"build ok\nGITHUB_TOKEN={PAT}\nplain line\n"))
-    check("exit stays 0 (rewrites, never blocks)", code == 0, f"exit={code} stderr={err[:120]}")
-    check("emits updatedToolOutput", out is not None and "updatedToolOutput" in out["hookSpecificOutput"], f"out={out}")
+    check(
+        "exit stays 0 (rewrites, never blocks)",
+        code == 0,
+        f"exit={code} stderr={err[:120]}",
+    )
+    check(
+        "emits updatedToolOutput",
+        out is not None and "updatedToolOutput" in out["hookSpecificOutput"],
+        f"out={out}",
+    )
     updated = out["hookSpecificOutput"]["updatedToolOutput"] if out else {}
     check("token gone from stdout", PAT not in updated.get("stdout", PAT))
-    check("[REDACTED] marks the spot", "GITHUB_TOKEN=[REDACTED]" in updated.get("stdout", ""))
-    check("untouched lines survive", "build ok\n" in updated.get("stdout", "") and "plain line\n" in updated.get("stdout", ""))
-    check("other tool_response fields preserved", updated.get("interrupted") is False and updated.get("isImage") is False)
+    check(
+        "[REDACTED] marks the spot",
+        "GITHUB_TOKEN=[REDACTED]" in updated.get("stdout", ""),
+    )
+    check(
+        "untouched lines survive",
+        "build ok\n" in updated.get("stdout", "")
+        and "plain line\n" in updated.get("stdout", ""),
+    )
+    check(
+        "other tool_response fields preserved",
+        updated.get("interrupted") is False and updated.get("isImage") is False,
+    )
     check(
         "additionalContext names the count",
-        "masked 1 credential-shaped value" in out["hookSpecificOutput"].get("additionalContext", "") if out else False,
+        (
+            "masked 1 credential-shaped value"
+            in out["hookSpecificOutput"].get("additionalContext", "")
+            if out
+            else False
+        ),
     )
 
     # --- stderr is scanned and rewritten too ---
     _, out, _ = run(bash_payload("fine\n", f"warn: token {PAT} expired\n"))
     updated = out["hookSpecificOutput"]["updatedToolOutput"] if out else {}
-    check("stderr masked", PAT not in updated.get("stderr", PAT) and "[REDACTED]" in updated.get("stderr", ""))
+    check(
+        "stderr masked",
+        PAT not in updated.get("stderr", PAT)
+        and "[REDACTED]" in updated.get("stderr", ""),
+    )
     check("stdout left as-is when clean", updated.get("stdout") == "fine\n")
 
     # --- two different secrets, each replaced everywhere it appears ---
     _, out, _ = run(bash_payload(f"{AWS}\n{PAT}\nagain {PAT}\n"))
     s = out["hookSpecificOutput"]["updatedToolOutput"]["stdout"] if out else ""
-    check("every occurrence of every secret masked", PAT not in s and AWS.split("=")[1] not in s and s.count("[REDACTED]") == 3, f"stdout={s!r}")
-    check("count reflects distinct secrets", "masked 2 credential-shaped" in out["hookSpecificOutput"]["additionalContext"] if out else False)
+    check(
+        "every occurrence of every secret masked",
+        PAT not in s and AWS.split("=")[1] not in s and s.count("[REDACTED]") == 3,
+        f"stdout={s!r}",
+    )
+    check(
+        "count reflects distinct secrets",
+        (
+            "masked 2 credential-shaped"
+            in out["hookSpecificOutput"]["additionalContext"]
+            if out
+            else False
+        ),
+    )
 
     # --- clean output: no rewrite, no noise ---
     code, out, err = run(bash_payload("ordinary log line\n" * 1500))
-    check("clean output → silent exit 0", code == 0 and out is None and not err, f"exit={code} out={out}")
+    check(
+        "clean output → silent exit 0",
+        code == 0 and out is None and not err,
+        f"exit={code} out={out}",
+    )
 
     # --- shapes that look like secrets but are not ---
     sha_lines = "\n".join(f"{i:040x} feat: change {i}" for i in range(20))
@@ -105,7 +148,11 @@ if HAVE_GITLEAKS:
     check("output over 2 MB passes through", code == 0 and out is None)
 else:
     code, out, err = run(bash_payload(f"GITHUB_TOKEN={PAT}\n"))
-    check("gitleaks absent → silent no-op", code == 0 and out is None and not err, f"exit={code} out={out}")
+    check(
+        "gitleaks absent → silent no-op",
+        code == 0 and out is None and not err,
+        f"exit={code} out={out}",
+    )
 
 # --- gitleaks missing at runtime must never surface as a hook error ---
 with tempfile.TemporaryDirectory() as bindir:
@@ -114,7 +161,11 @@ with tempfile.TemporaryDirectory() as bindir:
         if src:
             os.symlink(src, os.path.join(bindir, tool))
     code, out, err = run(bash_payload(f"GITHUB_TOKEN={PAT}\n"), {"PATH": bindir})
-    check("no gitleaks on PATH → silent exit 0", code == 0 and out is None and not err, f"exit={code} err={err[:120]}")
+    check(
+        "no gitleaks on PATH → silent exit 0",
+        code == 0 and out is None and not err,
+        f"exit={code} err={err[:120]}",
+    )
 
 # --- fail-open contract: never rewrite or error on input the hook cannot use ---
 for label, payload in (
@@ -122,10 +173,17 @@ for label, payload in (
     ("malformed", "not json at all"),
     ("tool_response is a string", json.dumps({"tool_response": f"x {PAT}"})),
     ("stdout is not a string", json.dumps({"tool_response": {"stdout": 123}})),
-    ("no tool_response", json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}})),
+    (
+        "no tool_response",
+        json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
+    ),
 ):
     code, out, err = run(payload)
-    check(f"fail-open: {label}", code == 0 and out is None and not err, f"exit={code} out={out} err={err[:100]}")
+    check(
+        f"fail-open: {label}",
+        code == 0 and out is None and not err,
+        f"exit={code} out={out} err={err[:100]}",
+    )
 
 # --- opt-out, and the drain-before-check contract ---
 code, out, _ = run(bash_payload(f"GITHUB_TOKEN={PAT}\n"), {DISABLE: "1"})
