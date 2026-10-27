@@ -8,11 +8,5 @@
   "homepage": "https://github.com/AndrewDongminYoo/cc-agents-kit",
   "repository": "https://github.com/AndrewDongminYoo/cc-agents-kit",
   "license": "Apache-2.0",
-  "keywords": [
-    "hooks",
-    "safety",
-    "guardrails",
-    "shell",
-    "zsh"
-  ]
+  "keywords": ["hooks", "safety", "guardrails", "shell", "zsh"]
 }

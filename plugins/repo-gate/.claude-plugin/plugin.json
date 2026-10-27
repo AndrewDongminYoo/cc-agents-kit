@@ -8,12 +8,6 @@
   "homepage": "https://github.com/AndrewDongminYoo/cc-agents-kit",
   "repository": "https://github.com/AndrewDongminYoo/cc-agents-kit",
   "license": "Apache-2.0",
-  "keywords": [
-    "ci",
-    "commits",
-    "linting",
-    "security",
-    "trunk"
-  ],
+  "keywords": ["ci", "commits", "linting", "security", "trunk"],
   "skills": "./skills"
 }
