@@ -52,9 +52,9 @@ Two placements are load-bearing:
 
 Enforced by the suites; break one and the corresponding case fails.
 
-- **Fail open.** Empty, malformed, or key-less input exits `0` with no output. `jq` is parsed with `|| true`, so a machine without `jq` makes every guard stop guarding *silently* — that is deliberate, and it is why `jq` is documented as a hard prerequisite rather than checked at runtime.
+- **Fail open.** Empty, malformed, or key-less input exits `0` with no output. `jq` is parsed with `|| true`, so a machine without `jq` makes every guard stop guarding _silently_ — that is deliberate, and it is why `jq` is documented as a hard prerequisite rather than checked at runtime.
 - **`PreToolUse` guards exit `2` to block. `PostToolUse` hooks never block** — they emit `hookSpecificOutput.additionalContext` (a warning) or `hookSpecificOutput.updatedToolOutput` (`output-secret-mask` rewriting a Bash result) and exit `0`.
-- **The `CC_GUARD_DISABLE_*` opt-out is checked *after* `HOOK_INPUT=$(cat ...)`, never before.** A `Write` payload carries the whole file content, so exiting before draining stdin leaves the harness writing to a closed pipe and surfaces a hook error at exactly the moment the user asked for the hook to be off. Pinned by a 200KB-payload case in `hooks/_optout.py`, shared by every suite, that runs the hook behind a real pipe and reads the writer's `PIPESTATUS` — Python's `subprocess` swallows `BrokenPipeError`, so an `input=`-style test cannot see this bug.
+- **The `CC_GUARD_DISABLE_*` opt-out is checked _after_ `HOOK_INPUT=$(cat ...)`, never before.** A `Write` payload carries the whole file content, so exiting before draining stdin leaves the harness writing to a closed pipe and surfaces a hook error at exactly the moment the user asked for the hook to be off. Pinned by a 200KB-payload case in `hooks/_optout.py`, shared by every suite, that runs the hook behind a real pipe and reads the writer's `PIPESTATUS` — Python's `subprocess` swallows `BrokenPipeError`, so an `input=`-style test cannot see this bug.
 - Scripts must parse under macOS's system `/bin/bash` 3.2, not just a newer bash on `PATH`.
 
 ## Verifying a change
@@ -72,7 +72,7 @@ Before cutting anything, compare `git tag` against `gh release list` and finish 
 ## Working in this repo, the guards are usually live
 
 The same hooks are typically installed in the developing session's own `~/.claude/settings.json`, so they inspect the tool calls used to edit them.
-Writing documentation or fixtures that *mention* a blocked shape — a download-and-execute pipeline, `rm -rf` on the home directory, a secrets filename — gets blocked when the text passes through `Bash`.
+Writing documentation or fixtures that _mention_ a blocked shape — a download-and-execute pipeline, `rm -rf` on the home directory, a secrets filename — gets blocked when the text passes through `Bash`.
 Submit synthetic test/documentation content through a file editor when appropriate, but never disguise a denied access or switch tools to defeat it. Operator-designated development paths and their value-access tradeoff are documented in `docs/environment-access.md`; tests must use synthetic inputs, and agents must not register live paths themselves.
 
 ## Provenance

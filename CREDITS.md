@@ -11,43 +11,43 @@ Column meanings:
 
 ## guard-hooks
 
-| Component | Upstream | Licence | Adaptation |
-| --- | --- | --- | --- |
-| `dangerous-command-guard.sh` | original | Apache-2.0 | Written for this repository. |
-| `secrets-path-guard.sh` | original | Apache-2.0 | Written for this repository. |
-| `zsh-quoting-guard.sh` | original | Apache-2.0 | Written for this repository. |
-| `pathless-rewriter-guard.sh` | original | Apache-2.0 | Written for this repository. |
-| `staged-secret-guard.sh` | original | Apache-2.0 | Written for this repository. |
-| `lockfile-drift-check.sh` | original | Apache-2.0 | Written for this repository. |
-| `shellcheck-on-edit.sh` | original | Apache-2.0 | Written for this repository. |
-| `output-secret-mask.sh` | original | Apache-2.0 | Written for this repository. The idea — rewrite a `PostToolUse` Bash result instead of blocking it — was seen in [JeongJaeSoon/agent-guard](https://github.com/JeongJaeSoon/agent-guard) (MIT); no text or code is shared. |
-| `security-review-findings.sh` | original | Apache-2.0 | Written for this repository. |
+| Component                     | Upstream | Licence    | Adaptation                                                                                                                                                                                                                 |
+| ----------------------------- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dangerous-command-guard.sh`  | original | Apache-2.0 | Written for this repository.                                                                                                                                                                                               |
+| `secrets-path-guard.sh`       | original | Apache-2.0 | Written for this repository.                                                                                                                                                                                               |
+| `zsh-quoting-guard.sh`        | original | Apache-2.0 | Written for this repository.                                                                                                                                                                                               |
+| `pathless-rewriter-guard.sh`  | original | Apache-2.0 | Written for this repository.                                                                                                                                                                                               |
+| `staged-secret-guard.sh`      | original | Apache-2.0 | Written for this repository.                                                                                                                                                                                               |
+| `lockfile-drift-check.sh`     | original | Apache-2.0 | Written for this repository.                                                                                                                                                                                               |
+| `shellcheck-on-edit.sh`       | original | Apache-2.0 | Written for this repository.                                                                                                                                                                                               |
+| `output-secret-mask.sh`       | original | Apache-2.0 | Written for this repository. The idea — rewrite a `PostToolUse` Bash result instead of blocking it — was seen in [JeongJaeSoon/agent-guard](https://github.com/JeongJaeSoon/agent-guard) (MIT); no text or code is shared. |
+| `security-review-findings.sh` | original | Apache-2.0 | Written for this repository.                                                                                                                                                                                               |
 
 ## context-handoff
 
-| Component | Upstream | Licence | Adaptation |
-| --- | --- | --- | --- |
-| `handoff` | original | Apache-2.0 | Written for this repository. Conceptually in the same family as the session-continuity skills in [oh-my-opencode](https://github.com/alvinunreal/oh-my-opencode-slim); no text is shared. |
-| `session-export` | original | Apache-2.0 | Written for this repository. |
-| `session-to-md` | original | Apache-2.0 | Written for this repository. The `session-export` skill runs this `bin/` helper. |
-| `log-it` | original | Apache-2.0 | Written for this repository. |
-| `wayfinder` | [mattpocock/skills](https://github.com/mattpocock/skills), `skills/engineering/wayfinder` | MIT | Rewritten around a `docs/plans` ticket substrate. 14% of the shipped file is verbatim upstream, measured line-wise. |
-| `context-budget` | [affaan-m/ecc](https://github.com/affaan-m/ecc), `skills/context-budget` | MIT | **Largely upstream** — 87% of the shipped file is verbatim, measured line-wise. Included as an MIT redistribution rather than as original work. |
-| `config-gc` | [affaan-m/ecc](https://github.com/affaan-m/ecc), `skills/config-gc` | MIT | **Substantially upstream** — 54% of the shipped file is verbatim, measured line-wise. |
+| Component        | Upstream                                                                                  | Licence    | Adaptation                                                                                                                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handoff`        | original                                                                                  | Apache-2.0 | Written for this repository. Conceptually in the same family as the session-continuity skills in [oh-my-opencode](https://github.com/alvinunreal/oh-my-opencode-slim); no text is shared. |
+| `session-export` | original                                                                                  | Apache-2.0 | Written for this repository.                                                                                                                                                              |
+| `session-to-md`  | original                                                                                  | Apache-2.0 | Written for this repository. The `session-export` skill runs this `bin/` helper.                                                                                                          |
+| `log-it`         | original                                                                                  | Apache-2.0 | Written for this repository.                                                                                                                                                              |
+| `wayfinder`      | [mattpocock/skills](https://github.com/mattpocock/skills), `skills/engineering/wayfinder` | MIT        | Rewritten around a `docs/plans` ticket substrate. 14% of the shipped file is verbatim upstream, measured line-wise.                                                                       |
+| `context-budget` | [affaan-m/ecc](https://github.com/affaan-m/ecc), `skills/context-budget`                  | MIT        | **Largely upstream** — 87% of the shipped file is verbatim, measured line-wise. Included as an MIT redistribution rather than as original work.                                           |
+| `config-gc`      | [affaan-m/ecc](https://github.com/affaan-m/ecc), `skills/config-gc`                       | MIT        | **Substantially upstream** — 54% of the shipped file is verbatim, measured line-wise.                                                                                                     |
 
 ## repo-gate
 
-| Component | Upstream | Licence | Adaptation |
-| --- | --- | --- | --- |
-| `setup-trunk` | original | Apache-2.0 | Written for this repository. |
-| `ci-babysit` | original | Apache-2.0 | Written for this repository. |
-| `semantic-commit` | original | Apache-2.0 | Written for this repository. |
+| Component                 | Upstream | Licence    | Adaptation                   |
+| ------------------------- | -------- | ---------- | ---------------------------- |
+| `setup-trunk`             | original | Apache-2.0 | Written for this repository. |
+| `ci-babysit`              | original | Apache-2.0 | Written for this repository. |
+| `semantic-commit`         | original | Apache-2.0 | Written for this repository. |
 | `fix-osv-vulnerabilities` | original | Apache-2.0 | Written for this repository. |
-| `cspell-triage` | original | Apache-2.0 | Written for this repository. |
-| `find-trunk-repos` | original | Apache-2.0 | Written for this repository. |
-| `cspell-dict-report` | original | Apache-2.0 | Written for this repository. |
-| `markdownlint-triage` | original | Apache-2.0 | Written for this repository. |
-| `markdownlint-summary` | original | Apache-2.0 | Written for this repository. |
+| `cspell-triage`           | original | Apache-2.0 | Written for this repository. |
+| `find-trunk-repos`        | original | Apache-2.0 | Written for this repository. |
+| `cspell-dict-report`      | original | Apache-2.0 | Written for this repository. |
+| `markdownlint-triage`     | original | Apache-2.0 | Written for this repository. |
+| `markdownlint-summary`    | original | Apache-2.0 | Written for this repository. |
 
 ## MIT notices
 

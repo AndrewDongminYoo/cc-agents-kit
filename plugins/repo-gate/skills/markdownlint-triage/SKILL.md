@@ -96,13 +96,13 @@ The baseline that `setup-trunk` seeds already disables the formatting rules Pret
 The table below covers only the content rules that baseline leaves on.
 For flexible notes or prompts, consider this selective policy only when the document requirements support it:
 
-| Rules | Decision criteria |
-| --- | --- |
-| MD026, MD036, MD041 | Consider exceptions when punctuation, emphasized labels, or documents without an opening H1 are intentional. |
-| MD033, MD034 | Consider exceptions when the renderer accepts intentional HTML or bare URLs. Retain stricter rules when publishing requirements need them. |
-| MD024 | Consider `siblings_only: true` when repeated headings under different parent sections are valid. Duplicates under the same parent still fire and need a heading change. |
-| MD001, MD025 | Retain hierarchy checks when the documents require ordered heading levels and one document title. |
-| MD037, MD038, MD040, MD056 | Retain checks for malformed emphasis, code-span spacing, missing fence languages, and table column mismatches. Review the source before changing it. |
+| Rules                      | Decision criteria                                                                                                                                                       |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MD026, MD036, MD041        | Consider exceptions when punctuation, emphasized labels, or documents without an opening H1 are intentional.                                                            |
+| MD033, MD034               | Consider exceptions when the renderer accepts intentional HTML or bare URLs. Retain stricter rules when publishing requirements need them.                              |
+| MD024                      | Consider `siblings_only: true` when repeated headings under different parent sections are valid. Duplicates under the same parent still fire and need a heading change. |
+| MD001, MD025               | Retain hierarchy checks when the documents require ordered heading levels and one document title.                                                                       |
+| MD037, MD038, MD040, MD056 | Retain checks for malformed emphasis, code-span spacing, missing fence languages, and table column mismatches. Review the source before changing it.                    |
 
 Do not replace the whole configuration with this table or disable unrelated rules that already provide useful coverage.
 Apply approved exceptions to the configuration actually loaded by the runner.
@@ -126,12 +126,12 @@ For ordinary documents, preserve meaning, frontmatter, links, examples, and data
 
 Classify fence languages before workers start, not in a later audit; reclassifying afterwards costs a second pass over every fence.
 
-| Block content | Language |
-| --- | --- |
-| Slash-command lists, CLI output, shell transcripts, status dumps | `log` |
-| Shell commands meant to be run | `bash` |
-| Tool-call syntax, or config and data in a real syntax | that language: `python`, `dotenv`, `yaml`, `json` |
-| Paths, ASCII structure, pseudocode, prose samples | `plaintext` |
+| Block content                                                    | Language                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------- |
+| Slash-command lists, CLI output, shell transcripts, status dumps | `log`                                             |
+| Shell commands meant to be run                                   | `bash`                                            |
+| Tool-call syntax, or config and data in a real syntax            | that language: `python`, `dotenv`, `yaml`, `json` |
+| Paths, ASCII structure, pseudocode, prose samples                | `plaintext`                                       |
 
 Keep mechanical autofixes limited to approved files or filters and review their diff.
 Do not run a repository-wide formatter as a side effect of fixing Markdownlint findings.

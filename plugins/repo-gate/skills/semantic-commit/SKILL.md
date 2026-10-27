@@ -123,6 +123,7 @@ For each group in order:
    Anything else, such as new content, an executable bit, or a new or deleted file, was written by a parallel writer: the user in another editor, another agent session, or a tool.
    The index is the only way such an edit reaches a commit, so this one comparison covers it however it got there; stop and ask, and do not stage, stash, or restore it.
    Then record the reviewed tree: `reviewed=$(git write-tree)`.
+
 4. Run the project's verification commands against the isolated candidate (see Verification below).
 5. Fix any issues before committing.
    Re-run the full-index verification after each fix.
@@ -195,17 +196,18 @@ Rules:
   - `git -C <scratch>/candidate write-tree` equals `$reviewed` from Step 4.3 (no rewrite the verifier staged itself), and
   - `git -C <scratch>/candidate ls-files --others --exclude-standard` lists nothing (no new non-ignored file that the commit would lack).
     Ignored outputs are out of scope: the candidate holds only `HEAD` plus the staged diff, so anything a verifier writes to an ignored path is derived from the candidate, and the repository has declared that path as never committed.
-  Also confirm that `git write-tree` in the main checkout still equals `$reviewed`; if it does not, a parallel writer changed the main index during verification, so stop and ask as Step 4.3 requires, whatever the candidate shows.
-  Otherwise, any candidate mismatch means a verifier changed the candidate only, so the main index no longer matches what passed: carry the change into the main checkout, stage it, and verify again.
-  Then commit from the main checkout as usual.
-  Run `git worktree remove --force <scratch>/candidate` whenever a verification attempt ends, whether it passed, failed, or found a mismatch, and build a fresh candidate for the next attempt: a second `git worktree add` on the existing path fails with `already exists`, and `--force` is required because `apply --index` always leaves the candidate with staged changes.
-  The worktree holds `HEAD` plus the staged diff and nothing else, so an untracked file that belongs to a later group stays out of test discovery and out of the compiler.
-  Before building the patch, confirm that the index contains only the planned group.
-  A stash resets the files in the shared tree, which other writers are still using.
-  If the user saves a file there while it is reset, the save lands on the reverted copy, `git stash apply` refuses to overwrite it, and another session can drop the stash before you apply it (observed 2026-10-12).
-  When a check truly cannot run outside this checkout and a stash is unavoidable, push it with a unique message (`git stash push -m semantic-commit-<timestamp> ...`) and find its commit by that message in `git stash list --format='%H %gs'`, not by position.
-  Another session can push a stash between your push and your lookup, and then `stash@{0}` names its entry instead of yours; the message still names yours.
-  Recover through that SHA.
+    Also confirm that `git write-tree` in the main checkout still equals `$reviewed`; if it does not, a parallel writer changed the main index during verification, so stop and ask as Step 4.3 requires, whatever the candidate shows.
+    Otherwise, any candidate mismatch means a verifier changed the candidate only, so the main index no longer matches what passed: carry the change into the main checkout, stage it, and verify again.
+    Then commit from the main checkout as usual.
+    Run `git worktree remove --force <scratch>/candidate` whenever a verification attempt ends, whether it passed, failed, or found a mismatch, and build a fresh candidate for the next attempt: a second `git worktree add` on the existing path fails with `already exists`, and `--force` is required because `apply --index` always leaves the candidate with staged changes.
+    The worktree holds `HEAD` plus the staged diff and nothing else, so an untracked file that belongs to a later group stays out of test discovery and out of the compiler.
+    Before building the patch, confirm that the index contains only the planned group.
+    A stash resets the files in the shared tree, which other writers are still using.
+    If the user saves a file there while it is reset, the save lands on the reverted copy, `git stash apply` refuses to overwrite it, and another session can drop the stash before you apply it (observed 2026-10-12).
+    When a check truly cannot run outside this checkout and a stash is unavoidable, push it with a unique message (`git stash push -m semantic-commit-<timestamp> ...`) and find its commit by that message in `git stash list --format='%H %gs'`, not by position.
+    Another session can push a stash between your push and your lookup, and then `stash@{0}` names its entry instead of yours; the message still names yours.
+    Recover through that SHA.
+
 - Do not blindly re-`git add` a partially staged file after a formatter runs — that would pull the withheld hunks back in.
   Use the formatter's `--check` mode as the gate for such files, or re-split from scratch.
 

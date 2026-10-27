@@ -21,7 +21,7 @@ An entry pointing at a missing directory breaks installation for everyone, so ad
 ## Adding a hook
 
 1. Read the hook JSON from stdin and **fail open** — empty, malformed, or key-less input must exit `0` with no output. A guard that errors on unrelated tool calls gets uninstalled.
-2. Give it an opt-out: `CC_GUARD_DISABLE_<NAME>=1`, and add it to the README table. Check it *after* stdin is drained, never before — a `Write` payload carries the whole file content, so exiting early leaves the harness writing to a closed pipe and surfaces a hook error exactly when the user asked for the hook to be off.
+2. Give it an opt-out: `CC_GUARD_DISABLE_<NAME>=1`, and add it to the README table. Check it _after_ stdin is drained, never before — a `Write` payload carries the whole file content, so exiting early leaves the harness writing to a closed pipe and surfaces a hook error exactly when the user asked for the hook to be off.
 3. `PreToolUse` guards exit `2` to block. `PostToolUse` hooks must never block — emit `hookSpecificOutput.additionalContext` (or `hookSpecificOutput.updatedToolOutput` to rewrite a Bash result, as `output-secret-mask` does) and exit `0`.
 4. Write the regression suite next to the script. It resolves the hook via `Path(__file__).resolve().with_name(...)` and imports `_optout` as a plain sibling module, so all three files stay in the same directory.
 5. Cover the opt-out with `_optout.contract(HOOK, DISABLE_VAR, BLOCKING, SAFE)` for a hook that blocks, or `_optout.drain(HOOK, DISABLE_VAR)` for one that only warns and needs its own cases. Do not re-copy the machinery — it was byte-identical in seven suites before 0.3.6 collapsed it.
@@ -88,7 +88,7 @@ git show vPREV:plugins/<plugin>/.claude-plugin/plugin.json
 The v0.3.2 notes shipped calling a plugin "unchanged" that had moved a patch version, and had to be corrected after publishing.
 
 After publishing, verify the new version actually loads rather than assuming it did: `claude plugin update <plugin>@cc-agents-kit`, start a fresh session, and confirm a hook that exists only in the new version fires with `${CLAUDE_PLUGIN_ROOT}` in its error.
-Pick a probe that is harmless when it is *not* blocked — `prettier --write` fails on its own without a formatter installed, whereas `jsonsort` would quietly rewrite the tree.
+Pick a probe that is harmless when it is _not_ blocked — `prettier --write` fails on its own without a formatter installed, whereas `jsonsort` would quietly rewrite the tree.
 
 ## Commits
 

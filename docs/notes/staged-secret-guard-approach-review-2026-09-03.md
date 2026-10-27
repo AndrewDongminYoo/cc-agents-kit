@@ -14,21 +14,21 @@ Thirteen ways to reach a commit, each run against the installed 0.2.6 and
 against the PR #9 branch, in a repository with a credential staged.
 `ALLOWED` means the commit would proceed with the credential unscanned.
 
-| shape | 0.2.6 | PR #9 |
-| --- | --- | --- |
-| `git commit -m x` | refused | refused |
-| `git -c alias.ci=commit ci -m x` | refused | refused |
+| shape                                                   | 0.2.6   | PR #9   |
+| ------------------------------------------------------- | ------- | ------- |
+| `git commit -m x`                                       | refused | refused |
+| `git -c alias.ci=commit ci -m x`                        | refused | refused |
 | `autocommit`, a zsh function in the operator's `.zshrc` | ALLOWED | ALLOWED |
-| `bash script.sh` | ALLOWED | ALLOWED |
-| `sh -c "git commit -m x"` | ALLOWED | ALLOWED |
-| `eval "git commit -m x"` | ALLOWED | ALLOWED |
-| `g=git; $g commit -m x` | ALLOWED | ALLOWED |
-| `GC() { git "$@"; }; GC commit -m x` | ALLOWED | ALLOWED |
-| `git ci -m x`, alias from a config file | ALLOWED | ALLOWED |
-| `xargs git commit -m x` | ALLOWED | ALLOWED |
-| `find . -exec git commit -m x \;` | ALLOWED | ALLOWED |
-| `make commit` | ALLOWED | ALLOWED |
-| `npm run release` | ALLOWED | ALLOWED |
+| `bash script.sh`                                        | ALLOWED | ALLOWED |
+| `sh -c "git commit -m x"`                               | ALLOWED | ALLOWED |
+| `eval "git commit -m x"`                                | ALLOWED | ALLOWED |
+| `g=git; $g commit -m x`                                 | ALLOWED | ALLOWED |
+| `GC() { git "$@"; }; GC commit -m x`                    | ALLOWED | ALLOWED |
+| `git ci -m x`, alias from a config file                 | ALLOWED | ALLOWED |
+| `xargs git commit -m x`                                 | ALLOWED | ALLOWED |
+| `find . -exec git commit -m x \;`                       | ALLOWED | ALLOWED |
+| `make commit`                                           | ALLOWED | ALLOWED |
+| `npm run release`                                       | ALLOWED | ALLOWED |
 
 Two of thirteen.
 The guard recognises the command only when it is spelled out literally, and the
@@ -39,13 +39,13 @@ operator's own everyday commit function is among the eleven it cannot see.
 Every refusal in the local transcript archive was paired with the command that
 triggered it, and with what the session did next.
 
-| | |
-| --- | ---: |
-| refusals | 247 |
-| sessions affected | 91 |
-| the blocked command was a real commit | 125 |
+|                                             |     |
+| ------------------------------------------- | --: |
+| refusals                                    | 247 |
+| sessions affected                           |  91 |
+| the blocked command was a real commit       | 125 |
 | the blocked command was not a commit at all | 118 |
-| the next tool call also ran git | 200 |
+| the next tool call also ran git             | 200 |
 
 Across all eight guards in the plugin, this one's parse refusal is the most
 frequent event by a wide margin: 241 refusals over 11 days, against 36 occasions

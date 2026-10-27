@@ -83,11 +83,11 @@ gh run view <run-id> --log-failed
 Classify the failure before acting.
 Log inspection is read-only and is allowed in both authority modes.
 
-| Class         | Examples                                                                          | Action                                                 |
-| ------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Mechanical    | lockfile drift (immutable install), formatting, lint, generated files out of date | Repair in step 3 only with explicit local-repair authority. |
+| Class         | Examples                                                                          | Action                                                        |
+| ------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Mechanical    | lockfile drift (immutable install), formatting, lint, generated files out of date | Repair in step 3 only with explicit local-repair authority.   |
 | Environmental | runner outage, flaky network, cache corruption                                    | Rerun once only with explicit rerun authority, then escalate. |
-| Logic         | failing assertions, type errors, broken behavior                                  | Stop and report — do not auto-patch test expectations  |
+| Logic         | failing assertions, type errors, broken behavior                                  | Stop and report — do not auto-patch test expectations         |
 
 **A run that fails in seconds with an empty `steps` array has not run, and the shape alone does not say why.**
 `gh api repos/{owner}/{repo}/actions/runs/<id>/jobs` shows `steps: []`, and `--log-failed` answers `log not found` because no log exists, so read the annotation on `gh run view <id>` before classifying the failure.

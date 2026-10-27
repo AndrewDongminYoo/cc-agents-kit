@@ -30,11 +30,11 @@ Do not describe the newest transcript as the active session without that evidenc
 
 ## Formats
 
-| Format | Output |
-| --- | --- |
-| `md` | Conversation sections and expandable tool blocks when requested. |
+| Format | Output                                                                                    |
+| ------ | ----------------------------------------------------------------------------------------- |
+| `md`   | Conversation sections and expandable tool blocks when requested.                          |
 | `html` | A standalone report with export counts, tool expansion controls, and a responsive layout. |
-| `json` | Filtered records, metadata, and export diagnostics under `schema_version: 1`. |
+| `json` | Filtered records, metadata, and export diagnostics under `schema_version: 1`.             |
 
 HTML displays message text literally, including Markdown syntax.
 It escapes transcript markup and does not load external resources.

@@ -99,7 +99,7 @@ Verify a specific word rather than guessing:
 cspell trace <word>     # shows every dictionary that has it, and where that dictionary lives
 ```
 
-For a whole lint run rather than one word, `cspell-dict-report` (this plugin's `bin/`, on PATH) traces the list in one process and ranks the unenabled dictionaries by what each one *newly* covers:
+For a whole lint run rather than one word, `cspell-dict-report` (this plugin's `bin/`, on PATH) traces the list in one process and ranks the unenabled dictionaries by what each one _newly_ covers:
 
 ```bash
 cspell lint . --words-only --no-progress --no-summary | cspell-dict-report
@@ -255,6 +255,7 @@ The same split applies to inline directives, which is easy to get wrong:
   After injection, the same gate must fail and its output must name the exact canary token.
   If `cmp` fails, restore the pre-existing diff manually before continuing.
   Never create or delete a file in a source directory to test a spell checker — in a Flutter repo, `lib/main.dart` is the conventional entry point, so both creating and removing it carry meaning far beyond this task, and `rm` in a tracked tree is not a scratch operation.
+
 - **Reading `Files checked: 0` as a clean run.**
   With `useGitignore: true`, a linked worktree (`git worktree add`) that sits inside another repository's working tree can check nothing: `CSpell: Files checked: 0, Issues found: 0`, which reads as a pass.
   The enclosing repository is what matters, not the worktree alone.

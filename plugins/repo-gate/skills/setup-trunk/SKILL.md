@@ -138,16 +138,16 @@ trunk check --all --filter=shellcheck --sample=5
 No linter is mandatory for every repository.
 Choose from the following candidates only when the inspection step finds matching files, dependencies, configuration, or CI behavior:
 
-| Evidence | Candidate linters |
-| --- | --- |
-| GitHub Actions workflows | `actionlint` |
-| Shell scripts | `shellcheck`, optionally `shfmt` when the repository already formats shell |
-| JavaScript or TypeScript manifest and existing config | project-pinned `eslint@SYSTEM`, `prettier` |
-| Python manifest and existing config | `ruff`, `mypy`, or `black` as declared by the project |
-| Markdown or YAML with an established style config | `markdownlint`, `yamllint` |
-| Dependency lockfiles supported by the scanner | `osv-scanner` after verifying the lockfile targets it can interpret |
-| Terraform, Kubernetes, or other IaC files | `checkov` |
-| A repository requirement for committed-secret scanning | `trufflehog` |
+| Evidence                                               | Candidate linters                                                          |
+| ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| GitHub Actions workflows                               | `actionlint`                                                               |
+| Shell scripts                                          | `shellcheck`, optionally `shfmt` when the repository already formats shell |
+| JavaScript or TypeScript manifest and existing config  | project-pinned `eslint@SYSTEM`, `prettier`                                 |
+| Python manifest and existing config                    | `ruff`, `mypy`, or `black` as declared by the project                      |
+| Markdown or YAML with an established style config      | `markdownlint`, `yamllint`                                                 |
+| Dependency lockfiles supported by the scanner          | `osv-scanner` after verifying the lockfile targets it can interpret        |
+| Terraform, Kubernetes, or other IaC files              | `checkov`                                                                  |
+| A repository requirement for committed-secret scanning | `trufflehog`                                                               |
 
 The stack examples below are reference fragments, not bundles to copy wholesale.
 Remove every entry unsupported by the inspected repository and preserve tools already pinned by the project.

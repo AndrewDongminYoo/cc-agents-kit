@@ -259,8 +259,8 @@ If an override was previously set to pin an older version for a GHSA that was "n
 | Trusting a clean `pnpm install` exit code                 | Verify with `pnpm why <pkg> --depth 1` that the resolved version is ≥ patched                     |
 | Assuming the lock file auto-updates                       | Always run `pnpm install --no-frozen-lockfile` after editing overrides                            |
 | Setting override to exact version (`"3.1.4"`)             | Use `"^3.1.4"` — lets pnpm pick latest safe patch                                                 |
-| Adding `IgnoredVulns` before reachability evidence         | Collect the dependency path and affected usage first, then obtain explicit approval               |
-| Fresh-regenerating a lockfile without approval             | Preserve it by default; use an approved isolated regeneration only when needed                    |
+| Adding `IgnoredVulns` before reachability evidence        | Collect the dependency path and affected usage first, then obtain explicit approval               |
+| Fresh-regenerating a lockfile without approval            | Preserve it by default; use an approved isolated regeneration only when needed                    |
 | Leaving stale `[[IgnoredVulns]]` after patching           | Remove the entry when upgrading the override                                                      |
 | Checking latest published version instead of advisory     | Use the GitHub Advisory API — npm dist-tags don't encode CVE fix info                             |
 | Taking the first `vulnerabilities[]` entry in an advisory | Multiple entries = multiple major lines; match the major you are on                               |

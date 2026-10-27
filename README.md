@@ -16,19 +16,19 @@ Upgrading needs `claude plugin update guard-hooks@cc-agents-kit` — the marketp
 Refreshing the marketplace alone is not enough: the cache keeps one directory per version, and the runtime loads the version recorded at install time, so `claude plugin details` can report the new version while the old one is still what fires.
 Hooks are read when a session starts, so restart any session that is already open.
 
-| Plugin | What it does |
-| --- | --- |
-| [`guard-hooks`](#guard-hooks) | Nine defensive hooks — five block, three warn, one rewrites Bash output. |
-| [`context-handoff`](#context-handoff) | Carry work across sessions, and keep the context that carries it lean. |
-| [`repo-gate`](#repo-gate) | What runs between "the code works" and "it is pushed". |
-| [`context-meter`](#context-meter) | A mod that shows the real context fill and vetoes an auto-compact the advisor's usage would fire. |
-| [`quick-look`](#quick-look) | A mod that opens the files the agent touched in macOS Quick Look. |
+| Plugin                                | What it does                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [`guard-hooks`](#guard-hooks)         | Nine defensive hooks — five block, three warn, one rewrites Bash output.                          |
+| [`context-handoff`](#context-handoff) | Carry work across sessions, and keep the context that carries it lean.                            |
+| [`repo-gate`](#repo-gate)             | What runs between "the code works" and "it is pushed".                                            |
+| [`context-meter`](#context-meter)     | A mod that shows the real context fill and vetoes an auto-compact the advisor's usage would fire. |
+| [`quick-look`](#quick-look)           | A mod that opens the files the agent touched in macOS Quick Look.                                 |
 
 ## guard-hooks
 
 ### Why the zsh quoting guard exists
 
-Two shell mistakes recur across agent sessions, and both fail *silently* rather than with an error you would notice.
+Two shell mistakes recur across agent sessions, and both fail _silently_ rather than with an error you would notice.
 
 **A backtick inside a double-quoted commit or PR message.**
 zsh runs it as command substitution, so the backticked word is deleted from the message before git ever sees it — and the `command not found` scrolls past in the commit output.
@@ -55,7 +55,7 @@ find . -name *.md
 #   as `find . -name README.md`, so every nested .md is missing and nothing said so
 ```
 
-The middle case is loud. The other two are not: a zero-match abort leaves empty output that reads as *found nothing* rather than *never ran*, and a single match returns a short, plausible, wrong answer with a success exit code.
+The middle case is loud. The other two are not: a zero-match abort leaves empty output that reads as _found nothing_ rather than _never ran_, and a single match returns a short, plausible, wrong answer with a success exit code.
 
 Neither produces a wrong-looking result, which is what makes them expensive.
 The guard blocks both shapes before the command runs.
@@ -76,17 +76,17 @@ Nothing here is a sandbox — see [Known limits](#known-limits) for what these g
 Each hook is a standalone bash script reading the hook JSON on stdin.
 The five `PreToolUse` guards exit `2` to block; the four `PostToolUse` hooks never block — three attach a warning to the transcript, one rewrites the tool result.
 
-| Hook | Event / matcher | Blocks? | Disable with |
-| --- | --- | --- | --- |
-| `dangerous-command-guard.sh` | PreToolUse · `Bash` | yes | `CC_GUARD_DISABLE_DANGEROUS_COMMAND=1` |
-| `zsh-quoting-guard.sh` | PreToolUse · `Bash` | yes | `CC_GUARD_DISABLE_ZSH_QUOTING=1` |
-| `pathless-rewriter-guard.sh` | PreToolUse · `Bash` | yes | `CC_GUARD_DISABLE_PATHLESS_REWRITER=1` |
-| `staged-secret-guard.sh` | PreToolUse · `Bash` | yes | `CC_GUARD_DISABLE_STAGED_SECRET=1` |
-| `secrets-path-guard.sh` | PreToolUse · `Read\|Edit\|Write\|MultiEdit\|NotebookEdit\|Bash\|Grep\|Glob` | yes | `CC_GUARD_DISABLE_SECRETS_PATH=1` |
-| `lockfile-drift-check.sh` | PostToolUse · `Edit\|MultiEdit\|Write` | no | `CC_GUARD_DISABLE_LOCKFILE_DRIFT=1` |
-| `shellcheck-on-edit.sh` | PostToolUse · `Edit\|MultiEdit\|Write` | no | `CC_GUARD_DISABLE_SHELLCHECK=1` |
-| `output-secret-mask.sh` | PostToolUse · `Bash` | no | `CC_GUARD_DISABLE_OUTPUT_SECRET_MASK=1` |
-| `security-review-findings.sh` | PostToolUse · `Bash` | no | `CC_GUARD_DISABLE_SECURITY_FINDINGS=1` |
+| Hook                          | Event / matcher                                                             | Blocks? | Disable with                            |
+| ----------------------------- | --------------------------------------------------------------------------- | ------- | --------------------------------------- |
+| `dangerous-command-guard.sh`  | PreToolUse · `Bash`                                                         | yes     | `CC_GUARD_DISABLE_DANGEROUS_COMMAND=1`  |
+| `zsh-quoting-guard.sh`        | PreToolUse · `Bash`                                                         | yes     | `CC_GUARD_DISABLE_ZSH_QUOTING=1`        |
+| `pathless-rewriter-guard.sh`  | PreToolUse · `Bash`                                                         | yes     | `CC_GUARD_DISABLE_PATHLESS_REWRITER=1`  |
+| `staged-secret-guard.sh`      | PreToolUse · `Bash`                                                         | yes     | `CC_GUARD_DISABLE_STAGED_SECRET=1`      |
+| `secrets-path-guard.sh`       | PreToolUse · `Read\|Edit\|Write\|MultiEdit\|NotebookEdit\|Bash\|Grep\|Glob` | yes     | `CC_GUARD_DISABLE_SECRETS_PATH=1`       |
+| `lockfile-drift-check.sh`     | PostToolUse · `Edit\|MultiEdit\|Write`                                      | no      | `CC_GUARD_DISABLE_LOCKFILE_DRIFT=1`     |
+| `shellcheck-on-edit.sh`       | PostToolUse · `Edit\|MultiEdit\|Write`                                      | no      | `CC_GUARD_DISABLE_SHELLCHECK=1`         |
+| `output-secret-mask.sh`       | PostToolUse · `Bash`                                                        | no      | `CC_GUARD_DISABLE_OUTPUT_SECRET_MASK=1` |
+| `security-review-findings.sh` | PostToolUse · `Bash`                                                        | no      | `CC_GUARD_DISABLE_SECURITY_FINDINGS=1`  |
 
 #### `dangerous-command-guard.sh`
 
@@ -101,7 +101,7 @@ rm -rf ./build                                  # allowed
 #### `zsh-quoting-guard.sh`
 
 Blocks the two shapes described above.
-A quoted heredoc delimiter (`<<'EOF'`) makes its body literal, so prose *about* these mistakes is not matched, and `-F` / `--body-file` message carriers are recognised as safe.
+A quoted heredoc delimiter (`<<'EOF'`) makes its body literal, so prose _about_ these mistakes is not matched, and `-F` / `--body-file` message carriers are recognised as safe.
 
 #### `pathless-rewriter-guard.sh`
 
@@ -121,7 +121,7 @@ Tools that already error out without a path (`black`, `dart format`) are deliber
 
 #### `staged-secret-guard.sh`
 
-Before a `git commit` runs, scans the *added* lines of the effective commit candidate for credential shapes: npm auth tokens, GitHub / Slack / Google / PyPI tokens, OpenAI- and Anthropic-style keys, AWS access key ids, and private key blocks.
+Before a `git commit` runs, scans the _added_ lines of the effective commit candidate for credential shapes: npm auth tokens, GitHub / Slack / Google / PyPI tokens, OpenAI- and Anthropic-style keys, AWS access key ids, and private key blocks.
 Deleting a secret is never blocked, only adding one.
 Staged commits, `git commit -a`, pathspec commits, and quoted `git -C <path>` repositories are distinguished without executing the command string; a commit form that cannot be parsed safely is blocked instead of scanning the wrong candidate.
 A shell function with a brace body defined in the same command is followed: a call is read as its body with the call's arguments in place of `"$@"` and `$1`–`$9`, and a brace group as the commands inside it.
@@ -135,7 +135,7 @@ A variable that the same command visibly assigns a value holding a `git`, `/git`
 A double-quoted program word is one word, so there only a `git` or `/git` value counts, and only when the word could still end in `git` (`"$G/bin/tool"` passes).
 The value is not evaluated, so some commands that run no commit are refused too: a read-only git (`G=git; $G log`), an unquoted path under a directory named `git` (`ROOT=~/src/git; $ROOT/configure`), and a program that is not git whose value holds a `commit` word (`CZ='cz commit'; $CZ`).
 
-This is the commit-time counterpart to `secrets-path-guard.sh`, which blocks *reading* secret files - a value still reaches a diff by being typed, pasted, or written by a generator.
+This is the commit-time counterpart to `secrets-path-guard.sh`, which blocks _reading_ secret files - a value still reaches a diff by being typed, pasted, or written by a generator.
 High-confidence patterns only: a guard that cries wolf gets switched off.
 It is not a replacement for entropy-based scanning; run trufflehog or gitleaks in CI as well.
 
@@ -215,7 +215,7 @@ After a `Bash` command finishes, scans its stdout and stderr with gitleaks' defa
 A `cat` of a config file, a `printenv`, or a verbose CLI that echoes its token would otherwise leave the live value in the transcript for the rest of the session and in the session log on disk.
 The transcript also gets a one-line note saying how many values were masked, so the agent treats `[REDACTED]` as deliberate rather than as missing data.
 
-This is the output-side counterpart to `secrets-path-guard.sh` (which blocks *reading* secret files) and `staged-secret-guard.sh` (which blocks *committing* them): a value that arrives through a command the other two allow is still caught on its way into the context.
+This is the output-side counterpart to `secrets-path-guard.sh` (which blocks _reading_ secret files) and `staged-secret-guard.sh` (which blocks _committing_ them): a value that arrives through a command the other two allow is still caught on its way into the context.
 Silently does nothing when `gitleaks` is not installed, when the output is over 2 MB, or when the tool result is not the stdout/stderr object shape.
 Measured on an Apple Silicon Mac: about 30 ms per Bash call, including the gitleaks scan.
 
@@ -256,14 +256,14 @@ To turn the whole bundle off, use `/plugin` and disable `guard-hooks`.
 
 ### Requirements
 
-- **`jq`** — a hard prerequisite. Every hook parses its input with `jq`, and each one fails *open* when `jq` is missing: the guards stop guarding silently rather than erroring. Confirm with `jq --version` after installing.
+- **`jq`** — a hard prerequisite. Every hook parses its input with `jq`, and each one fails _open_ when `jq` is missing: the guards stop guarding silently rather than erroring. Confirm with `jq --version` after installing.
 - **`bash`** — the hooks are invoked as `bash <script>` regardless of your interactive shell, and are written against macOS's system `/bin/bash` 3.2, the oldest bash they need to parse under. Verified on macOS (`GNU bash 3.2.57`, darwin arm64) and on Linux, where CI runs shellcheck and the full suite on `ubuntu-latest` for every push to `main` and every pull request.
 - **`git`** — only `staged-secret-guard.sh` uses it, to read the effective commit candidate; outside a repository the hook exits `0`.
 - **`shellcheck`** — optional; only `shellcheck-on-edit.sh` uses it, and that hook no-ops without it.
 - **`gitleaks`** (8.x) — optional; only `output-secret-mask.sh` uses it (`brew install gitleaks`), and that hook no-ops without it.
 - **`python3` (3.9+)** — tests. The optional development-path matcher requires protected `/usr/bin/python3` in isolated mode; it never falls back to a project runtime from `PATH`. Without it, the existing secret-path denial remains.
 
-The guards target *zsh* command strings because that is the shell Claude Code runs commands under on macOS.
+The guards target _zsh_ command strings because that is the shell Claude Code runs commands under on macOS.
 Nothing in the hooks themselves is zsh-specific to execute.
 
 ### Known limits
@@ -281,7 +281,7 @@ They match patterns in the tool input, so deliberate multi-step obfuscation (sym
 - **`staged-secret-guard` only sees a commit the command spells out.** A function or alias from your shell profile, an alias in a git config file (`git ci`), a script, `sh -c` or `eval` strings, an unrecognised runner, a variable that holds the program or its subcommand and is not assigned by a `NAME=value` word in the same command (one inherited from the environment, or set through `read`, `printf -v`, a `for` loop, a command substitution such as `C=$(echo git commit)`, `${!name}` indirection, or pieces joined across `+=`), a visibly assigned variable that holds only the subcommand of a program the hook cannot read (`S=commit; $g "$S" -m x`) or becomes `git commit` only under the `IFS` the command sets (`IFS=:; C=git:commit; $C -m x`), and an `IFS` assigned under a name the command never spells out (`printf -v "${v}FS" :`) all reach `git commit` without being recognised. A git `pre-commit` hook sees every one of these, because they all end in the same place.
 - **`staged-secret-guard` follows literal runner commands and substitutions.** `nohup`, `nice` and `timeout` use known option arities and then scan the visible git candidate; a visible commit through `sudo` or `xargs` is refused because the selected user/cwd or appended input can change that candidate. Unrecognised runner options before visible git are refused, and so is a git after a redirection where a runner option's value or `timeout`'s duration should be (`nice -n >out 5 git status`, `nice -n 5>out git status`), a read-only one too, because which word the runner then takes is not followed; a value glued before a redirection (`sudo -u root>out`) stays the value. `env` reads `-i`, `-v`, a bare `-`, `-u`, `-P`, `-C` (`--chdir`), `-a` (`--argv0`), `--env0-from` and short clusters such as `-iu NAME` with their values, and ends at `-0` (`--null`), `--help` or `--version`, or at an `=value` on a long option that takes none (`--debug=x`; the `*-signal=SIG` options take one), because GNU and macOS `env` run no command given with them; a visible commit after `env -C` or `--env0-from` is refused like one through `sudo`, also when the `-C` value is a command substitution (`env -C "$(pwd)"`), and a git after `env -a` with a `git-` name is refused, since git takes the rest of that name as its subcommand. An `env` option the hook does not know (BSD `-L` or `-U`) refuses a git, or a program it cannot read, after it. GNU `env`'s long options are read under any unique prefix GNU coreutils 9.x `env` accepts (`--deb`, `--un=NAME`, `--lis`), and a prefix it finds ambiguous (`--de`, `--i`) is refused like an unknown option. `env -S` (`--split-string`) is refused when a word of its string is `git` or ends in `/git`, reading `\_` and `\c` as word breaks and splitting a quoted span on its inner whitespace, which can only refuse more (`env -S "'git ' status"` names a program `git ` that does not exist, and is refused); the string ends at an unquoted `#` that starts a word, as `env` reads the rest as a comment, but only when nothing before that `#` is quoted, escaped or expanded, so `env -S "'a' # git"` is still refused; a string that starts with an option or an assignment, or whose first word holds an expansion (`"$CMD"`, `${G}`), refuses a git after it or a `commit` in or after it, as after any program the hook cannot read. GNU `env` re-parses the options such a string supplies and expands its own `${NAME}` references in it, so after one that starts with an option or whose first word holds an expansion, or after a redirection in the `-S` value slot, that string and every later word of the command are read as `-S` strings too: a `git` word in one is refused even where `env` passes that word to the program as data (`env -S '-i' echo 'fix git'`, `env -S '${PY}' tool.py 'git log'`), and so is a `commit` word after a word that holds a `$` in the same string, or a later word that is `commit`, with or without a redirection glued on (`env -S >out '${G}' commit`, `env -S >out 'echo ${X} commit'`), also where `env` takes that word as the program's name without expanding it and runs no git (`env -S '-i' '${G} commit'`, `env -S '-i' '${G}' commit>out`). Where any word of such a string starts with `-`, a word is also read as starting after every `=` and every `S` in it, so glued `-S` layers (`-S-Sgit`, `--split-string=-Sgit`) are read, which can refuse a string that runs no git (`env -S '-i' 'x -Sgit'`, where `env` looks for a program named `x -Sgit`). Otherwise its first word is taken as the program and the words after the string as that program's arguments, so a runner, or a `${VAR}` reference past the first word, inside the string (`env -S 'nohup' git commit`, `env -S 'nohup ${G} commit'`) is not read. Commands inside `$(...)`, including double-quoted forms, and backticks are parsed without running them; quoted message substitutions retain flags and pathspecs after the closing quote. Dynamically constructed runner commands and arbitrary shell evaluation remain outside this recogniser.
 - **`staged-secret-guard` skips only a heredoc body that nothing can run.** A body is skipped as data only when every heredoc on its line is opened at the start of a word with a quoted delimiter that parses completely and a terminator line that exists, by a literal `cat` or `tee` (`cat > r.sh <<'X'`) on a line with no pipe, parenthesis, backtick or descriptor duplication. Everything before it in the command has to be plain words and separators too: each command there is, after any `NAME=value` whose name does not end in `PATH`, one of `cat`, `tee`, `mkdir`, `touch`, `rm`, `ls`, `git`, `echo`, `pwd` or `true`, programs that cannot change how the shell finds `cat` (so `cd`, `hash`, `alias`, `autoload`, `read`, `!`, `{` and every other word keep the body read); no word holds a parenthesis, substitution, backtick, `${` or newline, or names `PATH`; no body before it was read as commands, and no `<<` glued inside a word (`cat<<B`) came before it; and no `$'…'` string came before it, since its escape rules can leave the hook's idea of the quoting different from the shell's. Every other body is parsed as though it ran, because `bash <<X`, `cat <<X | sh`, `{ cat <<'X' … } | bash`, `eval $(cat <<X` and the `$(…)` in an unquoted `cat <<X` body do run; so a script written with `bash`, or through an assignment prefix (`LC_ALL=C cat <<X`), is still refused when a line in it names git through a variable (`$GIT commit`). The skip trusts that the `cat` and `tee` the shell finds on `PATH` are the real ones: an executable planted under either name that runs its input would run a skipped body, even with nothing before it, and no reading of the command can see that, which is the trust every command in the session already places in `PATH`. A narrow substitution exception also skips a quoted `cat`/`tee` heredoc in the final double-quoted word of a literal `git commit -m`/`--message`, `echo`, or `gh pr`/`gh issue` create/edit/comment `--body` command. Its prefix must contain no earlier command, expansion or redirection, and only whitespace may follow the closing `)"`; a pipe inside or after the substitution keeps the body read. This preserves ordinary commit/PR message prose without hiding an executable heredoc supplied to `eval`, `bash -c`, `sh -c` or `source`. Other complex heredoc contexts, including legacy backticks, remain conservatively parsed as commands and may be refused. A script written as data is still not scanned when it later runs (`bash r.sh`).
-- **`staged-secret-guard` reads `git commit` flags from an allowlist.** A flag it does not recognise is blocked rather than guessed at, because an unknown flag might take a value and mis-parsing one would scan the wrong candidate. The table matches whole flags, so a bundled short form (`-sq`) is refused too. Flags that change *which* content is committed (`-i`, `-p`, `--interactive`, `--pathspec-from-file`) and `-e`, which would open an editor with no TTY to open it on, are blocked deliberately.
+- **`staged-secret-guard` reads `git commit` flags from an allowlist.** A flag it does not recognise is blocked rather than guessed at, because an unknown flag might take a value and mis-parsing one would scan the wrong candidate. The table matches whole flags, so a bundled short form (`-sq`) is refused too. Flags that change _which_ content is committed (`-i`, `-p`, `--interactive`, `--pathspec-from-file`) and `-e`, which would open an editor with no TTY to open it on, are blocked deliberately.
 - **`pathless-rewriter-guard` only knows the tools it lists.** A rewriter outside that list, or one reached through a shell alias or a package script (`npm run format`), is invisible to it.
 - **`output-secret-mask` masks what gitleaks' default rules recognise, after the command has already run.** The value has still reached your terminal scrollback and any file the command wrote; only the model's copy is masked. A credential with no recognisable shape or with low entropy passes through, and so does anything printed by a tool other than `Bash` (`Read` of a file that holds a key is the job of `secrets-path-guard`).
 - **`zsh-quoting-guard` stops scanning at a quoted heredoc**, which also discards anything chained after the terminator. A deliberate fail-open.
@@ -295,7 +295,7 @@ cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; d
 ```
 
 Two details worth knowing if you extend them.
-The opt-out cases feed the hook a 200KB payload over a real pipe and read the *writer's* exit status, because Python's `subprocess` swallows `BrokenPipeError` — an `input=`-style test cannot see the bug they exist to catch, and moving the opt-out check above the stdin read fails them with `SIGPIPE` rather than passing quietly.
+The opt-out cases feed the hook a 200KB payload over a real pipe and read the _writer's_ exit status, because Python's `subprocess` swallows `BrokenPipeError` — an `input=`-style test cannot see the bug they exist to catch, and moving the opt-out check above the stdin read fails them with `SIGPIPE` rather than passing quietly.
 `shellcheck-on-edit.test.py` skips its findings checks when `shellcheck` is absent and asserts the silent no-op instead, so it stays meaningful in CI either way.
 
 ## context-handoff
@@ -306,14 +306,14 @@ The opt-out cases feed the hook a 200KB payload over a real pipe and read the *w
 
 Six skills for work that outlives one session, and for the config that work drags along.
 
-| Skill | Use it when |
-| --- | --- |
-| `handoff` | Context is long or degrading and the next session needs a self-contained brief — printed, or written to a file a fresh session can pick up. |
-| `session-export` | Save the transcript as Markdown, standalone HTML, or structured JSON, with optional tool details. |
-| `log-it` | A session found something non-obvious and it should outlive the window. Routes each fact by who has to read it. |
-| `wayfinder` | The effort is too big for one session. Charts it as decision tickets under `docs/plans/`, one resolved per session. |
-| `context-budget` | You want to know what is eating the context window — agents, skills, MCP servers, rules — ranked by what you would get back. |
-| `config-gc` | The active root from `CLAUDE_CONFIG_DIR` or `~/.claude` has accumulated. Walks redundant, stale, and orphaned items with a confirmation per deletion. |
+| Skill            | Use it when                                                                                                                                           |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handoff`        | Context is long or degrading and the next session needs a self-contained brief — printed, or written to a file a fresh session can pick up.           |
+| `session-export` | Save the transcript as Markdown, standalone HTML, or structured JSON, with optional tool details.                                                     |
+| `log-it`         | A session found something non-obvious and it should outlive the window. Routes each fact by who has to read it.                                       |
+| `wayfinder`      | The effort is too big for one session. Charts it as decision tickets under `docs/plans/`, one resolved per session.                                   |
+| `context-budget` | You want to know what is eating the context window — agents, skills, MCP servers, rules — ranked by what you would get back.                          |
+| `config-gc`      | The active root from `CLAUDE_CONFIG_DIR` or `~/.claude` has accumulated. Walks redundant, stale, and orphaned items with a confirmation per deletion. |
 
 `wayfinder`, `context-budget`, and `config-gc` derive from MIT-licensed work by others, with the overlap measured rather than described — see [CREDITS.md](CREDITS.md).
 
@@ -325,14 +325,14 @@ Six skills for work that outlives one session, and for the config that work drag
 
 Six skills for the stretch between "the code works" and "it is pushed".
 
-| Skill | Use it when |
-| --- | --- |
-| `semantic-commit` | Unrelated changes are staged together and want splitting into conventional commits, verified before each one. Splits at hunk level when a single file spans two concerns. |
-| `setup-trunk` | Adding trunk.io to a repo, or configuring its linters and hooks over a codebase with existing violations. |
-| `ci-babysit` | A pushed branch or open PR needs CI monitoring. Watch-only requests remain read-only. Reruns, repairs, commits, and pushes require explicit authority, and the skill stops for logic failures or human decisions. |
-| `fix-osv-vulnerabilities` | `osv-scanner` or `trunk check` reports GHSA advisories and they need triage rather than a blanket bump. |
-| `cspell-triage` | cspell is reporting unknown words, or its dictionaries need consolidating. |
-| `markdownlint-triage` | A markdownlint log needs summarizing by rule, the rule set needs trimming to what catches real defects, or an existing backlog needs fixing file by file. Ships `markdownlint-summary` on PATH. |
+| Skill                     | Use it when                                                                                                                                                                                                       |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `semantic-commit`         | Unrelated changes are staged together and want splitting into conventional commits, verified before each one. Splits at hunk level when a single file spans two concerns.                                         |
+| `setup-trunk`             | Adding trunk.io to a repo, or configuring its linters and hooks over a codebase with existing violations.                                                                                                         |
+| `ci-babysit`              | A pushed branch or open PR needs CI monitoring. Watch-only requests remain read-only. Reruns, repairs, commits, and pushes require explicit authority, and the skill stops for logic failures or human decisions. |
+| `fix-osv-vulnerabilities` | `osv-scanner` or `trunk check` reports GHSA advisories and they need triage rather than a blanket bump.                                                                                                           |
+| `cspell-triage`           | cspell is reporting unknown words, or its dictionaries need consolidating.                                                                                                                                        |
+| `markdownlint-triage`     | A markdownlint log needs summarizing by rule, the rule set needs trimming to what catches real defects, or an existing backlog needs fixing file by file. Ships `markdownlint-summary` on PATH.                   |
 
 These are ecosystem-agnostic where the task allows it: the commit and CI skills read the project's own declared scripts rather than assuming a stack.
 
