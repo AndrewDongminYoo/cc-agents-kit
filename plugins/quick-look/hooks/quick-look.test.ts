@@ -21,7 +21,10 @@ const PRESENTATION = { isFullscreen: true, columns: 160 };
 
 // The world beneath the plugin: a small file system, the session's directory,
 // HOME, and a process.spawn that records the argv instead of running anything.
-function bottom(on: On, exit: { code: number | null; fails?: boolean } = { code: 0 }) {
+function bottom(
+  on: On,
+  exit: { code: number | null; fails?: boolean } = { code: 0 },
+) {
   const spawned: string[][] = [];
   const toasts: string[] = [];
   const recent: { value: string[] } = { value: [] };
@@ -129,7 +132,9 @@ test("/ql says so when Quick Look cannot start", async ($, on) => {
 
   await ql($, "docs/plan.md");
   await settled();
-  expect(toasts).toContain("quick-look: could not start Quick Look for plan.md");
+  expect(toasts).toContain(
+    "quick-look: could not start Quick Look for plan.md",
+  );
 });
 
 test("/ql says so when qlmanage exits with an error", async ($, on) => {

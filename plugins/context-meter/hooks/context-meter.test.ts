@@ -173,7 +173,10 @@ test("subtracts the floor once when server calls ran in parallel", async ($, on)
   await runStep($, step("t1", 0));
   await runStep($, step("t1", 1));
 
-  const answer = await $.session.compact({ trigger: "auto", messages: ONE_MESSAGE });
+  const answer = await $.session.compact({
+    trigger: "auto",
+    messages: ONE_MESSAGE,
+  });
   expect(answer.skip).toBeUndefined();
 });
 
@@ -190,7 +193,10 @@ test("reads a request whose advisor call was cut short as measured", async ($, o
   await runStep($, step("t1", 0));
   await runStep($, step("t1", 1));
 
-  const answer = await $.session.compact({ trigger: "auto", messages: ONE_MESSAGE });
+  const answer = await $.session.compact({
+    trigger: "auto",
+    messages: ONE_MESSAGE,
+  });
   expect(answer.skip).toBeUndefined();
 });
 
@@ -270,7 +276,11 @@ test("counts a Korean tool result by its bytes, not as ASCII", async ($, on) => 
       text: "",
       toolUses: [],
       toolResults: [
-        { tool_use_id: "r1", text: "가".repeat(15_000), isError: false } as never,
+        {
+          tool_use_id: "r1",
+          text: "가".repeat(15_000),
+          isError: false,
+        } as never,
       ],
     },
   ];
@@ -296,8 +306,14 @@ test("vetoes once per reading, so a wrong estimate delays a compaction by one re
   await runStep($, step("t1", 0));
   await runStep($, step("t1", 1));
 
-  const first = await $.session.compact({ trigger: "auto", messages: ONE_MESSAGE });
-  const second = await $.session.compact({ trigger: "auto", messages: ONE_MESSAGE });
+  const first = await $.session.compact({
+    trigger: "auto",
+    messages: ONE_MESSAGE,
+  });
+  const second = await $.session.compact({
+    trigger: "auto",
+    messages: ONE_MESSAGE,
+  });
   expect(first.skip).toContain("Auto-compact skipped");
   expect(second.skip).toBeUndefined();
 });

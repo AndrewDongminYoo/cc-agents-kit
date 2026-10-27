@@ -90,7 +90,9 @@ async function preview($: EngineInterface, path: string): Promise<string> {
     } catch {
       // A replaced panel ends without throwing, so this one could not start.
       if (current === stream)
-        $.ui.toast(`quick-look: could not start Quick Look for ${basename(path)}`);
+        $.ui.toast(
+          `quick-look: could not start Quick Look for ${basename(path)}`,
+        );
     } finally {
       if (current === stream) current = null;
     }

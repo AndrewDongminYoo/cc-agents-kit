@@ -61,8 +61,10 @@ function tokensSince(messages: readonly SessionMessage[]): number {
   let bytes = 0;
   for (const message of messages.slice(start)) {
     bytes += utf8Bytes(message.text);
-    for (const use of message.toolUses) bytes += utf8Bytes(JSON.stringify(use.input));
-    for (const result of message.toolResults ?? []) bytes += utf8Bytes(result.text);
+    for (const use of message.toolUses)
+      bytes += utf8Bytes(JSON.stringify(use.input));
+    for (const result of message.toolResults ?? [])
+      bytes += utf8Bytes(result.text);
   }
   return bytes;
 }
@@ -188,7 +190,11 @@ export const register: Register = (on) => {
   // next request measures again. A precompute keeps the window as it is.
   on("session.compact", async ($, e, next) => {
     const result = await next(e);
-    if (e.agentId === undefined && e.trigger !== "precompute" && !("skip" in result)) {
+    if (
+      e.agentId === undefined &&
+      e.trigger !== "precompute" &&
+      !("skip" in result)
+    ) {
       await update($, reading, () => null);
     }
     return result;
