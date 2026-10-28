@@ -1,4 +1,4 @@
-enable=all
+# Match CI default checks; optional style rewrites are not part of the hook contract.
 source-path=SCRIPTDIR
 disable=SC2154
 

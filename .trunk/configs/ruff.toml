@@ -1,5 +1,8 @@
 # Generic, formatter-friendly config.
+# README supports Python 3.9; do not require APIs introduced in newer Python.
+target-version = "py39"
 select = ["B", "D3", "D4", "E", "F"]
 
 # Never enforce `E501` (line length violations). This should be handled by formatters.
-ignore = ["E501"]
+# Fixture and helper docstrings describe their subjects rather than use imperative mood.
+ignore = ["D401", "E501"]

@@ -3,7 +3,10 @@ name: ci
 on:
   push:
     branches: [main]
-  pull_request:
+  pull_request: {}
+
+permissions:
+  contents: read
 
 jobs:
   hooks:
