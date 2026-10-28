@@ -481,7 +481,7 @@ class ExportTests(unittest.TestCase):
         self.assertIn("Content-Security-Policy", html)
         self.assertIn("default-src 'none'", html)
         policy = re.search(
-            r'<meta http-equiv="Content-Security-Policy" content="([^"]+)"', html
+            r'<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"', html
         )
         self.assertIsNotNone(policy)
         directives = {
