@@ -38,6 +38,20 @@ Suites are plain `python3` scripts requiring `bash` and `jq`, and `node` for `se
 The `claude plugin validate` and `claude plugin test` commands are optional checks for a function-hook mod; they are not part of the default CI gate.
 `.github/workflows/ci.yml` runs the shell and Python commands above, shellchecks and `bash -n`-parses every shipped shell script including the extensionless Bash entries under `plugins/*/bin/`, and checks the manifests, skill frontmatter, private references, `bin/` executability, and the demo's quoted guard message.
 
+## Offline Secret Reader
+
+Run `python3 -B .trunk/configs/tests/test_trufflehog_to_sarif.py` for the standard-library reader regressions.
+CI runs this exact file separately from the shipped hook suites.
+The TruffleHog command uses `--no-verification --no-update` and a local filesystem reader that retains decoded findings without literal source positions.
+
+The reader limits each source read to 1 MiB plus a sentinel byte and retains eight cached source files.
+It preserves Unicode columns, reported lines and file-level decoded findings; these limits do not bound total JSONL, result count, offsets, or process memory.
+TruffleHog also uses `--fail-on-scan-errors`.
+The exact `plugins/guard-hooks/hooks/output-secret-mask.test.py` fixture is excluded only from TruffleHog because the operator confirmed both constants were never issued.
+This is a file exclusion, not a value whitelist, so other secrets in that file would also be skipped.
+All other linters and all other TruffleHog targets remain enabled.
+Run literal and encoded detection controls outside that path, and stop each one-off daemon with `trunk daemon shutdown --monitor=false` in the same checkout.
+
 ## Layout contract
 
 ```log
