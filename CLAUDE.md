@@ -10,7 +10,21 @@ Every change is therefore judged on two things: does the manifest still resolve,
 ## Commands
 
 ```bash
-shellcheck plugins/*/hooks/*.sh
+# Build the same NUL-delimited shell list as CI, including extensionless bin entries.
+export RUNNER_TEMP="$(mktemp -d)"
+python3 - <<'PYTHON' >"$RUNNER_TEMP/shell-files.z"
+import os, pathlib, sys
+for f in sorted(pathlib.Path(".").rglob("*")):
+    if not f.is_file() or ".git" in f.parts:
+        continue
+    first_line = f.open("rb").readline()
+    is_bash_bin = len(f.parts) == 4 and f.parts[0] == "plugins" and f.parts[2] == "bin" and f.suffix == "" and b"bash" in first_line
+    if f.suffix == ".sh" or is_bash_bin:
+        sys.stdout.buffer.write(os.fsencode(str(f)) + b"\0")
+PYTHON
+test -s "$RUNNER_TEMP/shell-files.z"
+xargs -0 shellcheck <"$RUNNER_TEMP/shell-files.z"
+xargs -0 -n1 /bin/bash -n <"$RUNNER_TEMP/shell-files.z"
 (cd plugins/guard-hooks/hooks && for t in *.test.py; do python3 "$t" || exit 1; done)
 for t in plugins/*/bin/*.test.py; do python3 "$t" || exit 1; done
 python3 plugins/guard-hooks/hooks/<name>.test.py     # a single suite
@@ -21,7 +35,22 @@ claude plugin test plugins/<mod>                     # runs the mod's *.test.ts 
 
 There is no build, no package manager, and no test framework.
 Suites are plain `python3` scripts requiring `bash` and `jq`, and `node` for `session-to-md.test.py`; `shellcheck` is optional (`shellcheck-on-edit.test.py` skips its findings checks and asserts the silent no-op instead).
-`.github/workflows/ci.yml` runs the commands above, shellchecks and `bash -n`-parses every shipped shell script including the extensionless Bash entries under `plugins/*/bin/`, and checks the manifests, skill frontmatter, private references, `bin/` executability, and the demo's quoted guard message.
+The `claude plugin validate` and `claude plugin test` commands are optional checks for a function-hook mod; they are not part of the default CI gate.
+`.github/workflows/ci.yml` runs the shell and Python commands above, shellchecks and `bash -n`-parses every shipped shell script including the extensionless Bash entries under `plugins/*/bin/`, and checks the manifests, skill frontmatter, private references, `bin/` executability, and the demo's quoted guard message.
+
+## Offline Secret Reader
+
+Run `python3 -B .trunk/configs/tests/test_trufflehog_to_sarif.py` for the standard-library reader regressions.
+CI runs this exact file separately from the shipped hook suites.
+The TruffleHog command uses `--no-verification --no-update` and a local filesystem reader that retains decoded findings without literal source positions.
+
+The reader limits each source read to 1 MiB plus a sentinel byte and retains eight cached source files.
+It preserves Unicode columns, reported lines and file-level decoded findings; these limits do not bound total JSONL, result count, offsets, or process memory.
+TruffleHog also uses `--fail-on-scan-errors`.
+The exact `plugins/guard-hooks/hooks/output-secret-mask.test.py` fixture is excluded only from TruffleHog because the operator confirmed both constants were never issued.
+This is a file exclusion, not a value whitelist, so other secrets in that file would also be skipped.
+All other linters and all other TruffleHog targets remain enabled.
+Run literal and encoded detection controls outside that path, and stop each one-off daemon with `trunk daemon shutdown --monitor=false` in the same checkout.
 
 ## Layout contract
 

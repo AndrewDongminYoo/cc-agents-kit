@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Rank the cspell dictionaries that would clear a word list, and show what is left.
+r"""Rank the cspell dictionaries that would clear a word list, and show what is left.
 
 Reads a word list on stdin, one word per line, repeats counting as occurrences:
 
     cspell lint . --words-only --no-progress --no-summary | cspell-dict-report
 
-Case-variant duplicates are folded together, so the VS Code "^(.*)\\n(\\1)$"
+Case-variant duplicates are folded together, so the VS Code "^(.*)\n(\1)$"
 replace pass is not needed first.
 
 Every unique word is traced in a single `cspell trace` process against the
@@ -87,7 +87,9 @@ def trace(words, index, excluded):
     found = defaultdict(set)
     misspelled = {}
     known = {w.lower() for w in words}
-    out = run(["cspell", "trace", "--stdin", "--only-found"], stdin="\n".join(words) + "\n")
+    out = run(
+        ["cspell", "trace", "--stdin", "--only-found"], stdin="\n".join(words) + "\n"
+    )
     for line in out.splitlines():
         parts = line.split(None, 3)
         if len(parts) != 4 or parts[:3] == ["Word", "F", "Dictionary"]:
@@ -101,7 +103,9 @@ def trace(words, index, excluded):
         compound = "•" in word
         word = word.replace("•", "").lower()
         if word not in known:
-            print(f"warning: trace reported an unrequested word {word!r}", file=sys.stderr)
+            print(
+                f"warning: trace reported an unrequested word {word!r}", file=sys.stderr
+            )
             continue
         if compound:
             continue
@@ -116,7 +120,9 @@ def trace(words, index, excluded):
 
 
 def table(rows, headers):
-    widths = [max(len(str(r[i])) for r in [headers, *rows]) for i in range(len(headers))]
+    widths = [
+        max(len(str(r[i])) for r in [headers, *rows]) for i in range(len(headers))
+    ]
     for row in [headers, *rows]:
         cells = [str(c).ljust(w) for c, w in zip(row, widths)]
         print("  " + "  ".join(cells).rstrip())
@@ -154,7 +160,10 @@ def main():
     index = dictionary_index()
     unknown = excluded - {name for name, _ in index.values()}
     if unknown:
-        print(f"warning: --exclude names no configured dictionary: {', '.join(sorted(unknown))}", file=sys.stderr)
+        print(
+            f"warning: --exclude names no configured dictionary: {', '.join(sorted(unknown))}",
+            file=sys.stderr,
+        )
     found, misspelled = trace(traceable, index, excluded) if traceable else ({}, {})
 
     def by_count(words):
@@ -168,7 +177,10 @@ def main():
     if misspelled:
         print("\nMISSPELLED - a dictionary knows these as errors, fix the source")
         table(
-            [(spelling(w), f"{occurrences[w]}x", f"-> {misspelled[w]}") for w in by_count(misspelled)],
+            [
+                (spelling(w), f"{occurrences[w]}x", f"-> {misspelled[w]}")
+                for w in by_count(misspelled)
+            ],
             ("WORD", "SEEN", "SUGGESTION"),
         )
 
@@ -176,24 +188,40 @@ def main():
     if covered:
         print("\nALREADY COVERED by an enabled dictionary")
         print("  (from a word list: the entry is redundant, delete it. From a lint log")
-        print("   this should be empty - a word an enabled dictionary has does not flag")
-        print("   - so a row means the word is forbidden rather than unknown, or the log")
-        print("   predates the config. `cspell dictionaries` reports the no-file-type set,")
-        print("   so a languageId-activated dictionary shows up under CANDIDATES instead.)")
+        print(
+            "   this should be empty - a word an enabled dictionary has does not flag"
+        )
+        print(
+            "   - so a row means the word is forbidden rather than unknown, or the log"
+        )
+        print(
+            "   predates the config. `cspell dictionaries` reports the no-file-type set,"
+        )
+        print(
+            "   so a languageId-activated dictionary shows up under CANDIDATES instead.)"
+        )
         table(
             [
-                (spelling(w), f"{occurrences[w]}x", ", ".join(sorted(n for n, on in covered[w] if on)))
+                (
+                    spelling(w),
+                    f"{occurrences[w]}x",
+                    ", ".join(sorted(n for n, on in covered[w] if on)),
+                )
                 for w in by_count(covered)
             ],
             ("WORD", "SEEN", "ENABLED DICTIONARIES"),
         )
 
     # Rank only over words nothing enabled covers yet - that is the work left.
-    pending = {w: {n for n, on in d if not on} for w, d in found.items() if w not in covered}
+    pending = {
+        w: {n for n, on in d if not on} for w, d in found.items() if w not in covered
+    }
     pending = {w: d for w, d in pending.items() if d}
 
     if pending:
-        print(f"\nDICTIONARY CANDIDATES - {len(pending)} word(s) no enabled dictionary has")
+        print(
+            f"\nDICTIONARY CANDIDATES - {len(pending)} word(s) no enabled dictionary has"
+        )
         # Greedy set cover: each row is scored against the words the rows above
         # it leave behind, so NEW is what enabling that dictionary actually buys
         # and a dictionary listed as redundant provably is. Plain "words only
@@ -209,7 +237,10 @@ def main():
             for word, names in remaining.items():
                 for name in names:
                     gain[name].append(word)
-            name = min(gain, key=lambda n: (-len(gain[n]), -sum(occurrences[w] for w in gain[n]), n))
+            name = min(
+                gain,
+                key=lambda n: (-len(gain[n]), -sum(occurrences[w] for w in gain[n]), n),
+            )
             words = by_count(gain[name])
             rows.append(
                 (
@@ -217,7 +248,8 @@ def main():
                     len(words),
                     len(totals[name]),
                     sum(occurrences[w] for w in words),
-                    ", ".join(spelling(w) for w in words[:SAMPLE]) + (", ..." if len(words) > SAMPLE else ""),
+                    ", ".join(spelling(w) for w in words[:SAMPLE])
+                    + (", ..." if len(words) > SAMPLE else ""),
                 )
             )
             for word in words:
@@ -232,11 +264,15 @@ def main():
         seen = sum(occurrences[w] for w in residue)
         print(f"\nIN NO DICTIONARY - {len(residue)} word(s), {seen} occurrence(s)")
         print("  Typos to fix, generated-file noise to ignorePaths, or real vocabulary")
-        print("  to register. Stemmer fragments here mean a generated tree is in scope.")
+        print(
+            "  to register. Stemmer fragments here mean a generated tree is in scope."
+        )
         table([(spelling(w), f"{occurrences[w]}x") for w in residue], ("WORD", "SEEN"))
 
     if skipped:
-        print(f"\nNOT TRACED - {len(skipped)} word(s) carry a separator cspell splits on")
+        print(
+            f"\nNOT TRACED - {len(skipped)} word(s) carry a separator cspell splits on"
+        )
         print(f"  {', '.join(spelling(w) for w in skipped)}")
 
 

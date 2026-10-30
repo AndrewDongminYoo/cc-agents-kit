@@ -3,7 +3,10 @@ name: ci
 on:
   push:
     branches: [main]
-  pull_request:
+  pull_request: {}
+
+permissions:
+  contents: read
 
 jobs:
   hooks:
@@ -30,6 +33,9 @@ jobs:
       # check needs a real parser: asserting that it parses is the point.
       - name: Ensure pyyaml
         run: python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --disable-pip-version-check --break-system-packages pyyaml
+
+      - name: Test offline secret reader
+        run: python3 -B .trunk/configs/tests/test_trufflehog_to_sarif.py
 
       - name: Report the bash under test
         run: /bin/bash -c 'echo "/bin/bash is $BASH_VERSION"'

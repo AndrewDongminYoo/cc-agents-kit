@@ -111,7 +111,7 @@ In verbose mode, additionally output per-file token counts, line-by-line breakdo
 
 ## Examples
 
-**Basic audit**
+### Basic audit
 
 ```log
 User: /context-budget
@@ -120,7 +120,7 @@ Skill: Scans setup → 16 agents (12,400 tokens), 28 skills (6,200), 87 MCP tool
        Top saving: remove 3 MCP servers → -27,500 tokens (47% overhead reduction)
 ```
 
-**Verbose mode**
+### Verbose mode
 
 ```log
 User: /context-budget --verbose
@@ -128,7 +128,7 @@ Skill: Full report + per-file breakdown showing planner.md (213 lines, 1,840 tok
        MCP tool list with per-tool sizes, duplicated rule lines side by side
 ```
 
-**Pre-expansion check**
+### Pre-expansion check
 
 ```log
 User: I want to add 5 more MCP servers, do I have room?
