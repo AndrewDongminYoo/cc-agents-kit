@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `repo-gate` 0.2.10 `setup-trunk` recommends changing a linter's commands by overriding its definition under `lint.definitions`, so that `lint.enabled` stays a plain list of `linter@version` strings, and advises against the `- linter@version:` mapping form.
+  It shows `trunk print-config` keeping the plugin's command fields and adding only the overridden `enabled: true`, using `pinact`'s `upgrade` command as the example.
+
 ## [0.8.3] — 2026-10-25
 
 `repo-gate`'s `setup-trunk` records how a first run in a brand-new repository behaves and what a generated `.shellcheckrc` should become (#82, #83, #84), `ci-babysit` and `fix-osv-vulnerabilities` record two lessons from a Dependabot sweep (#81), and `context-handoff`'s `handoff` and `log-it` name the source of each external status (#79).

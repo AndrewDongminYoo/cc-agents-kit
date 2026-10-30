@@ -354,6 +354,37 @@ lint:
 `SYSTEM` tells trunk to skip its sandboxed version and invoke the repo's binary.
 Do **not** use `SYSTEM` if the tool isn't installed in the project.
 
+### Changing a linter's commands: override its definition
+
+To turn on a command that a plugin ships disabled, or to change one field of a command, override the linter's definition by name under `lint.definitions`.
+This is the recommended form, because `lint.enabled` stays a plain list of `linter@version` strings:
+
+```yaml
+lint:
+  definitions:
+    - name: pinact
+      commands:
+        - name: upgrade
+          enabled: true
+  enabled:
+    - pinact@<version>
+```
+
+Trunk merges the override onto the plugin's definition by linter name, and each command by its `name`, so only the fields you write change.
+The trunk-io/plugins `pinact` definition ships `upgrade` with `enabled: false`; with the override above, `trunk print-config` shows that command with the plugin's `run`, `output` and `success_codes` unchanged and `enabled: true` added (checked 2026-10-30).
+
+Avoid attaching settings to an entry of `lint.enabled`:
+
+```yaml
+lint:
+  enabled:
+    - pinact@<version>:
+        commands: [lint, upgrade]
+```
+
+That form turns one list item into a mapping, so `lint.enabled` mixes strings and objects, and the change hides in the list of enabled linters instead of in `lint.definitions`.
+After either edit, run `trunk print-config` and read the merged command before you trust it.
+
 ### Configuring ignores in `.trunk/trunk.yaml`
 
 Keep format and style ignores linter-specific.
