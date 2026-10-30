@@ -5,14 +5,19 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.8.4] — 2026-10-30
+
+`guard-hooks`' `secrets-path-guard` no longer refuses `rg --files`, the listing many agent sessions start with, and `repo-gate`'s `setup-trunk` recommends overriding a linter's definition to change its commands (#87).
+`guard-hooks` moves from 0.5.1 to 0.5.2 and `repo-gate` from 0.2.9 to 0.2.10; `context-handoff` (0.2.3), `context-meter` (0.1.0) and `quick-look` (0.1.0) are unchanged.
+
 ### Changed
 
-- `repo-gate` 0.2.10 `setup-trunk` recommends changing a linter's commands by overriding its definition under `lint.definitions`, so that `lint.enabled` stays a plain list of `linter@version` strings, and advises against the `- linter@version:` mapping form.
+- `repo-gate` 0.2.10 `setup-trunk` recommends changing a linter's commands by overriding its definition under `lint.definitions`, so that `lint.enabled` stays a plain list of `linter@version` strings, and advises against the `- linter@version:` mapping form (#87).
   It shows `trunk print-config` keeping the plugin's command fields and adding only the overridden `enabled: true`, using `pinact`'s `upgrade` command as the example.
 
 ### Fixed
 
-- `guard-hooks` 0.5.2 `secrets-path-guard` lets `rg --files` list paths with `--hidden`, `-uu`, a dotenv-capable glob or type, or an ignore file, because the listing reads no file; a `-c`, `-l`, `--count`, `--count-matches`, `--files-with-matches`, `--files-without-match` or `--json` anywhere in the command still turns it into a search that the existing checks apply to.
+- `guard-hooks` 0.5.2 `secrets-path-guard` lets `rg --files` list paths with `--hidden`, `-uu`, a dotenv-capable glob or type, or an ignore file, because the listing reads no file; a `-c`, `-l`, `--count`, `--count-matches`, `--files-with-matches`, `--files-without-match` or `--json` anywhere in the command still turns it into a search that the existing checks apply to (#87).
   Agent sessions commonly start by listing a repository with `rg --files --hidden`, and the hook refused that first call.
 
 ## [0.8.3] — 2026-10-25
