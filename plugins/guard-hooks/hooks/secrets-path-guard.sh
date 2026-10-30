@@ -420,6 +420,7 @@ rg_type_add() {
 check_rg() {
   local n=${#ARG_WORDS[@]} j=0 a v u c k cluster
   local hidden=0 unrestricted=0 excluded=0 listed=0 ignore_file=0 last_glob_excludes=0 selected='' dotenv_types=' sh all ' t
+  local files=0 search=0
   while ((j < n)); do
     a=${ARG_WORDS[j]}
     j=$((j + 1))
@@ -428,6 +429,8 @@ check_rg() {
       --) break ;;
       --hidden) hidden=1 ;;
       --no-hidden) hidden=0 ;;
+      --files) files=1 ;;
+      --count | --count-matches | --files-with-matches | --files-without-match | --json) search=1 ;;
       --unrestricted)
         unrestricted=$((unrestricted + 1))
         ((unrestricted != 2)) || hidden=1
@@ -471,6 +474,7 @@ check_rg() {
           k=$((k + 1))
           case "$c" in
             .) hidden=1 ;;
+            c | l) search=1 ;;
             u)
               unrestricted=$((unrestricted + 1))
               ((unrestricted != 2)) || hidden=1
@@ -503,6 +507,13 @@ check_rg() {
     selected=${BASH_REMATCH[2]}
     [[ "$dotenv_types" == *" $t "* ]] && listed=1
   done
+  # --files prints the paths rg would search and reads no file, so a dotenv
+  # name in that list leaks nothing. A count, file-match or JSON flag anywhere
+  # turns the listing back into a search (the last mode flag wins, ripgrep
+  # 15.2.0), so only a listing with none of them skips the checks below.
+  if ((files && !search)); then
+    return 0
+  fi
   if (((hidden || listed) && !excluded)); then
     echo "$RECURSIVE_MSG" >&2
     exit 2

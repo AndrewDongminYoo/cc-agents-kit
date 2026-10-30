@@ -719,6 +719,38 @@ RECURSIVE = [
     (2, "rg --no-hidden then -.", "rg --no-hidden -. KEY ."),
     (2, "rg: the second -u after --no-hidden", "rg -u --no-hidden -u KEY ."),
     (2, "rg --no-hidden keeps a dotenv glob", "rg --no-hidden -g '*' KEY ."),
+    # --- rg --files lists paths and reads no file, unless a mode flag turns it
+    # back into a search (the last mode flag wins, ripgrep 15.2.0) ---
+    (0, "rg --files --hidden lists names only", "rg --files --hidden ."),
+    (0, "rg --files -uu lists names only", "rg --files -uu ."),
+    (0, "rg --files with a dotenv glob lists names only", "rg --files -g '*' ."),
+    (0, "rg --files with a dotenv type lists names only", "rg --files -t sh ."),
+    (
+        0,
+        "rg --files with an ignore file lists names only",
+        "rg --files --ignore-file x .",
+    ),
+    (0, "rg --files in a pipeline", "pwd; rg --files --hidden | head -50"),
+    (2, "rg --files turned into a count by -c", "rg --files --hidden -c KEY ."),
+    (
+        2,
+        "rg --files turned into a count by --count-matches",
+        "rg --files --hidden --count-matches KEY .",
+    ),
+    (2, "rg --files turned into a match list by -l", "rg --files --hidden -l KEY ."),
+    (
+        2,
+        "rg --files turned into a match list by --files-with-matches",
+        "rg --files --hidden --files-with-matches KEY .",
+    ),
+    (
+        2,
+        "rg --files turned into --files-without-match",
+        "rg --files --hidden --files-without-match KEY .",
+    ),
+    (2, "rg --files turned into JSON", "rg --files -uu --json ."),
+    (2, "rg --files with -l inside a cluster", "rg --files -.l KEY ."),
+    (2, "rg: --files after -- is a path, not the flag", "rg --hidden KEY -- --files"),
     # --- rg --type-add only defines a type; -t selects it, in either order ---
     (0, "rg --type-add without -t", "rg --type-add 'custom:*' KEY ."),
     (

@@ -10,6 +10,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 - `repo-gate` 0.2.10 `setup-trunk` recommends changing a linter's commands by overriding its definition under `lint.definitions`, so that `lint.enabled` stays a plain list of `linter@version` strings, and advises against the `- linter@version:` mapping form.
   It shows `trunk print-config` keeping the plugin's command fields and adding only the overridden `enabled: true`, using `pinact`'s `upgrade` command as the example.
 
+### Fixed
+
+- `guard-hooks` 0.5.2 `secrets-path-guard` lets `rg --files` list paths with `--hidden`, `-uu`, a dotenv-capable glob or type, or an ignore file, because the listing reads no file; a `-c`, `-l`, `--count`, `--count-matches`, `--files-with-matches`, `--files-without-match` or `--json` anywhere in the command still turns it into a search that the existing checks apply to.
+  Agent sessions commonly start by listing a repository with `rg --files --hidden`, and the hook refused that first call.
+
 ## [0.8.3] — 2026-10-25
 
 `repo-gate`'s `setup-trunk` records how a first run in a brand-new repository behaves and what a generated `.shellcheckrc` should become (#82, #83, #84), `ci-babysit` and `fix-osv-vulnerabilities` record two lessons from a Dependabot sweep (#81), and `context-handoff`'s `handoff` and `log-it` name the source of each external status (#79).
