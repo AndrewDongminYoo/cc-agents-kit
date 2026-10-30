@@ -3,6 +3,9 @@
 version: 0.1
 cli:
   version: 1.25.0
+  options:
+    - commands: [ALL]
+      args: --monitor=false
 # Many linters and tools depend on runtimes - configure them here. (https://docs.trunk.io/runtimes)
 runtimes:
   enabled:
@@ -12,14 +15,33 @@ runtimes:
 # This is the section where you manage your linters. (https://docs.trunk.io/check/configuration)
 # cspell:words shfmt, taplo
 lint:
+  definitions:
+    - name: pinact
+      commands:
+        - name: upgrade
+          enabled: true
+    - name: trufflehog
+      commands:
+        - name: lint
+          run: trufflehog filesystem --json --fail --fail-on-scan-errors --no-verification --no-update ${target}
+          direct_configs:
+            - .trunk/configs/trufflehog_to_sarif.py
+          parser:
+            runtime: python
+            run: python3 .trunk/configs/trufflehog_to_sarif.py
   disabled:
     - bandit
     - shfmt
     - taplo
+  ignore:
+    # Operator confirmed both credential-shaped constants are never-issued fixtures.
+    # This exact test file is excluded only from TruffleHog; all other checks remain.
+    - linters: [trufflehog]
+      paths: [plugins/guard-hooks/hooks/output-secret-mask.test.py]
   enabled:
     - actionlint@1.7.12
     - black@26.10.1
-    - checkov@3.3.30
+    - checkov@3.4.0
     - git-diff-check
     - isort@9.0.2
     - markdownlint@0.50.0
