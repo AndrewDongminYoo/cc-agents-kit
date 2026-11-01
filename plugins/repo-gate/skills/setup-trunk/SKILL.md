@@ -131,6 +131,34 @@ trunk check --all --filter=eslint
 trunk check --all --filter=shellcheck --sample=5
 ```
 
+**Read how CI runs trunk before you rely on hold-the-line.**
+If a workflow runs `trunk-io/trunk-action` with `check-mode: all`, CI checks every file, not only the changed ones.
+Then a linter that you enable must report nothing on the whole repository, or the first PR after the change fails.
+Run `trunk check --all --no-fix --show-existing` in the tree that you will push, without `--filter`, as the last step.
+A filtered run or a run in a different checkout does not show the state that CI reads.
+
+### Try a linter before you enable it
+
+`--filter` runs only linters that are enabled.
+For a linter in `lint.disabled`, or one that no section names, the check runs nothing and exits 2:
+
+```log
+✖ [--filter] 'checkov,hadolint,shellcheck,taplo' are not enabled
+```
+
+To try such a linter:
+
+1. Copy `.trunk/trunk.yaml` to a scratch path.
+2. Run `trunk check enable <linter> ...`.
+3. Run `trunk check --all --no-fix --show-existing --filter=<linter>,...`.
+4. Keep each linter that the evidence supports, and remove the others from `lint.enabled`.
+
+`trunk check enable` can also write a config file into `.trunk/configs/`, for example `.shellcheckrc` or `.hadolint.yaml`.
+Read each new file, and delete the files of linters that you do not keep.
+`trunk check enable` puts the new entries at the top of `lint.enabled`, before the entries that were already there.
+Sort the entries that you added.
+(trunk 1.25.0, plugins v1.11.0, 2026-11-01: one call put `checkov`, `hadolint`, `shellcheck` and `taplo` before `actionlint`, and a later call put `cspell` before all of them.)
+
 ## Evidence-based Linter Selection
 
 ### No universal baseline
