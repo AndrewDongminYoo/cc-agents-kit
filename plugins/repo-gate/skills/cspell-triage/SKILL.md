@@ -48,6 +48,8 @@ Otherwise consolidate to the root and delete the orphan.
 
 Set `useGitignore: true` while you are there — without it, ignored trees are still scanned.
 Pair it with `gitignoreRoot: "."`: in a linked worktree inside another repository, `useGitignore` alone can hide every file; see "Reading `Files checked: 0` as a clean run" under Common mistakes.
+The quotation marks are JSON syntax.
+In a YAML config, write `gitignoreRoot: .`, because yamllint with `quoted-strings: {required: only-when-needed}` reports the quoted form (auto-chatter `cspell.config.yaml`, 2026-11-01).
 
 **Put the scan surface in the config, never in the gate command — and only widen it when the repo has something to widen it for.**
 By default cspell skips every path beginning with `.`. Whether that hides anything is one command:
@@ -255,6 +257,12 @@ The same split applies to inline directives, which is easy to get wrong:
   After injection, the same gate must fail and its output must name the exact canary token.
   If `cmp` fails, restore the pre-existing diff manually before continuing.
   Never create or delete a file in a source directory to test a spell checker — in a Flutter repo, `lib/main.dart` is the conventional entry point, so both creating and removing it carry meaning far beyond this task, and `rm` in a tracked tree is not a scratch operation.
+
+- **Declaring the task done from the cspell gate alone.**
+  The cspell config and the dictionary files are files of the repository too, so other linters check them.
+  After you change them, run the repository's full gate without a linter filter, for example `trunk check --all --no-fix --show-existing` in a Trunk repository.
+  In auto-chatter on 2026-11-01, a delegated run of this skill finished with `trunk check --all --filter=cspell` green.
+  The unfiltered run then failed on `cspell.config.yaml` with `yamllint/quoted-strings`, because the config had `gitignoreRoot: "."` (step 1).
 
 - **Reading `Files checked: 0` as a clean run.**
   With `useGitignore: true`, a linked worktree (`git worktree add`) that sits inside another repository's working tree can check nothing: `CSpell: Files checked: 0, Issues found: 0`, which reads as a pass.

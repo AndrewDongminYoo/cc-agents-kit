@@ -10,6 +10,9 @@ Entries are grouped by release; the topmost section collects work that has not y
 - `repo-gate` 0.2.11 `setup-trunk` covers a JavaScript workspace in a subdirectory that the root `trunk.yaml` lints: how to merge a nested `.trunk/` into the root, installing a prettier plugin through the prettier tool's `extra_packages` (trunk's sandbox has no `<dir>/node_modules`), and limiting eslint to the workspace that holds `eslint.config.*`.
   It records that trunk's `osv-scanner` skips `uv.lock` because the built-in `lockfile` type omits it, with the file-type override that adds it, and that a pinact floating-ref exemption belongs in `.github/pinact.yml` rather than `lint.ignore`.
   A new table links each common linter's configuration reference and the trunk plugin definitions.
+- `repo-gate` 0.2.12 `setup-trunk` says to read how CI runs trunk before relying on hold-the-line: with `check-mode: all`, a newly enabled linter must be clean on the whole repository, so the last step is an unfiltered `trunk check --all --no-fix --show-existing` in the tree that will be pushed.
+  It shows how to try a linter that is not enabled, because `--filter` exits 2 for one, and that `trunk check enable` puts new entries at the top of `lint.enabled` and can write a config file.
+- `repo-gate` 0.2.12 `cspell-triage` says to finish with the repository's full gate after a config or dictionary change, because a `--filter=cspell` run missed a yamllint failure in `cspell.config.yaml`, and to write `gitignoreRoot: .` unquoted in a YAML config.
 
 ## [0.8.4] — 2026-10-30
 
