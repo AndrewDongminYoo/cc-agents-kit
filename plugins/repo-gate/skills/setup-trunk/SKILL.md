@@ -459,11 +459,15 @@ This also applies when a separate repository was merged in with its own `.trunk/
 
 To merge a nested `<dir>/.trunk/` into the root config:
 
-1. Read `<dir>/.trunk/trunk.yaml` and note each linter it enabled.
+1. Read `<dir>/.trunk/trunk.yaml` and note each linter it enabled, each `lint.definitions` override, each `lint.ignore` entry and each action.
 2. Diff each file in `<dir>/.trunk/configs/` against the root `.trunk/configs/`.
-3. Delete `<dir>/.trunk/`.
-4. Remove the root `lint.ignore` entry for `<dir>/**`.
-5. Run `trunk check --all --no-fix --show-existing --filter=<linter>` for each linter, and read the results under `<dir>/`.
+3. Migrate what the root does not have yet:
+   - Add each linter that only `<dir>/` enabled to the root `lint.enabled`. If it applies only to `<dir>/`, limit it with a `lint.ignore` entry, as the eslint example below does.
+   - Copy each definition override, ignore entry and action that still applies. Rewrite its paths relative to the repository root.
+   - For each config file that differs, decide which rules apply to `<dir>/`. Merge them into the root copy. Keep a separate copy inside `<dir>/` only for a tool that reads the nearest config file, such as prettier.
+4. Delete `<dir>/.trunk/`.
+5. Remove the root `lint.ignore` entry for `<dir>/**`.
+6. Run `trunk check --all --no-fix --show-existing --filter=<linter>` for each linter, and read the results under `<dir>/`.
 
 Trunk runs some linters in a sandbox directory that does not contain `<dir>/node_modules`.
 Two linters behave differently there:
