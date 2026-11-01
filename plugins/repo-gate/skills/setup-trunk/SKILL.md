@@ -410,6 +410,104 @@ lint:
         - "**" # disable entirely for mobile repos
 ```
 
+When the linter reads its own ignore file, put the exemption there instead of in `lint.ignore`.
+A trunk ignore applies only inside trunk.
+A direct run of the same tool, or another scanner, still reports the path.
+For example, `pinact` exempts floating refs such as `dtolnay/rust-toolchain@stable` with a rule in `.github/pinact.yml` (or `.pinact.yaml`):
+
+```yaml
+version: 3
+rules:
+  - ignore: true
+    conditions:
+      - expr: |
+          ActionName == "dtolnay/rust-toolchain" && ActionVersion == "stable"
+```
+
+Match on `ActionName`, which includes the owner.
+`ActionRepoOwner` for that action is `dtolnay`, not `rust-toolchain`.
+A whole-file `lint.ignore` for pinact also stops pinact from checking the pinnable actions in that file.
+A direct `pinact run --update` without a token hits the GitHub API limit of 60 requests and prints `403 API rate limit` for each action, so run it with `GITHUB_TOKEN="$(gh auth token)"` before you read its result as "up to date".
+(pinact 4.1.1 through trunk and 5.0.2 direct, 2026-11-01.)
+
+### Lockfiles that trunk's `osv-scanner` does not scan
+
+Trunk runs `osv-scanner` only on files of its built-in `lockfile` type, and that type has no `uv.lock`.
+So `trunk check` never scans a Python project that uv locks, and it reports no error.
+`osv-scanner` itself reads `uv.lock`.
+Add a file type and override the linter's `files`:
+
+```yaml
+lint:
+  definitions:
+    - name: osv-scanner
+      files: [lockfile, uv-lockfile]
+  files:
+    - name: uv-lockfile
+      filenames: [uv.lock]
+```
+
+An override of `files` replaces the plugin's list, so keep `lockfile` in it.
+Confirm the change with `trunk check --all --no-fix --show-existing --filter=osv-scanner`: the `Checked N files` count goes up by one for each `uv.lock`.
+For any other lockfile, compare its name with the `lockfile` type in trunk-io/plugins `linters/plugin.yaml` before you trust a clean scan.
+(trunk 1.25.0, plugins v1.11.0, osv-scanner 2.7.0, 2026-11-01.)
+
+### A workspace in a subdirectory (monorepo)
+
+Use this when a JavaScript workspace lives in a subdirectory, such as `frontend/`, and the root `.trunk/trunk.yaml` lints it.
+This also applies when a separate repository was merged in with its own `.trunk/`.
+
+To merge a nested `<dir>/.trunk/` into the root config:
+
+1. Read `<dir>/.trunk/trunk.yaml` and note each linter it enabled, each `lint.definitions` override, each `lint.files` type, each `lint.ignore` entry, each `tools.definitions` entry and each action.
+2. Diff each file in `<dir>/.trunk/configs/` against the root `.trunk/configs/`.
+3. Migrate what the root does not have yet:
+   - Add each linter that only `<dir>/` enabled to the root `lint.enabled`. If it applies only to `<dir>/`, limit it with a `lint.ignore` entry, as the eslint example below does.
+   - Copy each definition override, `tools.definitions` entry, ignore entry and action that still applies. Rewrite its paths relative to the repository root.
+   - Copy each `lint.files` type that a copied override names and the root does not define, or the override points at a type that no longer exists.
+   - For each config file that differs, decide which rules apply to `<dir>/`. Merge them into the root copy. Keep a separate copy inside `<dir>/` only for a tool that reads the nearest config file, such as prettier.
+4. Delete `<dir>/.trunk/`.
+5. Remove the root `lint.ignore` entry for `<dir>/**`.
+6. Run `trunk check --all --no-fix --show-existing --filter=<linter>` for each linter, and read the results under `<dir>/`.
+
+Trunk runs some linters in a sandbox directory that does not contain `<dir>/node_modules`.
+Two linters behave differently there:
+
+- **prettier with a plugin.**
+  If `<dir>/.prettierrc.*` names a plugin, trunk's prettier fails on every file under `<dir>/` with `Cannot find package '<plugin>' imported from <sandbox>/noop.js`.
+  Install the plugin with trunk's prettier tool:
+
+  ```yaml
+  tools:
+    definitions:
+      - name: prettier
+        extra_packages:
+          - prettier-plugin-tailwindcss@0.8.1 # keep equal to <dir>/package.json
+  ```
+
+  Then compare `trunk check --all --no-fix --show-existing --filter=prettier` with `pnpm exec prettier --check .` in `<dir>/`. They must list the same files.
+  Prettier uses the nearest config file, so files outside `<dir>/` keep the defaults or the root config.
+
+- **eslint with a flat config in `<dir>/`.**
+  trunk's eslint loaded `<dir>/eslint.config.mjs` and its plugins from `<dir>/node_modules`.
+  For files outside `<dir>/`, it fails with `ESLint couldn't find an eslint.config.* file`.
+  Limit eslint to the workspace:
+
+  ```yaml
+  lint:
+    ignore:
+      - linters: [eslint]
+        paths:
+          - "**"
+          - "!<dir>/**"
+  ```
+
+  Keep the trunk eslint version equal to the one in `<dir>/package.json`.
+  This works only after the package manager installed `<dir>/node_modules`.
+  To prove that the config is read, add a file with a known violation, confirm that trunk reports it, and then delete the file.
+
+(trunk 1.25.0, prettier 3.9.10, eslint 10.14.0, 2026-11-01.)
+
 ### Linter config files in subdirectories
 
 If a linter's config file lives in `.github/` or another non-root directory (e.g., `.cspell.json` in `.github/`), trunk may not detect it and will report false positives.
@@ -469,6 +567,29 @@ When `trunk check` reports a dependency vulnerability (e.g., from `osv-scanner`)
 | Using trunk's `dart` linter in Flutter projects               | Disable `dart`; use a custom `dart-actions` definition instead       |
 | eslint/dart reporting different results than running directly | Pin to `@SYSTEM` in `trunk.yaml` to use the repo's own binary        |
 | Forgetting `!path` negative globs                             | Use `!pattern` to re-enable a subset inside an ignored directory     |
+| Trusting a clean `osv-scanner` run in a uv project            | Add a `uv.lock` file type; trunk's `lockfile` type omits it          |
+| Exempting a pinact floating ref with `lint.ignore`            | Use a `rules` entry in `.github/pinact.yml`                          |
+| Prettier plugin "Cannot find package" under a subdirectory    | Add the plugin to the prettier tool's `extra_packages`               |
+
+## Linter configuration references
+
+Read the linter's own config reference before you write its config file.
+Read the trunk plugin definition before you override `files`, `commands` or `direct_configs`.
+
+| Topic                                                   | Reference                                                            |
+| ------------------------------------------------------- | -------------------------------------------------------------------- |
+| `trunk.yaml` keys                                       | <https://docs.trunk.io/reference/trunk-yaml>                         |
+| Trunk linter definitions (`linters/<name>/plugin.yaml`) | <https://github.com/trunk-io/plugins/tree/main/linters>              |
+| Trunk file types such as `lockfile`                     | <https://github.com/trunk-io/plugins/blob/main/linters/plugin.yaml>  |
+| actionlint                                              | <https://github.com/rhysd/actionlint/blob/main/docs/config.md>       |
+| eslint (flat config)                                    | <https://eslint.org/docs/latest/use/configure/configuration-files>   |
+| markdownlint rules                                      | <https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md>  |
+| osv-scanner                                             | <https://google.github.io/osv-scanner/configuration/>                |
+| pinact                                                  | <https://github.com/suzuki-shunsuke/pinact/blob/main/docs/config.md> |
+| prettier                                                | <https://prettier.io/docs/configuration>                             |
+| ruff                                                    | <https://docs.astral.sh/ruff/configuration/>                         |
+| shellcheck (`.shellcheckrc`, see RC FILES)              | <https://github.com/koalaman/shellcheck/blob/master/shellcheck.1.md> |
+| yamllint                                                | <https://yamllint.readthedocs.io/en/stable/configuration.html>       |
 
 ## Quick Reference
 
