@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `repo-gate` 0.2.11 `setup-trunk` covers a JavaScript workspace in a subdirectory that the root `trunk.yaml` lints: how to merge a nested `.trunk/` into the root, installing a prettier plugin through the prettier tool's `extra_packages` (trunk's sandbox has no `<dir>/node_modules`), and limiting eslint to the workspace that holds `eslint.config.*`.
+  It records that trunk's `osv-scanner` skips `uv.lock` because the built-in `lockfile` type omits it, with the file-type override that adds it, and that a pinact floating-ref exemption belongs in `.github/pinact.yml` rather than `lint.ignore`.
+  A new table links each common linter's configuration reference and the trunk plugin definitions.
+
 ## [0.8.4] — 2026-10-30
 
 `guard-hooks`' `secrets-path-guard` no longer refuses `rg --files`, the listing many agent sessions start with, and `repo-gate`'s `setup-trunk` recommends overriding a linter's definition to change its commands (#87).
