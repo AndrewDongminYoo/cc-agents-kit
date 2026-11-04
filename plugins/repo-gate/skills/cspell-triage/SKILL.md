@@ -223,7 +223,7 @@ The same split applies to inline directives, which is easy to get wrong:
 ## Common mistakes
 
 - **Widening a working config's scan surface as a side quest.**
-  A word-triage request on a repo with no tracked dot-paths does not need `enableGlobDot`, and enabling it there forces a `.git` ignore into existence purely to patch the setting's own side effect (observed twice by the operator, 2026-08-12). The gate at the top routes this case to step 3 alone.
+  A word-triage request on a repo with no tracked dot-paths does not need `enableGlobDot`, and enabling it there forces a `.git` ignore into existence purely to patch the setting's own side effect (observed twice by Dongmin Yu, 2026-08-12). The gate at the top routes this case to step 3 alone.
 - **`-c` does not replace the repo's own config — it merges with it.**
   Running `cspell -c probe.json .` inside a repo that has `cspell.json` still loads that `cspell.json`, dictionaries and all.
   A/B tests built on `-c` therefore show no difference and read as "the dictionary contributes nothing."
