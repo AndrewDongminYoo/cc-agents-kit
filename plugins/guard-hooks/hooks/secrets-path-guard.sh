@@ -24,7 +24,7 @@ SEARCH_PATH=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.path // empty' 2>/d
 # APFS is case-insensitive by default; match case-insensitively too.
 shopt -s nocasematch
 if [[ "$FILE_PATH" == *".zprofile.secrets"* || "$COMMAND" == *".zprofile.secrets"* || "$SEARCH_PATH" == *".zprofile.secrets"* ]]; then
-  echo "The file ~/.zprofile.secrets holds Keychain-derived secrets and must not be read, edited, or echoed. Ask the operator to verify its configuration without copying secret values into chat or another file." >&2
+  echo "The file ~/.zprofile.secrets holds Keychain-derived secrets and must not be read, edited, or echoed. Ask the user to verify its configuration without copying secret values into chat or another file." >&2
   exit 2
 fi
 
@@ -185,7 +185,7 @@ for field in FILE_PATH SCAN SEARCH_PATH; do
         continue
         ;;
     esac
-    echo "Blocked: dotenv path is not designated for development access in auto mode. Consult the template schema or ask the operator to review this exact path. Do not request secret values in chat or copy them to another file. See docs/environment-access.md." >&2
+    echo "Blocked: dotenv path is not designated for development access in auto mode. Consult the template schema or ask the user to review this exact path. Do not request secret values in chat or copy them to another file. See docs/environment-access.md." >&2
     if [[ "$field" == SCAN && "$matched" == [\'\"].env\* && "$COMMAND" == *--exclude* ]]; then
       echo "A two-word --exclude '.env*' is accepted only in a grep, egrep or fgrep command of up to 4 KiB, read from the start of the command with no eval, sh -c, \$(...), quoting the hook cannot read, or -- before it. Write --exclude='.env*'." >&2
     fi

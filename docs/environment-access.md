@@ -8,9 +8,9 @@ Maintain a tracked `.env.example` containing key names, empty assignments and co
 ## Choose the development paths explicitly
 
 By default this guard denies live dotenv paths, including names that look like development files.
-The operator can designate exact files for development access through `CC_GUARD_DEV_ENV_PATHS`, a JSON array in the operator-controlled hook environment.
+The user can designate exact files for development access through `CC_GUARD_DEV_ENV_PATHS`, a JSON array in the user-controlled hook environment.
 The setting is empty/unset by default; the plugin does not install it or select paths.
-For example, an operator could review this settings fragment for their own chosen path:
+For example, a user could review this settings fragment for their own chosen path:
 
 ```json
 {
@@ -23,8 +23,8 @@ For example, an operator could review this settings fragment for their own chose
 This is an example, not an instruction to copy a whole settings file or register that placeholder.
 Store the setting outside agent-writable configuration and review changes as permission changes.
 Do not let the agent expand the list after a refusal.
-The operator must verify that each selected file contains development credentials suitable for agent access.
-File names do not decide purpose: `.env.local` is not automatically safe, and an operator-designated path is not reclassified from its suffix.
+The user must verify that each selected file contains development credentials suitable for agent access.
+File names do not decide purpose: `.env.local` is not automatically safe, and a user-designated path is not reclassified from its suffix.
 Do not register production secrets or authentication stores.
 
 Each entry must be an absolute, normalized dotenv file path, with no glob, traversal, shell metacharacters or symlink components.
@@ -48,7 +48,7 @@ Every other mode retains the existing dotenv denial.
 Direct file tools can use an exact absolute path or a relative path resolved against the tool event's normalized, absolute, existing and symlink-free `cwd`.
 Bash commands must spell the designated absolute path literally, quoted when needed.
 This avoids guessing the working directory after `cd`, subshells or functions.
-For example, after the operator designates their actual development file:
+For example, after the user designates their actual development file:
 
 ```bash
 source '/absolute/project/.env.development' && npm run dev

@@ -95,7 +95,7 @@ export const register: Register = (on) => {
   // here) delays a needed compaction by one request, never more.
   let lastVetoedReading: string | null = null;
   // A refused append leaves the nudge unsent, so it is retried on the next
-  // prompt; the operator is told only once.
+  // prompt; the user is told only once.
   let isRefusalToasted = false;
 
   // One reading per request, from the request's own usage, main loop only.
@@ -145,8 +145,8 @@ export const register: Register = (on) => {
     };
     await update($, reading, () => next_);
     try {
-      // A copy the operator (or a later session) can read from disk, since
-      // the band is drawn only on the operator's screen.
+      // A copy the user (or a later session) can read from disk, since
+      // the band is drawn only on the user's screen.
       await $.store.set("lastReading", next_);
     } catch {
       // Diagnostic only: a store that refuses must not cost the reading.
@@ -201,7 +201,7 @@ export const register: Register = (on) => {
   });
 
   // The handoff nudge, once per session, by the real reading. The row the
-  // model reads goes through session.append; the operator gets a toast.
+  // model reads goes through session.append; the user gets a toast.
   on("prompt.submit", async ($, e, next) => {
     const real = await read($, reading);
     if (

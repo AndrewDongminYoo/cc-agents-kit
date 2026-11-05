@@ -13,7 +13,7 @@ CASES = [
     # (expected_exit, label, command)
     (
         2,
-        "operator's real slip: backtick in -m",
+        "real slip: backtick in -m",
         'git commit -m "fix: cancel `players` subscription"',
     ),
     (
