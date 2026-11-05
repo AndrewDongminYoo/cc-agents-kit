@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Match operator-designated development paths; never read dotenv contents."""
+"""Match user-designated development paths; never read dotenv contents."""
 
 import json
 import os

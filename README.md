@@ -148,7 +148,7 @@ It is not a replacement for entropy-based scanning; run trufflehog or gitleaks i
 Blocks any tool call whose `file_path`, `command`, or `path` names a live secrets file — dotenv files and their variants, plus `~/.zprofile.secrets`.
 Template variants stay readable for key names and documentation. Never copy real values into chat or another file to get around a refusal.
 
-An operator can designate exact development dotenv paths with the default-off `CC_GUARD_DEV_ENV_PATHS` JSON array.
+A user can designate exact development dotenv paths with the default-off `CC_GUARD_DEV_ENV_PATHS` JSON array.
 Only in auto mode, recognized references to those paths leave the decision to normal permissions and auto evaluation; the hook never emits `allow` or `ask`.
 The agent can read the selected values and use ordinary absolute-path `source` commands.
 Unregistered dotenv paths and Keychain protection remain unchanged, and other deny rules still apply.

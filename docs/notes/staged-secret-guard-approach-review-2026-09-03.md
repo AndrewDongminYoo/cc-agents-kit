@@ -18,7 +18,7 @@ against the PR #9 branch, in a repository with a credential staged.
 | ------------------------------------------------------- | ------- | ------- |
 | `git commit -m x`                                       | refused | refused |
 | `git -c alias.ci=commit ci -m x`                        | refused | refused |
-| `autocommit`, a zsh function in the operator's `.zshrc` | ALLOWED | ALLOWED |
+| `autocommit`, a zsh function in the user's own `.zshrc` | ALLOWED | ALLOWED |
 | `bash script.sh`                                        | ALLOWED | ALLOWED |
 | `sh -c "git commit -m x"`                               | ALLOWED | ALLOWED |
 | `eval "git commit -m x"`                                | ALLOWED | ALLOWED |
@@ -32,7 +32,7 @@ against the PR #9 branch, in a repository with a credential staged.
 
 Two of thirteen.
 The guard recognises the command only when it is spelled out literally, and the
-operator's own everyday commit function is among the eleven it cannot see.
+user's own everyday commit function is among the eleven it cannot see.
 
 ## What the misses cost, measured
 

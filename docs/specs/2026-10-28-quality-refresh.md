@@ -27,7 +27,7 @@ Preserve public contracts, product source, manifests, locks, workflows that publ
 
 ## Confirmed fixture exception
 
-The operator confirmed both credential-shaped constants in `plugins/guard-hooks/hooks/output-secret-mask.test.py` were never issued.
+It was confirmed that both credential-shaped constants in `plugins/guard-hooks/hooks/output-secret-mask.test.py` were never issued.
 Exclude only that exact file from TruffleHog, without reading or changing its protected values.
 This suppresses every TruffleHog finding in that file, not just the two fixtures.
 Other linters and other scanner targets remain active; literal and decoded positive controls must run outside the exception.

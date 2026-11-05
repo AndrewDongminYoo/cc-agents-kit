@@ -54,7 +54,7 @@ lint:
     - trufflehog@3.99.8
     - yamllint@1.38.0
   ignore:
-    # Operator confirmed both credential-shaped constants are never-issued fixtures.
+    # Both credential-shaped constants are confirmed never-issued fixtures.
     # This exact test file is excluded only from TruffleHog; all other checks remain.
     - linters: [trufflehog]
       paths: [plugins/guard-hooks/hooks/output-secret-mask.test.py]
