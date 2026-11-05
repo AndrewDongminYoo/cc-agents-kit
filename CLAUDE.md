@@ -47,7 +47,7 @@ The TruffleHog command uses `--no-verification --no-update` and a local filesyst
 The reader limits each source read to 1 MiB plus a sentinel byte and retains eight cached source files.
 It preserves Unicode columns, reported lines and file-level decoded findings; these limits do not bound total JSONL, result count, offsets, or process memory.
 TruffleHog also uses `--fail-on-scan-errors`.
-The exact `plugins/guard-hooks/hooks/output-secret-mask.test.py` fixture is excluded only from TruffleHog because Dongmin Yu confirmed both constants were never issued.
+The exact `plugins/guard-hooks/hooks/output-secret-mask.test.py` fixture is excluded only from TruffleHog because both constants were confirmed never issued.
 This is a file exclusion, not a value whitelist, so other secrets in that file would also be skipped.
 All other linters and all other TruffleHog targets remain enabled.
 Run literal and encoded detection controls outside that path, and stop each one-off daemon with `trunk daemon shutdown --monitor=false` in the same checkout.
