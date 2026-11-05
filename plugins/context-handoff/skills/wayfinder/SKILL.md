@@ -37,7 +37,7 @@ The map is an **index**, not a store.
 A decision lives in exactly one place — its ticket — so the map gists it and links, never restates it.
 Load the map at low resolution each session and open individual tickets on demand.
 
-Refer to every ticket by its **title** in anything the operator reads.
+Refer to every ticket by its **title** in anything the user reads.
 A wall of `01, 02, 03` is illegible; the number rides inside the name, it never stands in for it.
 
 ```markdown
@@ -93,11 +93,11 @@ Use the local files by default — they work offline and commit alongside the co
 
 ## Ticket types
 
-Every ticket is **HITL** — worked with the operator, who speaks for themselves — or **AFK**, driven by the agent alone.
+Every ticket is **HITL** — worked with the user, who speaks for themselves — or **AFK**, driven by the agent alone.
 A HITL ticket resolves only through that live exchange.
 An agent that asks its own question and then answers it has broken HITL and produced a fabricated decision.
 
-- **grilling** (HITL) — conversation, one question at a time. The default. Look up _facts_ yourself; put every _decision_ to the operator and wait.
+- **grilling** (HITL) — conversation, one question at a time. The default. Look up _facts_ yourself; put every _decision_ to the user and wait.
 - **research** (AFK) — reading docs, third-party APIs, or the knowledge wiki to surface a fact a decision waits on. Resolved by a subagent.
 - **prototype** (HITL) — a cheap, rough, concrete artifact to react to, when "how should it look" or "how should it behave" is the real question. Link the artifact; do not paste it in.
 - **task** (either) — manual work that must happen before a decision can be made: provisioning access, moving data so its shape can be seen, signing up for a service so its API can be judged. The one type that _does_ rather than decides, and it earns that by unblocking a decision. Its answer records what was done plus any facts later tickets depend on.
@@ -123,7 +123,7 @@ It stays out of **Decisions so far**, which records the route actually walked.
 
 1. **Pull precedent first.** If you keep a record of past decisions — a wiki, a memory directory, an agent that retrieves them — query it on 1–2 narrowly-named topics before naming anything. Finding nothing means you are setting new precedent, so say so on the map's Notes rather than silently inventing.
 2. **Name the destination.** Grill it out one question at a time. The destination fixes the scope, so it settles before any ticket exists.
-3. **Map the frontier** — grill again, breadth-first, fanning across the whole space rather than deep on one thread. **If this surfaces no fog**, the effort fits one session: stop, say so, and ask how the operator wants to proceed. Do not build a map nobody needs.
+3. **Map the frontier** — grill again, breadth-first, fanning across the whole space rather than deep on one thread. **If this surfaces no fog**, the effort fits one session: stop, say so, and ask how the user wants to proceed. Do not build a map nobody needs.
 4. **Write the map and the tickets you can specify now**, then wire `Blocked by` in a second pass once every ticket has a number. Everything you cannot specify stays in **Not yet specified**.
 5. **Fan out the AFK research tickets** as parallel subagents in a single message. Built-in `Explore` and `Plan` agents do not inherit `CLAUDE.md` or your rules files, so write every constraint they must respect into each prompt yourself.
 6. **Commit the map** as a conventional commit, then stop. Charting resolves nothing by design, and it is not a finished task group — do not write the post-task audit marker.
@@ -131,8 +131,8 @@ It stays out of **Decisions so far**, which records the route actually walked.
 ## Work the map
 
 1. **Re-read the map and the ticket files from disk in this turn.** You are never the only writer — a teammate, another session, or a merged branch can move the files under you — so state from earlier in the conversation is stale.
-2. **Choose and claim.** Take the ticket the operator named, else the first frontier ticket by number. Set `Status: claimed` and save before any work.
-3. **Resolve it**, zooming into related or resolved tickets on demand and invoking whatever the map's Notes name. HITL tickets resolve through the operator, not around them.
+2. **Choose and claim.** Take the ticket the user named, else the first frontier ticket by number. Set `Status: claimed` and save before any work.
+3. **Resolve it**, zooming into related or resolved tickets on demand and invoking whatever the map's Notes name. HITL tickets resolve through the user, not around them.
 4. **Record the answer with its evidence basis.** Every fact in a resolution traces to a source, and a gap is marked as one rather than filled in. A resolution built on truncated or aborted command output is not a resolution: empty output can mean the command never ran.
 5. **Update the map**: append one gist line plus link under **Decisions so far**, graduate the fog this answer sharpened into new tickets, and clear each graduated patch from **Not yet specified** so it lives in one place. If the answer invalidates other tickets, update or delete them.
 6. **Commit, then stop.** One ticket per session — the exception is AFK research, which subagents burn down in parallel. Hand off (`handoff`) or `/clear` rather than taking a second ticket on a tired context.
