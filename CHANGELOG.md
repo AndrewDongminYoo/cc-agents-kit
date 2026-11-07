@@ -5,7 +5,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
-`context-handoff` gives a compaction the same shape as a handoff: a `PreCompact` hook supplies the summary instructions, a `SessionStart` hook names the transcript after a compaction, and the `handoff` template takes the same section list.
+## [0.9.0] — 2026-11-08
+
+`context-handoff` gives a compaction the same shape as a handoff: a `PreCompact` hook supplies the summary instructions, a `SessionStart` hook names the transcript after a compaction, and the `handoff` template takes the same section list (#96).
+Text that named a person in the third person was reworded across the repository (#93, #94, #95).
 `context-handoff` moves from 0.2.3 to 0.3.0; `context-meter` (0.1.0), `guard-hooks` (0.5.2), `quick-look` (0.1.0) and `repo-gate` (0.2.12) are unchanged.
 
 ### Added
@@ -22,6 +25,9 @@ Entries are grouped by release; the topmost section collects work that has not y
 - `context-handoff` 0.3.0 `handoff` rewrites its Output Template to the same FIXED/RECAP section list, so a handoff and a compaction are one document at two lengths.
   The verbatim rule now covers TASK, DONE WHEN and USER CONSTRAINTS; the external-status source rule and the fixed re-read line from 0.2.3 are kept under EXTERNAL STATUS; DEAD ENDS entries carry their evidence or are marked unverified.
   The design and its evidence are `docs/specs/2026-11-07-compaction-brief.md`.
+  A live measurement of both hooks across two manual compactions is recorded in `docs/plans/2026-11-07-compaction-brief.md`.
+- Wording that referred to a person as "the operator" or in the third person now uses neutral or first-person phrasing in `README.md`, `CLAUDE.md`, `docs/environment-access.md`, the `context-handoff` `wayfinder` skill, the `repo-gate` `cspell-triage` skill, and comments in `context-meter` and `guard-hooks` (#93, #94, #95).
+  The `wayfinder` change ships with `context-handoff` 0.3.0; the `cspell-triage`, `context-meter` and `guard-hooks` wording reaches installs with those plugins' next version bump, because none of the three merges bumped one.
 
 ## [0.8.5] — 2026-11-01
 
