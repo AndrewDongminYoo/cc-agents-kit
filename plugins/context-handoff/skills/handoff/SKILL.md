@@ -69,14 +69,14 @@ Capture TASK, DONE WHEN and USER CONSTRAINTS verbatim — do not paraphrase or i
 ## Output Template
 
 A handoff is a brief for the work still to be done, not a narrative of the work so far: it keeps what the next stretch has to act on and drops repetition, chronology that does not matter, and any weighting by how often a fact came up.
-The FIXED block is written once and copied unchanged into every later handoff or compaction; the RECAP block is replaced each time.
+The FIXED block is append-only: every entry from an earlier handoff or compaction is copied word for word, and what the user said since is added after it, in order; the RECAP block is written fresh each time from the current state.
 The plugin's `PreCompact` hook gives every compaction this same section list, so a compaction the user lets run is the thin version of this handoff, not a different document.
 
 ```plaintext
 HANDOFF CONTEXT
 ===============
 
-FIXED (copied unchanged from any earlier handoff; otherwise verbatim from the conversation)
+FIXED (append-only: earlier entries copied word for word, later requests and corrections added after them in order; where a later one replaces an earlier one, keep both and say which is current)
 
 TASK
 ----
@@ -91,12 +91,12 @@ USER CONSTRAINTS
 - [Verbatim constraints and preferences from the user, or quoted from CLAUDE.md/AGENTS.md]
 - If none, write: None
 
+RECAP (written fresh each time from the current state)
+
 PERSISTENT STATE
 ----------------
-- [Branch, worktree, uncommitted files, running services or background tasks]
+- [Branch, worktree, uncommitted files, running services or background tasks, as they are now]
 - [The session transcript path, so dropped history can be grepped]
-
-RECAP (replaces any earlier recap)
 
 OBJECTIVE
 ---------
@@ -167,4 +167,5 @@ TO CONTINUE IN A NEW SESSION:
 - Using `#` headers / bold / code fences in the content — breaks clean paste.
 - Calling non-existent tools (`session_read`, `todoread`) — the conversation is already in context.
 - Dropping the fixed re-read line from EXTERNAL STATUS: without it the receiving side builds on stated status (tracker, review, store or console, inbox) that may have changed since the handoff was written.
-- Rewriting the FIXED block in a later handoff: the task and its acceptance criteria drift a little with every paraphrase, so they are copied, never restated.
+- Restating the FIXED block in a later handoff: the task and its acceptance criteria drift a little with every paraphrase, so earlier entries are copied and later ones appended, never rewritten.
+- Carrying PERSISTENT STATE forward unchanged: uncommitted files and running services move between handoffs, so it is read from the workspace each time.

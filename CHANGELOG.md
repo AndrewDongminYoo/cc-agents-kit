@@ -11,7 +11,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 ### Added
 
 - `context-handoff` 0.3.0 ships `hooks/compaction-brief.sh`, a `PreCompact` hook on `manual|auto` that prints the compaction brief on stdout, which Claude Code uses as the instructions for the compaction summary.
-  The brief is the Appendix G compaction prompt from "You don't need long context" (arXiv 2611.05306): a FIXED block (task, acceptance criteria, user constraints and persistent state, verbatim and copied unchanged across compactions) and a RECAP block (objective, established facts, applied changes, verification, dead ends, remaining plan, retrieval commands, external status with its source).
+  The brief is the Appendix G compaction prompt from "You don't need long context" (arXiv 2611.05306): a FIXED block (task, acceptance criteria and user constraints, verbatim and append-only across compactions) and a RECAP block (persistent state, objective, established facts, applied changes, verification, dead ends, remaining plan, retrieval commands, external status with its source).
   It never blocks or delays a compaction, fails open by printing the brief on any input, and is disabled with `CC_GUARD_DISABLE_COMPACTION_BRIEF=1`.
 - `context-handoff` 0.3.0 ships `hooks/post-compact-retrieval.sh`, a `SessionStart` hook on `compact` that adds one line naming the transcript on disk, so history the summary dropped is grepped rather than re-derived (the paper's section 3.1 fallback for lossy compaction).
   It prints nothing without a transcript path and is disabled with `CC_GUARD_DISABLE_POST_COMPACT_RETRIEVAL=1`.

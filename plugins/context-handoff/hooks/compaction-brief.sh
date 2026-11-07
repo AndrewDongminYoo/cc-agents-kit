@@ -44,14 +44,14 @@ Keep only what the next stretch of work needs to act on; drop repetition, drop t
 Do not invent observations. Mark anything unverified as unverified.
 Use exactly these sections, in this order, with these headings.
 
-FIXED (copy unchanged from any earlier brief in the conversation; otherwise fill from the conversation, verbatim)
+FIXED (append-only: copy every entry from an earlier brief in the conversation word for word, then add what the user said since, in order; never paraphrase or drop an entry, and where a later request or correction replaces an earlier one, keep both and say which is current)
 - Task: every request the user made, in their words and in order.
 - Done when: the acceptance criteria, in the user's words where they gave them.
 - User constraints: constraints and preferences the user stated, and any from CLAUDE.md or AGENTS.md that were quoted; write None if there are none.
-- Persistent state: branch, worktree, uncommitted files, running services or background tasks, and the transcript path.
-$TRANSCRIPT_LINE
 
-RECAP (replaces any earlier recap)
+RECAP (replaces any earlier recap; every section is written fresh from the current state)
+- Persistent state: branch, worktree, uncommitted files, running services or background tasks, and the transcript path, as they are now.
+$TRANSCRIPT_LINE
 - Objective: one line, the required result of the current stretch.
 - Established facts: exact paths, symbols, commands, observed values and the important errors or output, with observations separated from unverified ideas.
 - Applied changes: each changed or created file, what changed, and whether it was verified.

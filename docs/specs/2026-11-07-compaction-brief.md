@@ -18,7 +18,8 @@ Out of scope: blocking or vetoing a compaction (the `context-meter` mod owns the
 The paper's long-horizon results (Claude Opus 4.5 within -3.7 to +5.6 points of full history across 22 threshold settings, with the Appendix G prompt driving every compaction) are the evidence for the section list; Appendix A's prose alone had led to a wrong reading of it, so the prompt text, not the description, is the source.
 Appendix A's finding is that the best compactions "are not narratives of the execution history but carefully cherry-picked briefs for further execution".
 That excludes equal-weight summarization, not history: the prompt keeps applied changes, verification results and dead ends because each one changes what the next stretch does.
-The harness, not the model, re-supplies the task on reset ("Do not invent observations or repeat the full task or document manifest"), which is why the template has a FIXED block the recap never rewrites.
+The harness, not the model, re-supplies the task on reset ("Do not invent observations or repeat the full task or document manifest"), which is why the template has a FIXED block the recap never paraphrases.
+A second compaction still has to carry requests and corrections made after the first brief, so the block is append-only rather than frozen (Codex review on PR #96, 2026-11-07), and mutable workspace state lives in the RECAP, where it is read fresh each time.
 Section 3.1 of the paper gives the fallback for what any lossy compaction loses: keep every message on disk and expose it to selective reading, which Claude Code already does through `transcript_path`.
 
 ## The brief
@@ -27,13 +28,14 @@ Both the hook and the template use this section list.
 Wording differs by channel (second person for the hook, first person for the handoff), the sections do not.
 
 ```plaintext
-FIXED (written once; a compaction or a later handoff copies it unchanged)
+FIXED (append-only: earlier entries copied word for word, later requests and corrections added in order;
+       where a later one replaces an earlier one, both stay and the current one is named)
   Task              the user's requests, verbatim, in order
   Done when         the acceptance criteria, verbatim where the user gave them
   User constraints  verbatim constraints from the user or CLAUDE.md/AGENTS.md; "None" if none
-  Persistent state  branch, worktree, uncommitted files, running services, and the transcript path
 
-RECAP (replaced on every compaction or handoff)
+RECAP (written fresh on every compaction or handoff from the current state)
+  Persistent state  branch, worktree, uncommitted files, running services, and the transcript path, as they are now
   Objective         one line: the required result of the current stretch
   Established facts exact paths, symbols, commands, observed values, key errors;
                     observations separated from unverified ideas

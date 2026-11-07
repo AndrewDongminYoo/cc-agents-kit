@@ -72,6 +72,17 @@ check("auto: exit 0", code == 0, f"exit={code} err={err!r}")
 check("auto: all twelve headings and the closing line", brief_ok(out), out)
 check("auto: transcript path named", TRANSCRIPT in out, out)
 check(
+    "auto: FIXED is append-only, not frozen",
+    "append-only" in out and "copy unchanged" not in out,
+    out,
+)
+check(
+    "auto: persistent state is in the RECAP, after the FIXED block",
+    out.index("RECAP") < out.index("- Persistent state:")
+    and out.index("- User constraints:") < out.index("RECAP"),
+    out,
+)
+check(
     "auto: no decision, no systemMessage",
     "decision" not in out and "systemMessage" not in out,
 )
