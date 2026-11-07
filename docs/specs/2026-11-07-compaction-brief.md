@@ -63,7 +63,7 @@ RECAP (written fresh on every compaction or handoff from the current state)
 - Includes the `transcript_path` from the payload in the Persistent state instruction when present, so the summary can name it.
 - On `manual` with a non-null `custom_instructions`, still prints the brief; the docs do not state how the two combine, and the plan's first step measures it.
 - Fails open: empty, malformed or key-less stdin exits `0` and prints the brief anyway (printing nothing would silently fall back to the default summary, which is the condition this hook exists to replace; a brief with no transcript path is still a valid brief).
-- Parses under macOS `/bin/bash` 3.2; `jq` optional (used only to read `transcript_path` and `custom_instructions`, with `|| true`).
+- Parses under macOS `/bin/bash` 3.2; reads `transcript_path` with `jq ... || true` under the kit's rule that `jq` is a documented prerequisite never checked at runtime (README §Prerequisites, CLAUDE.md §Hook contract), so without `jq` the brief carries the generic transcript line and the retrieval hook stays silent, the same fail-open as every other hook.
 
 ### `post-compact-retrieval.sh` (`SessionStart`, matcher `compact`)
 
