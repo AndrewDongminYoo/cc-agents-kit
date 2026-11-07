@@ -22,7 +22,7 @@ Use File Mode (below) only when a context-threshold nudge requests it or the use
 - You need to carry context to another machine, tool, or teammate.
 
 **Not this skill:** a short durable fact for future sessions → write a memory file in the persistent memory directory and index it in `MEMORY.md` (auto-loaded each session). Never write memory files from `handoff` — the two channels serve different lifetimes.
-**Handoff-first policy:** if you run a PreCompact hook that intercepts the first auto-compact of a session (this plugin ships none), its interception message makes this skill the first option: print the handoff immediately and tell the user to `/clear` and paste it into the fresh session. Only if the user chooses to keep the session does the next auto-compact proceed normally.
+**Handoff-first policy:** if you run a PreCompact hook that intercepts the first auto-compact of a session (this plugin's own `PreCompact` hook does not intercept; it only shapes the compaction summary to the template below), its interception message makes this skill the first option: print the handoff immediately and tell the user to `/clear` and paste it into the fresh session. Only if the user chooses to keep the session does the next auto-compact proceed normally.
 
 If the session has no meaningful work to preserve, say so and stop.
 
@@ -64,70 +64,88 @@ Never commit handoff files.
 3. **Format** using the template below and deliver it through the selected mode.
 
 Write in first person ("I did...", "I told you...").
-Capture USER REQUESTS and EXPLICIT CONSTRAINTS verbatim — do not paraphrase or invent them.
+Capture TASK, DONE WHEN and USER CONSTRAINTS verbatim — do not paraphrase or invent them.
 
 ## Output Template
+
+A handoff is a brief for the work still to be done, not a narrative of the work so far: it keeps what the next stretch has to act on and drops repetition, chronology that does not matter, and any weighting by how often a fact came up.
+The FIXED block is append-only: every entry from an earlier handoff or compaction is copied word for word, and what the user said since is added after it, in order; the RECAP block is written fresh each time from the current state.
+The plugin's `PreCompact` hook gives every compaction this same section list, so a compaction the user lets run is the thin version of this handoff, not a different document.
 
 ```plaintext
 HANDOFF CONTEXT
 ===============
 
-USER REQUESTS (AS-IS)
----------------------
-- [Exact verbatim user requests - NOT paraphrased]
+FIXED (append-only: earlier entries copied word for word, later requests and corrections added after them in order; where a later one replaces an earlier one, keep both and say which is current)
 
-GOAL
+TASK
 ----
-[One sentence describing what should be done next]
+- [Every user request, in their words, in order]
 
-WORK COMPLETED
---------------
-- [First person bullet points of what was done]
-- [Include specific file paths when relevant]
-- [Note key implementation decisions]
-
-CURRENT STATE
--------------
-- [Current state of the codebase or task]
-- [Build/test status if applicable]
-- [Any environment or configuration state]
-- [Each external status (tracker issue, review, store or console, inbox) with the source to re-read it from: a URL, an ID, or a path]
-
-PENDING TASKS
--------------
-- [Tasks planned but not completed; next logical steps; blockers]
-- [Include current TODO state]
-
-KEY FILES
+DONE WHEN
 ---------
-- [path/to/file] - [brief role description]
-(Maximum 10 files, prioritized by importance; include files from git diff/status)
+- [The acceptance criteria, in the user's words where they gave them]
 
-IMPORTANT DECISIONS
--------------------
-- [Technical decisions made and why; trade-offs; conventions established]
-
-EXPLICIT CONSTRAINTS
---------------------
-- [Verbatim constraints only - from the user or existing CLAUDE.md/AGENTS.md]
+USER CONSTRAINTS
+----------------
+- [Verbatim constraints and preferences from the user, or quoted from CLAUDE.md/AGENTS.md]
 - If none, write: None
 
-CONTEXT FOR CONTINUATION
-------------------------
-- [What the next session needs to know; warnings/gotchas; doc references]
-- Before acting on any status recorded above (tracker, review, store or console, inbox), re-read it from its named source: this handoff records what the writing session believed, and that status may have changed since. Treat a status with no named source as unverified.
+RECAP (written fresh each time from the current state)
+
+PERSISTENT STATE
+----------------
+- [Branch, worktree, uncommitted files, running services or background tasks, as they are now]
+- [The session transcript path, so dropped history can be grepped]
+
+OBJECTIVE
+---------
+[One line: the required result of the current stretch]
+
+ESTABLISHED FACTS
+-----------------
+- [Exact paths, symbols, commands, observed values, important errors or output]
+- [Observations first, then unverified ideas, labelled as such]
+
+APPLIED CHANGES
+---------------
+- [path/to/file] - [what changed] - [verified: yes/no, and how]
+
+VERIFICATION
+------------
+- [Exact checks run, outcomes, failures, obstacles, workarounds]
+
+DEAD ENDS
+---------
+- [An approach that failed and must not be retried] - [the evidence that it failed]
+
+REMAINING PLAN
+--------------
+- [Outstanding subgoals in execution order]
+- [The immediate next command or edit]
+- [The condition for completion]
+
+RETRIEVAL
+---------
+- [Narrow commands to re-fetch truncated output or dropped history: a grep or sed -n over the transcript path, a file with a line range]
+
+EXTERNAL STATUS
+---------------
+- [Each tracker issue, review, store or console, inbox, with the source to re-read it from: a URL, an ID, or a path]
+- Before acting on any status recorded above, re-read it from its named source: this handoff records what the writing session believed, and that status may have changed since. Treat a status with no named source as unverified.
 ```
 
-The last line of CONTEXT FOR CONTINUATION is fixed text: keep it in every handoff, because the receiving session sees only the handoff and never this skill.
+The last line of EXTERNAL STATUS is fixed text: keep it in every handoff, because the receiving session sees only the handoff and never this skill.
 
 ## Format Rules
 
 - Plain text with dash bullets — no `#` markdown headers, no bold/italic, no code fences inside the content (so it pastes cleanly as one message).
 - Workspace-relative file paths.
 - Pick a length proportional to complexity; include only what matters for continuation.
-- USER REQUESTS (AS-IS) and EXPLICIT CONSTRAINTS are verbatim only.
+- TASK, DONE WHEN and USER CONSTRAINTS are verbatim only.
 - Never include secrets (API keys, credentials, tokens).
-- Max 10 files in KEY FILES. GOAL is one sentence.
+- At most 10 files across ESTABLISHED FACTS and APPLIED CHANGES, prioritized by importance. OBJECTIVE is one line.
+- Every DEAD ENDS entry carries its evidence; a failure with no evidence in hand is marked unverified rather than asserted.
 
 ## Continuation Instructions
 
@@ -148,4 +166,6 @@ TO CONTINUE IN A NEW SESSION:
 - Paraphrasing user requests or inventing constraints — both must be verbatim.
 - Using `#` headers / bold / code fences in the content — breaks clean paste.
 - Calling non-existent tools (`session_read`, `todoread`) — the conversation is already in context.
-- Dropping the fixed re-read line from CONTEXT FOR CONTINUATION: without it the receiving side builds on stated status (tracker, review, store or console, inbox) that may have changed since the handoff was written.
+- Dropping the fixed re-read line from EXTERNAL STATUS: without it the receiving side builds on stated status (tracker, review, store or console, inbox) that may have changed since the handoff was written.
+- Restating the FIXED block in a later handoff: the task and its acceptance criteria drift a little with every paraphrase, so earlier entries are copied and later ones appended, never rewritten.
+- Carrying PERSISTENT STATE forward unchanged: uncommitted files and running services move between handoffs, so it is read from the workspace each time.

@@ -1,0 +1,29 @@
+{
+  "description": "A PreCompact brief that shapes every compaction summary, and a SessionStart line after compaction that names the transcript to grep.",
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/compaction-brief.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-compact-retrieval.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

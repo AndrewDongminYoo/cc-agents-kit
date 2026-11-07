@@ -280,8 +280,9 @@ jobs:
 
       - name: Hook regression suites
         run: |
-          cd plugins/guard-hooks/hooks
-          for t in *.test.py; do python3 "$t" || exit 1; done
+          for t in plugins/*/hooks/*.test.py; do
+            (cd "$(dirname "$t")" && python3 "$(basename "$t")") || exit 1
+          done
 
       - name: bin regression suites
         run: |
