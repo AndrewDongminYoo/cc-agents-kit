@@ -323,6 +323,15 @@ Six skills for work that outlives one session, and for the config that work drag
 
 `wayfinder`, `context-budget`, and `config-gc` derive from MIT-licensed work by others, with the overlap measured rather than described — see [CREDITS.md](CREDITS.md).
 
+Two hooks give a compaction the same shape as a handoff, so the summary that survives an auto-compact is a brief for the work still to be done rather than a narrative of the work so far.
+The section list is the compaction prompt from "You don't need long context" (arXiv 2611.05306, Appendix G): the task and acceptance criteria verbatim, then established facts, applied changes, verification, dead ends, the remaining plan, and the commands that re-fetch what the summary dropped.
+Neither hook blocks or delays a compaction; `context-meter` owns the veto.
+
+| Hook                        | Event · matcher             | Does                                                                                                                   | Opt-out                                     |
+| --------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `compaction-brief.sh`       | PreCompact · `manual\|auto` | Prints the brief as the compaction summary's instructions (Claude Code reads a PreCompact hook's stdout that way).     | `CC_GUARD_DISABLE_COMPACTION_BRIEF=1`       |
+| `post-compact-retrieval.sh` | SessionStart · `compact`    | After a compaction, adds one line naming the transcript on disk, so dropped history is grepped rather than re-derived. | `CC_GUARD_DISABLE_POST_COMPACT_RETRIEVAL=1` |
+
 ## repo-gate
 
 ```bash

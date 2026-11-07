@@ -5,6 +5,24 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+`context-handoff` gives a compaction the same shape as a handoff: a `PreCompact` hook supplies the summary instructions, a `SessionStart` hook names the transcript after a compaction, and the `handoff` template takes the same section list.
+`context-handoff` moves from 0.2.3 to 0.3.0; `context-meter` (0.1.0), `guard-hooks` (0.5.2), `quick-look` (0.1.0) and `repo-gate` (0.2.12) are unchanged.
+
+### Added
+
+- `context-handoff` 0.3.0 ships `hooks/compaction-brief.sh`, a `PreCompact` hook on `manual|auto` that prints the compaction brief on stdout, which Claude Code uses as the instructions for the compaction summary.
+  The brief is the Appendix G compaction prompt from "You don't need long context" (arXiv 2611.05306): a FIXED block (task, acceptance criteria, user constraints and persistent state, verbatim and copied unchanged across compactions) and a RECAP block (objective, established facts, applied changes, verification, dead ends, remaining plan, retrieval commands, external status with its source).
+  It never blocks or delays a compaction, fails open by printing the brief on any input, and is disabled with `CC_GUARD_DISABLE_COMPACTION_BRIEF=1`.
+- `context-handoff` 0.3.0 ships `hooks/post-compact-retrieval.sh`, a `SessionStart` hook on `compact` that adds one line naming the transcript on disk, so history the summary dropped is grepped rather than re-derived (the paper's section 3.1 fallback for lossy compaction).
+  It prints nothing without a transcript path and is disabled with `CC_GUARD_DISABLE_POST_COMPACT_RETRIEVAL=1`.
+- CI's hook regression step runs the suites under every `plugins/*/hooks` directory, not only `guard-hooks`.
+
+### Changed
+
+- `context-handoff` 0.3.0 `handoff` rewrites its Output Template to the same FIXED/RECAP section list, so a handoff and a compaction are one document at two lengths.
+  The verbatim rule now covers TASK, DONE WHEN and USER CONSTRAINTS; the external-status source rule and the fixed re-read line from 0.2.3 are kept under EXTERNAL STATUS; DEAD ENDS entries carry their evidence or are marked unverified.
+  The design and its evidence are `docs/specs/2026-11-07-compaction-brief.md`.
+
 ## [0.8.5] — 2026-11-01
 
 `repo-gate`'s `setup-trunk` covers a JavaScript workspace in a subdirectory and how to try a linter before enabling it, and `cspell-triage` ends on the repository's full gate (#90, #91).
