@@ -1,15 +1,45 @@
 # cc-agents-kit
 
 [![ci](https://github.com/AndrewDongminYoo/cc-agents-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/AndrewDongminYoo/cc-agents-kit/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/AndrewDongminYoo/cc-agents-kit)](https://github.com/AndrewDongminYoo/cc-agents-kit/releases/latest)
+[![licence](https://img.shields.io/github/license/AndrewDongminYoo/cc-agents-kit)](#licence)
+[![catalogue](https://img.shields.io/badge/catalogue-skills.donminzzi.kr-informational)](https://skills.donminzzi.kr/)
 
-A Claude Code plugin marketplace.
+A Claude Code plugin marketplace for the mistakes an agent repeats: a command that should never run, a compaction that drops what mattered, and the work left between "the code works" and "it is pushed".
 Each plugin is scoped to one pain, so you install the part you want and nothing else.
+The [catalogue site](https://skills.donminzzi.kr/) walks through every tool with an example, in English and Korean.
 
 Before installing, ask your AI whether these plugins fit your coding-agent harness: [Review in Claude](https://claude.ai/new?q=Read%20https%3A%2F%2Fraw.githubusercontent.com%2FAndrewDongminYoo%2Fcc-agents-kit%2Fmain%2FREADME.md%20and%20the%20linked%20plugin%20sources.%20Evaluate%20whether%20any%20cc-agents-kit%20plugins%20are%20worth%20adopting%20in%20my%20coding-agent%20harness.%20Ask%20which%20harness%20I%20use%20if%20unknown.%20Compare%20benefits%2C%20overlap%20with%20my%20existing%20setup%2C%20prerequisites%2C%20permissions%2C%20and%20limitations.%20Distinguish%20Claude%20Code-specific%20hooks%20and%20mods%20from%20guidance%20that%20could%20be%20adapted%20to%20other%20harnesses%3B%20do%20not%20assume%20Codex%20compatibility.%20Cite%20source%20paths%2C%20recommend%20the%20smallest%20useful%20selection%20or%20no%20installation%2C%20and%20keep%20the%20review%20read-only.%20Do%20not%20install%20anything%20or%20change%20configuration%20without%20my%20explicit%20approval.) · [Review in ChatGPT](https://chatgpt.com/?hints=search&q=Read%20https%3A%2F%2Fraw.githubusercontent.com%2FAndrewDongminYoo%2Fcc-agents-kit%2Fmain%2FREADME.md%20and%20the%20linked%20plugin%20sources.%20Evaluate%20whether%20any%20cc-agents-kit%20plugins%20are%20worth%20adopting%20in%20my%20coding-agent%20harness.%20Ask%20which%20harness%20I%20use%20if%20unknown.%20Compare%20benefits%2C%20overlap%20with%20my%20existing%20setup%2C%20prerequisites%2C%20permissions%2C%20and%20limitations.%20Distinguish%20Claude%20Code-specific%20hooks%20and%20mods%20from%20guidance%20that%20could%20be%20adapted%20to%20other%20harnesses%3B%20do%20not%20assume%20Codex%20compatibility.%20Cite%20source%20paths%2C%20recommend%20the%20smallest%20useful%20selection%20or%20no%20installation%2C%20and%20keep%20the%20review%20read-only.%20Do%20not%20install%20anything%20or%20change%20configuration%20without%20my%20explicit%20approval.).
 The links prefill a source-based review request covering existing overlap, prerequisites, permissions, and Claude Code-specific behavior.
 Describe your current setup in the new chat; installation and configuration changes require your approval.
 
+| When this keeps happening                                                                 | Install                               | Ships              |
+| ----------------------------------------------------------------------------------------- | ------------------------------------- | ------------------ |
+| The agent runs a command that should never have run, or reads a file it should not have.  | [`guard-hooks`](#guard-hooks)         | 9 hooks            |
+| Every new session starts by re-explaining the work, and a compaction drops what mattered. | [`context-handoff`](#context-handoff) | 6 skills · 2 hooks |
+| The code works, but commits, CI, and lint findings still take work.                       | [`repo-gate`](#repo-gate)             | 6 skills           |
+| Advisor turns make the harness read the context as about twice as full and compact early. | [`context-meter`](#context-meter)     | 1 mod              |
+| You want to look at the files the agent just touched, on a Mac.                           | [`quick-look`](#quick-look)           | 1 mod              |
+
+## See it run
+
+CI compares each recording with what the shipped hook prints now, and fails when they differ: the first quotes the guard's message from `docs/demo.sh`, and the other two run the hook scripts while they record.
+
+A search that silently returns the wrong answer under zsh, then the same search blocked before it runs (`zsh-quoting-guard`):
+
 ![A search that silently returns the wrong answer, then the same search blocked before it runs](docs/guard-hooks.gif)
+
+Three tool calls blocked before they run, and the template file the same guard leaves readable (`dangerous-command-guard`, `secrets-path-guard`):
+
+![A recursive delete of the home directory, a download piped into a shell, and a read of a dotenv file, each blocked; the dotenv template allowed](docs/guard-blocks.gif)
+
+The sections a compaction summary is asked for, and the line that points the next turn at the full transcript (`compaction-brief`, `post-compact-retrieval`):
+
+![The compaction brief's FIXED and RECAP section headings, then the post-compaction line naming the transcript file](docs/compaction-brief.gif)
+
+To record one again, run `bash docs/demo.sh` for the first, or `bash docs/demo-<name>.sh` for the others (`brew install asciinema agg`).
+
+## Install
 
 ```bash
 /plugin marketplace add AndrewDongminYoo/cc-agents-kit
@@ -19,14 +49,6 @@ Describe your current setup in the new chat; installation and configuration chan
 Upgrading needs `claude plugin update guard-hooks@cc-agents-kit` — the marketplace suffix is required, and installing again is a no-op that reports success.
 Refreshing the marketplace alone is not enough: the cache keeps one directory per version, and the runtime loads the version recorded at install time, so `claude plugin details` can report the new version while the old one is still what fires.
 Hooks are read when a session starts, so restart any session that is already open.
-
-| Plugin                                | What it does                                                                                      |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [`guard-hooks`](#guard-hooks)         | Nine defensive hooks — five block, three warn, one rewrites Bash output.                          |
-| [`context-handoff`](#context-handoff) | Carry work across sessions, and keep the context that carries it lean.                            |
-| [`repo-gate`](#repo-gate)             | What runs between "the code works" and "it is pushed".                                            |
-| [`context-meter`](#context-meter)     | A mod that shows the real context fill and vetoes an auto-compact the advisor's usage would fire. |
-| [`quick-look`](#quick-look)           | A mod that opens the files the agent touched in macOS Quick Look.                                 |
 
 ## guard-hooks
 
