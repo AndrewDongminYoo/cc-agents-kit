@@ -5,6 +5,13 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Added
+
+- `reply-language` 0.1.0, a temporary plugin for anthropics/claude-code#99704, to be removed once that issue is fixed: Opus 5.5 drifts into English in user-facing text although `language` names another language.
+  `reply-language-reminder.sh` adds a sentence that allows English only for what someone other than the user reads, on each user message and after `Agent` or `SendMessage`, and a one-line reminder after every other tool result.
+  `reply-language-check.sh` blocks a stop once and asks for a restatement when the turn's user-visible text, or its last block, is under 30% target-script letters.
+  It supports languages with a script of their own (Korean, Japanese, Chinese, Cyrillic, Arabic-script, Hindi, Thai, Greek, Hebrew) and reads the target from `language` or `CC_REPLY_LANGUAGE`.
+
 ### Changed
 
 - The README opens with badges, a link to the catalogue site, a table that maps each recurring problem to its plugin, and two more recordings: `guard-hooks` blocking three tool calls, and the sections `context-handoff` asks a compaction summary for (#98).

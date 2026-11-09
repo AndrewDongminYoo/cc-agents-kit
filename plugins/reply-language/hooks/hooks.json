@@ -1,0 +1,38 @@
+{
+  "description": "Temporary workaround for anthropics/claude-code#99704: remind the reply language by who reads the text, and ask for a restatement when a turn's user-facing text drifted into another language.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/reply-language-reminder.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/reply-language-reminder.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/reply-language-check.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
