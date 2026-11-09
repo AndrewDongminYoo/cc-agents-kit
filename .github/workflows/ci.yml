@@ -278,6 +278,43 @@ jobs:
           print(f"{len(fragments)} quoted fragment(s) match what the hook prints")
           PY
 
+      # docs/demo-<name>.sh runs the shipped hooks while it records
+      # docs/<name>.cast. Replay each one without delays and compare the text,
+      # so a hook whose output changed cannot leave an old GIF in the README.
+      - name: Demo recordings match what the hooks print
+        run: |
+          python3 - <<'PY'
+          import difflib, json, os, pathlib, re, subprocess, sys
+          ansi = re.compile(r"\x1b\[[0-9;]*m")
+          def text(s):
+              return ansi.sub("", s).replace("\r", "")
+          scripts = sorted(pathlib.Path("docs").glob("demo-*.sh"))
+          if not scripts:
+              sys.exit("no docs/demo-*.sh found — the discovery above is broken")
+          stale = []
+          for script in scripts:
+              name = script.stem.removeprefix("demo-")
+              cast = pathlib.Path("docs", f"{name}.cast")
+              try:
+                  events = cast.read_text().splitlines()[1:]
+                  recorded = "".join(e[2] for e in map(json.loads, events) if e[1] == "o")
+              except (OSError, ValueError, LookupError, TypeError) as err:
+                  stale.append(name)
+                  print(f"{cast} is missing or unreadable: {err}", file=sys.stderr)
+                  continue
+              played = subprocess.run(
+                  ["bash", str(script), "--play"], capture_output=True, text=True,
+                  env={**os.environ, "DEMO_FAST": "1"}, check=True).stdout
+              if text(recorded) != text(played):
+                  stale.append(name)
+                  sys.stderr.writelines(difflib.unified_diff(
+                      text(recorded).splitlines(True), text(played).splitlines(True),
+                      f"docs/{name}.cast", f"bash {script} --play"))
+          if stale:
+              sys.exit("re-record: " + ", ".join(f"bash docs/demo-{n}.sh" for n in stale))
+          print(f"{len(scripts)} demo recording(s) match what the hooks print now")
+          PY
+
       - name: Hook regression suites
         run: |
           for t in plugins/*/hooks/*.test.py; do

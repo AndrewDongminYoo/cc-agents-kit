@@ -36,7 +36,7 @@ claude plugin test plugins/<mod>                     # runs the mod's *.test.ts 
 There is no build, no package manager, and no test framework.
 Suites are plain `python3` scripts requiring `bash` and `jq`, and `node` for `session-to-md.test.py`; `shellcheck` is optional (`shellcheck-on-edit.test.py` skips its findings checks and asserts the silent no-op instead).
 The `claude plugin validate` and `claude plugin test` commands are optional checks for a function-hook mod; they are not part of the default CI gate.
-`.github/workflows/ci.yml` runs the shell and Python commands above, shellchecks and `bash -n`-parses every shipped shell script including the extensionless Bash entries under `plugins/*/bin/`, and checks the manifests, skill frontmatter, private references, `bin/` executability, and the demo's quoted guard message.
+`.github/workflows/ci.yml` runs the shell and Python commands above, shellchecks and `bash -n`-parses every shipped shell script including the extensionless Bash entries under `plugins/*/bin/`, and checks the manifests, skill frontmatter, private references, `bin/` executability, the demo's quoted guard message, and that each `docs/demo-<name>.sh` replay still matches its committed `docs/<name>.cast`.
 
 ## Offline Secret Reader
 

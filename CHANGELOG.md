@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- The README opens with badges, a link to the catalogue site, a table that maps each recurring problem to its plugin, and two more recordings: `guard-hooks` blocking three tool calls, and the sections `context-handoff` asks a compaction summary for (#98).
+  `docs/demo-guard-blocks.sh` and `docs/demo-compaction-brief.sh` run the shipped hook scripts while they record, and a CI step replays each one and fails when its text no longer matches the committed `.cast`.
+
 ## [0.9.0] — 2026-11-08
 
 `context-handoff` gives a compaction the same shape as a handoff: a `PreCompact` hook supplies the summary instructions, a `SessionStart` hook names the transcript after a compaction, and the `handoff` template takes the same section list (#96).
