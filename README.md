@@ -23,7 +23,8 @@ Describe your current setup in the new chat; installation and configuration chan
 
 ## See it run
 
-CI compares each recording with what the shipped hook prints now, and fails when they differ: the first quotes the guard's message from `docs/demo.sh`, and the other two run the hook scripts while they record.
+The first recording quotes the guard's message from `docs/demo.sh`, and CI checks that quote against what the hook prints.
+The other two run the hook scripts while they record, and CI replays each one and fails when its text no longer matches the recording.
 
 A search that silently returns the wrong answer under zsh, then the same search blocked before it runs (`zsh-quoting-guard`):
 

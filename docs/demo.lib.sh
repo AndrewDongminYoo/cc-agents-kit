@@ -45,7 +45,9 @@ type_out() {
 run_hook() {
   local hook=$1 payload=$2 pattern=${3:-} out err rc=0
   err=$(mktemp)
-  out=$(printf '%s' "$payload" | /bin/bash "$demo_root/plugins/$hook" 2>"$err") || rc=$?
+  # Only PATH reaches the hook, so a CC_GUARD_* opt-out or dev-path setting in
+  # the recorder's shell cannot change what the demo shows.
+  out=$(printf '%s' "$payload" | env -i PATH="$PATH" /bin/bash "$demo_root/plugins/$hook" 2>"$err") || rc=$?
   if [[ -n "$pattern" ]]; then
     out=$(printf '%s\n' "$out" | grep -oE "$pattern" || true)
   fi
