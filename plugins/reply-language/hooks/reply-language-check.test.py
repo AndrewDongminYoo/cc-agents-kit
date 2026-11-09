@@ -258,6 +258,35 @@ silent(
     ],
 )
 
+silent(
+    "a backtick string inside code does not close the fence",
+    [
+        human(KO_ASK),
+        say(
+            KO_REPLY
+            + '\n\n```python\nmarker = "```"\n'
+            + ("# " + EN_REPLY + "\n") * 4
+            + "```\n"
+        ),
+    ],
+)
+
+legacy_image_prompt = {
+    "type": "user",
+    "message": {
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": ""},
+            },
+            {
+                "type": "text",
+                "text": "이 화면에서 버튼 정렬이 어긋난 이유를 한국어로 설명해 주세요",
+            },
+        ],
+    },
+}
 legacy_english = {
     "type": "user",
     "message": {"role": "user", "content": "Please update the documentation site."},
@@ -274,6 +303,10 @@ legacy_command = {
 blocks(
     "an origin-less slash command is the user's latest message",
     [legacy_english, say(KO_REPLY), legacy_command, say(EN_REPLY)],
+)
+blocks(
+    "an origin-less prompt sent with an image is the user's latest message",
+    [legacy_english, say(KO_REPLY), legacy_image_prompt, say(EN_REPLY)],
 )
 blocks(
     "a session resumed from the SDK into the CLI is checked",

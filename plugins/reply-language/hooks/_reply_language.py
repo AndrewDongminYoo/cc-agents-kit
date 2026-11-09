@@ -130,9 +130,14 @@ MIN_LETTERS = 40  # below this, a short line of paths or names decides nothing
 MAX_SHARE = 0.30  # under this share of target-script letters counts as drift
 USER_SHARE = 0.10  # a user message under this share was written in another language
 
-# A fence closes only on the same run of backticks or tildes that opened it,
-# so a four-backtick block can quote a three-backtick example.
-FENCE = re.compile(r"(?P<f>`{3,}|~{3,}).*?(?:(?P=f)|\Z)", re.S)
+# A fence opens and closes only at the start of a line, and closes only on a
+# run at least as long as the one that opened it: a four-backtick block can
+# quote a three-backtick example, and a string such as "```" inside code does
+# not end the block.
+FENCE = re.compile(
+    r"^[ \t]{0,3}(?P<f>`{3,}|~{3,}).*?(?:^[ \t]{0,3}(?P=f)[`~]*[ \t]*$|\Z)",
+    re.S | re.M,
+)
 INLINE = re.compile(r"`[^`\n]*`")
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
 LINK_TARGET = re.compile(r"\]\([^)]*\)")
@@ -232,6 +237,11 @@ def _is_human(entry):
     # Older transcripts carry no origin: a plain string prompt that is not a
     # harness wrapper such as <command-name> or <task-notification>.
     content = (entry.get("message") or {}).get("content")
+    if isinstance(content, list):
+        # A prompt sent with an image is a list of text and image blocks; a
+        # tool result is a list too, but never what the user typed.
+        kinds = {c.get("type") for c in content if isinstance(c, dict)}
+        return "tool_result" not in kinds and bool(kinds & {"text", "image"})
     if not isinstance(content, str):
         return False
     head = content.lstrip()
