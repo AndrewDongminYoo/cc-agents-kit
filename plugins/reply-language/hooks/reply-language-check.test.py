@@ -242,6 +242,14 @@ silent(
     "a harness API error rendered as an assistant message",
     [human(KO_ASK), say(KO_REPLY), api_error],
 )
+sidechain_brief = human(
+    "Survey the repository and report every hook script with its event in English."
+)
+sidechain_brief["isSidechain"] = True
+blocks(
+    "a subagent's English brief is neither the user's message nor a turn boundary",
+    [human(KO_ASK), sidechain_brief, say(EN_REPLY)],
+)
 silent(
     "subagent (sidechain) English is not shown to the user",
     [human(KO_ASK), say(EN_REPLY * 3, sidechain=True), say(KO_REPLY)],

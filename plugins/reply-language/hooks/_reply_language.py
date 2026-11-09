@@ -296,6 +296,8 @@ def stop_window(path):
             if not isinstance(entry, dict):
                 continue
             entrypoint = entrypoint or str(entry.get("entrypoint") or "")
+            if entry.get("isSidechain"):
+                continue  # a subagent's brief or reply: neither a turn nor the user
             if _opens_turn(entry):
                 texts = []
                 if _is_human(entry):
@@ -306,9 +308,9 @@ def stop_window(path):
 
 
 def _model_text(entry):
-    """Text the main model wrote for the user; not a subagent's, not a
-    harness error rendered as an assistant message."""
-    if entry.get("type") != "assistant" or entry.get("isSidechain"):
+    """Text the model wrote for the user; not a harness error rendered as an
+    assistant message. stop_window skips sidechain entries before this."""
+    if entry.get("type") != "assistant":
         return ""
     if entry.get("isApiErrorMessage"):
         return ""
