@@ -422,7 +422,7 @@ A Latin-script language cannot be told apart from English by script, so it is le
 
 A response here is the text written since the last input that started a turn: a user message, a task notification, a subagent's report or a queued message, so text already restated is not judged again at the next notification's stop.
 The check removes code blocks, inline code, URLs, link targets, paths, tags and quoted lines before counting, needs at least 40 letters, ignores subagent text and harness error messages, and stays silent when the user's last message was in another language (pasted content and slash-command names do not count as the user's language), for headless `sdk` runs, and on its own follow-up stop.
-Replayed over 189 of my own sessions, judged against Korean, it would have blocked 662 of 8,487 stops (7.8%); every block in a sample of 20 was English text shown to me.
+Replayed over 189 of my own sessions, judged against Korean, it would have blocked 673 of 8,520 stops (7.9%); every block in a sample of 20 contained English text shown to me.
 Of the 31 times my next message asked for Korean or said the reply was in English (found by a regular expression over my messages), the stops before 30 of them would have been blocked.
 The one it missed carried its only progress line in a thinking block, which the check does not read, because a non-empty thinking block may be reasoning the language rule does not cover.
 It cannot hide the English draft the user already saw; it only gets the restatement written without the user asking.
