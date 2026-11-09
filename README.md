@@ -20,6 +20,7 @@ Describe your current setup in the new chat; installation and configuration chan
 | The code works, but commits, CI, and lint findings still take work.                       | [`repo-gate`](#repo-gate)             | 6 skills           |
 | Advisor turns make the harness read the context as about twice as full and compact early. | [`context-meter`](#context-meter)     | 1 mod              |
 | You want to look at the files the agent just touched, on a Mac.                           | [`quick-look`](#quick-look)           | 1 mod              |
+| Replies drift into English although `language` names another language (temporary).        | [`reply-language`](#reply-language)   | 2 hooks            |
 
 ## See it run
 
@@ -399,6 +400,33 @@ It keeps the nine files the main agent most recently read, wrote or edited, plus
 `/ql` opens a pane listing them with hotkeys 1 to 9, `/ql <n>` previews one directly, and `/ql <path>` previews any file.
 The preview is `/usr/bin/qlmanage -p`, started without a shell after an existence check, so it works in any terminal, Warp included, and it opens on the Mac's own screen rather than on a Remote Control device.
 Nothing opens a window unless you ask: the model has no tool for it.
+
+## reply-language
+
+```bash
+/plugin install reply-language@cc-agents-kit
+```
+
+**Temporary.** A workaround for [anthropics/claude-code#99704](https://github.com/anthropics/claude-code/issues/99704): Opus 5.5 writes user-facing text in English although `language` and CLAUDE.md name another language, most often in the short lines between tool calls and right after English input addressed to it (a subagent report, a brief it just wrote, tool output), and a correction holds for about a turn ([#96326](https://github.com/anthropics/claude-code/issues/96326) has measurements from several languages).
+Uninstall it once that issue is fixed; it adds nothing a working harness needs.
+
+It reads the target language from the `language` setting (user, then project, then project-local settings, with the project found through `CLAUDE_PROJECT_DIR`) or from `CC_REPLY_LANGUAGE`, and does nothing when neither is set.
+A language chosen with `--settings` or in managed settings is not visible to a hook, so set `CC_REPLY_LANGUAGE` to the same value in that case.
+Only languages with a script of their own are supported: Korean, Japanese, Chinese, Russian and other Cyrillic, Persian, Arabic, Urdu, Hindi, Thai, Greek and Hebrew.
+A Latin-script language cannot be told apart from English by script, so it is left alone.
+
+| Hook                         | Event · matcher                     | Does                                                                                                                                                                                                                         | Opt-out                                      |
+| ---------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `reply-language-reminder.sh` | UserPromptSubmit; PostToolUse (all) | On a user message and after `Agent` or `SendMessage`, adds one sentence that allows English only for what someone other than the user reads. After every other tool result, adds a one-line reminder in the target language. | `CC_GUARD_DISABLE_REPLY_LANGUAGE_REMINDER=1` |
+| `reply-language-check.sh`    | Stop                                | When the text shown in this response, or its last block, is under 30% target-script letters, blocks the stop once and asks for the same content in the target language with no new tool work.                                | `CC_GUARD_DISABLE_REPLY_LANGUAGE_CHECK=1`    |
+
+A response here is the text written since the last input that started a turn: a user message, a task notification, a subagent's report or a queued message, so text already restated is not judged again at the next notification's stop.
+The check removes code blocks, inline code, URLs, link targets, paths, tags and quoted lines before counting, needs at least 40 letters, ignores subagent text and harness error messages, and stays silent when the user's last message was in another language (pasted content and slash-command names do not count as the user's language), for headless `sdk` runs, and on its own follow-up stop.
+Replayed over 189 of my own sessions, judged against Korean, it would have blocked 673 of 8,520 stops (7.9%); every block in a sample of 20 contained English text shown to me.
+Of the 31 times my next message asked for Korean or said the reply was in English (found by a regular expression over my messages), the stops before 30 of them would have been blocked.
+The one it missed carried its only progress line in a thinking block, which the check does not read, because a non-empty thinking block may be reasoning the language rule does not cover.
+It cannot hide the English draft the user already saw; it only gets the restatement written without the user asking.
+Both hooks need `python3` and fail open without it.
 
 ## Licence
 

@@ -1,0 +1,12 @@
+{
+  "name": "reply-language",
+  "version": "0.1.0",
+  "description": "Temporary workaround for anthropics/claude-code#99704, to be removed once it is fixed: keeps user-facing text in the language set by `language` (Korean, Japanese, Chinese and other non-Latin scripts) by restating the rule after tool results, and asks for a restatement when a turn drifted into English.",
+  "author": {
+    "name": "Dongmin Yu"
+  },
+  "homepage": "https://github.com/AndrewDongminYoo/cc-agents-kit",
+  "repository": "https://github.com/AndrewDongminYoo/cc-agents-kit",
+  "license": "Apache-2.0",
+  "keywords": ["hooks", "language", "i18n", "workaround", "temporary"]
+}

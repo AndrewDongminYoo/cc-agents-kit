@@ -49,6 +49,13 @@ Column meanings:
 | `markdownlint-triage`     | original | Apache-2.0 | Written for this repository. |
 | `markdownlint-summary`    | original | Apache-2.0 | Written for this repository. |
 
+## reply-language
+
+| Component                    | Upstream | Licence    | Adaptation                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reply-language-reminder.sh` | original | Apache-2.0 | Written for this repository. The reader-defined sentence and its injection on UserPromptSubmit and PostToolUse follow the replay measurements by murooka-t on [anthropics/claude-code#96326](https://github.com/anthropics/claude-code/issues/96326#issuecomment-6646429060); no code is shared.                                                                                                   |
+| `reply-language-check.sh`    | original | Apache-2.0 | Written for this repository. A Stop hook that measures the turn's user-visible text and asks once for a restatement was described by TipsyDrifter and run live by SinaEstavi on [anthropics/claude-code#96326](https://github.com/anthropics/claude-code/issues/96326#issuecomment-6567031214); the thresholds and exclusions here were set from a local transcript replay, and no code is shared. |
+
 ## MIT notices
 
 `wayfinder`, `context-budget`, and `config-gc` derive from MIT-licensed work.
