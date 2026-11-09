@@ -294,8 +294,14 @@ jobs:
           stale = []
           for script in scripts:
               name = script.stem.removeprefix("demo-")
-              events = pathlib.Path("docs", f"{name}.cast").read_text().splitlines()[1:]
-              recorded = "".join(e[2] for e in map(json.loads, events) if e[1] == "o")
+              cast = pathlib.Path("docs", f"{name}.cast")
+              try:
+                  events = cast.read_text().splitlines()[1:]
+                  recorded = "".join(e[2] for e in map(json.loads, events) if e[1] == "o")
+              except (OSError, ValueError, LookupError, TypeError) as err:
+                  stale.append(name)
+                  print(f"{cast} is missing or unreadable: {err}", file=sys.stderr)
+                  continue
               played = subprocess.run(
                   ["bash", str(script), "--play"], capture_output=True, text=True,
                   env={**os.environ, "DEMO_FAST": "1"}, check=True).stdout

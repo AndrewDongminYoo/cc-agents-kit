@@ -38,7 +38,7 @@ The sections a compaction summary is asked for, and the line that points the nex
 
 ![The compaction brief's FIXED and RECAP section headings, then the post-compaction line naming the transcript file](docs/compaction-brief.gif)
 
-To record one again, run `bash docs/demo.sh` for the first, or `bash docs/demo-<name>.sh` for the others (`brew install asciinema agg`).
+To record one again, run `bash docs/demo.sh` for the first, or `bash docs/demo-<name>.sh` for the others (`brew install asciinema agg jq`; without `jq` the hooks fail open and a recording would show blocked calls as allowed).
 
 ## Install
 

@@ -4,7 +4,7 @@
 # A demo script defines play() and ends with `demo_main <name> "$@"`:
 #
 #   bash docs/demo-<name>.sh           records docs/<name>.cast and .gif
-#                                      (brew install asciinema agg)
+#                                      (brew install asciinema agg jq)
 #   bash docs/demo-<name>.sh --play    prints the scene once
 #
 # The scenes run the shipped hook scripts, so what the GIF shows is what the
@@ -70,6 +70,12 @@ run_hook() {
 demo_main() {
   local name=$1
   shift
+  # Without jq every guard fails open, and the demo would show its blocks as
+  # allowed calls.
+  command -v jq >/dev/null || {
+    echo "jq is required: the hooks parse their input with it" >&2
+    return 1
+  }
   if [[ "${1:-}" == "--play" ]]; then
     play
     return
