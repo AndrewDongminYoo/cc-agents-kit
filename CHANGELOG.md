@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-11-09
+
+`reply-language` is a new, temporary plugin for replies that drift out of the `language` setting (#99); it is to be removed once anthropics/claude-code#99704 is fixed.
+The README opens with a problem-to-plugin table and two more recordings of shipped hooks (#98).
+`reply-language` starts at 0.1.0; `context-handoff` (0.3.0), `context-meter` (0.1.0), `guard-hooks` (0.5.2), `quick-look` (0.1.0) and `repo-gate` (0.2.12) are unchanged.
+
 ### Added
 
 - `reply-language` 0.1.0, a temporary plugin for anthropics/claude-code#99704, to be removed once that issue is fixed: Opus 5.5 drifts into English in user-facing text although `language` names another language.
