@@ -92,7 +92,11 @@ def transcript(entries):
 
 
 def run(entries=None, language="Korean", raw=None, **extra):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("CC_")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("CC_") and k != "CLAUDE_PROJECT_DIR"
+    }
     env.update(CLAUDE_CONFIG_DIR=WORK, HOME=WORK)
     if language is not None:
         env["CC_REPLY_LANGUAGE"] = language
@@ -242,6 +246,45 @@ silent(
     "a harness API error rendered as an assistant message",
     [human(KO_ASK), say(KO_REPLY), api_error],
 )
+# --- the 30% boundary, on one block of exactly 100 counted letters ---
+blocks("29% target script blocks", [human(KO_ASK), say("가" * 29 + " " + "a" * 71)])
+silent("30% target script passes", [human(KO_ASK), say("가" * 30 + " " + "a" * 70)])
+
+silent(
+    "a four-backtick fence hides the three-backtick example inside it",
+    [
+        human(KO_ASK),
+        say(KO_REPLY + "\n\n````markdown\n```text\n" + EN_REPLY * 4 + "\n```\n````\n"),
+    ],
+)
+
+legacy_english = {
+    "type": "user",
+    "message": {"role": "user", "content": "Please update the documentation site."},
+}
+legacy_command = {
+    "type": "user",
+    "message": {
+        "role": "user",
+        "content": (
+            "<command-name>/review</command-name>\n<command-args>한국어로 문서 사이트 변경을 검토해 주세요</command-args>"
+        ),
+    },
+}
+blocks(
+    "an origin-less slash command is the user's latest message",
+    [legacy_english, say(KO_REPLY), legacy_command, say(EN_REPLY)],
+)
+blocks(
+    "a session resumed from the SDK into the CLI is checked",
+    [
+        human(KO_ASK, "sdk-cli"),
+        say(KO_REPLY, entrypoint="sdk-cli"),
+        human(KO_ASK),
+        say(EN_REPLY),
+    ],
+)
+
 sidechain_brief = human(
     "Survey the repository and report every hook script with its event in English."
 )

@@ -74,9 +74,8 @@ ALIASES = {
     "עברית": "hebrew",
 }
 
-# The reminder defines English by who reads it: the wording that held in the
-# replay measurements on anthropics/claude-code#96326. Written in the target
-# language where one is provided here; English otherwise.
+# The reminder defines English by who reads it rather than by kind of text.
+# Written in the target language where one is provided here; English otherwise.
 REMINDERS = {
     "korean": (
         "사용자가 읽는 텍스트는 도구 호출 사이의 짧은 진행 안내까지 모두 한국어로 씁니다. "
@@ -131,7 +130,9 @@ MIN_LETTERS = 40  # below this, a short line of paths or names decides nothing
 MAX_SHARE = 0.30  # under this share of target-script letters counts as drift
 USER_SHARE = 0.10  # a user message under this share was written in another language
 
-FENCE = re.compile(r"```.*?(```|\Z)|~~~.*?(~~~|\Z)", re.S)
+# A fence closes only on the same run of backticks or tildes that opened it,
+# so a four-backtick block can quote a three-backtick example.
+FENCE = re.compile(r"(?P<f>`{3,}|~{3,}).*?(?:(?P=f)|\Z)", re.S)
 INLINE = re.compile(r"`[^`\n]*`")
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
 LINK_TARGET = re.compile(r"\]\([^)]*\)")
@@ -150,10 +151,13 @@ def target_language(cwd):
             os.path.expanduser("~"), ".claude"
         )
         candidates = [os.path.join(home, "settings.json")]
-        if cwd:
+        # The project root, not the shell's current directory: a `cd` in an
+        # earlier Bash call moves `cwd` but not the project whose settings apply.
+        project = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
+        if project:
             candidates += [
-                os.path.join(cwd, ".claude", "settings.json"),
-                os.path.join(cwd, ".claude", "settings.local.json"),
+                os.path.join(project, ".claude", "settings.json"),
+                os.path.join(project, ".claude", "settings.local.json"),
             ]
         for path in candidates:  # later files override earlier ones
             try:
@@ -228,7 +232,12 @@ def _is_human(entry):
     # Older transcripts carry no origin: a plain string prompt that is not a
     # harness wrapper such as <command-name> or <task-notification>.
     content = (entry.get("message") or {}).get("content")
-    return isinstance(content, str) and not content.lstrip().startswith("<")
+    if not isinstance(content, str):
+        return False
+    head = content.lstrip()
+    return not head.startswith("<") or head.startswith(
+        ("<command-name>", "<command-message>")
+    )
 
 
 COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
@@ -295,7 +304,9 @@ def stop_window(path):
                 continue
             if not isinstance(entry, dict):
                 continue
-            entrypoint = entrypoint or str(entry.get("entrypoint") or "")
+            # The latest entrypoint: a session resumed from the SDK into the
+            # CLI keeps its early sdk entries.
+            entrypoint = str(entry.get("entrypoint") or entrypoint)
             if entry.get("isSidechain"):
                 continue  # a subagent's brief or reply: neither a turn nor the user
             if _opens_turn(entry):

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# UserPromptSubmit, and PostToolUse on Agent|SendMessage: add one sentence of
-# context that defines the reply language by who reads the text.
+# UserPromptSubmit and PostToolUse (every tool): add context that keeps
+# user-facing text in the configured reply language.
 #
 # Opus 5.5 drifts into English right after English input that is addressed to
 # it (a subagent report, a brief it just wrote, tool output), and a correction
-# holds for about one turn (anthropics/claude-code#99704, #96326). In replay
-# measurements on #96326, a sentence that allows English only for what someone
-# other than the user reads cut the drift where "do not be swayed by English
-# input" did not. UserPromptSubmit also fires when a background subagent
-# reports back, which is one of the trigger points.
+# holds for about one turn (anthropics/claude-code#99704). On a user message
+# (which includes a background subagent reporting back) and after Agent or
+# SendMessage, the hook adds a sentence that allows English only for what
+# someone other than the user reads. After every other tool result it adds one
+# short line, right before the next text the model writes.
 #
 # The target language comes from Claude Code's `language` setting, or from
 # CC_REPLY_LANGUAGE. No language, or one without its own script: no output.

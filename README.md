@@ -410,7 +410,8 @@ Nothing opens a window unless you ask: the model has no tool for it.
 **Temporary.** A workaround for [anthropics/claude-code#99704](https://github.com/anthropics/claude-code/issues/99704): Opus 5.5 writes user-facing text in English although `language` and CLAUDE.md name another language, most often in the short lines between tool calls and right after English input addressed to it (a subagent report, a brief it just wrote, tool output), and a correction holds for about a turn ([#96326](https://github.com/anthropics/claude-code/issues/96326) has measurements from several languages).
 Uninstall it once that issue is fixed; it adds nothing a working harness needs.
 
-It reads the target language from the `language` setting (user, then project, then project-local settings) or from `CC_REPLY_LANGUAGE`, and does nothing when neither is set.
+It reads the target language from the `language` setting (user, then project, then project-local settings, with the project found through `CLAUDE_PROJECT_DIR`) or from `CC_REPLY_LANGUAGE`, and does nothing when neither is set.
+A language chosen with `--settings` or in managed settings is not visible to a hook, so set `CC_REPLY_LANGUAGE` to the same value in that case.
 Only languages with a script of their own are supported: Korean, Japanese, Chinese, Russian and other Cyrillic, Persian, Arabic, Urdu, Hindi, Thai, Greek and Hebrew.
 A Latin-script language cannot be told apart from English by script, so it is left alone.
 

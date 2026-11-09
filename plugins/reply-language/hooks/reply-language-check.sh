@@ -5,7 +5,7 @@
 #
 # The catch for what reply-language-reminder.sh does not prevent. It cannot
 # hide the draft the user already saw; it only gets the restatement written
-# without the user having to ask (anthropics/claude-code#99704, #96326).
+# without the user having to ask (anthropics/claude-code#99704).
 #
 # Measured on the main model's text blocks since the last input that started a
 # turn (a user message, a task notification, a subagent's report, a queued

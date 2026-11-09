@@ -18,11 +18,17 @@ DISABLE_VAR = "CC_GUARD_DISABLE_REPLY_LANGUAGE_REMINDER"
 CONFIG = tempfile.mkdtemp(prefix="reply-language-config-")
 
 
-def run(payload, language=None, config=CONFIG):
-    # No real settings may leak in: an empty config dir and HOME, and the
-    # language only from the case itself.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("CC_")}
+def run(payload, language=None, config=CONFIG, project=None):
+    # No real settings may leak in: an empty config dir and HOME, no inherited
+    # project dir, and the language only from the case itself.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("CC_") and k != "CLAUDE_PROJECT_DIR"
+    }
     env.update(CLAUDE_CONFIG_DIR=config, HOME=config)
+    if project is not None:
+        env["CLAUDE_PROJECT_DIR"] = project
     if language is not None:
         env["CC_REPLY_LANGUAGE"] = language
     proc = subprocess.run(
@@ -109,6 +115,16 @@ with tempfile.TemporaryDirectory() as config, tempfile.TemporaryDirectory() as p
     )
     code, out, _ = run(event("UserPromptSubmit", cwd=project), config=config)
     check("project local settings override user settings", "ユーザー" in out, out)
+    subdir = Path(project, "src")
+    subdir.mkdir()
+    code, out, _ = run(
+        event("UserPromptSubmit", cwd=str(subdir)), config=config, project=project
+    )
+    check(
+        "after a cd into a subdirectory, CLAUDE_PROJECT_DIR still finds the project settings",
+        "ユーザー" in out,
+        out,
+    )
 
 # --- silent cases ---
 for label, payload, language in (
