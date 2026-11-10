@@ -7,7 +7,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Added
 
-- `guard-hooks` 0.6.0 ships `bin/env-keys`, which prints the key names of dotenv files without their values; lines inside a multi-line value, a `$(...)` or a backslash continuation print nothing, and a heredoc ends the listing.
+- `guard-hooks` 0.6.0 ships `bin/env-keys`, which prints the key names of dotenv files without their values; lines inside a multi-line `'...'`, `"..."` or `$'...'` value or a backslash continuation print nothing, and a heredoc or a command substitution left open across lines ends the listing. It reads only a regular file and refuses a symbolic link named like a dotenv file.
   `secrets-path-guard.sh` leaves a command that is exactly `env-keys <dotenv path>...` to the ordinary permission decision in every mode, with no designation; a pipe, a second command, a variable, a glob or a prefix keeps the denial.
   The exemption reads the command text, so a shell function or alias named `env-keys` would run instead of the tool; see `docs/environment-access.md`.
 

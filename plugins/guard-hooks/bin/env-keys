@@ -7,7 +7,10 @@ value-free: only names that start an assignment line are printed, lines inside
 a quoted multi-line value are skipped, and no message repeats file content.
 """
 
+import errno
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -16,12 +19,17 @@ ASSIGNMENT = re.compile(r"[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=
 USAGE = "usage: env-keys <dotenv file>..."
 
 
+# Quotes that may stay open across lines and are tracked exactly.
+QUOTES = ("'", '"', "$'")
+
+
 def scan(line, stack):
     """Read one line as the shell would and return what is still open after it.
 
-    stack holds the open quotes, $( or ( groups and ${ braces. The result is
-    (stack, joined, heredoc): joined when an unquoted backslash ends the line.
-    A misread must only ever hide a later key, never show part of a value.
+    stack holds the open quotes ('...', "...", $'...'), backtick and $( or (
+    groups, and ${ braces. The result is (stack, joined, stop): joined when an
+    unquoted backslash ends the line, stop at a heredoc. A misread must only
+    ever hide a later key, never show part of a value.
     """
     i, n = 0, len(line)
     while i < n:
@@ -30,15 +38,18 @@ def scan(line, stack):
         if top == "'":
             if char == "'":
                 stack.pop()
-        elif top in ('"', "`"):
+        elif top in ('"', "$'"):
             if char == "\\":
                 i += 1
-            elif char == top:
+            elif char == top[-1]:
                 stack.pop()
-            elif pair in ("$(", "${"):
+            elif top == '"' and pair in ("$(", "${"):
                 stack.append(pair[1])
                 i += 1
+            elif top == '"' and char == "`":
+                stack.append(char)
         else:
+            # Unquoted, or inside a backtick, $( or ${: quotes nest here.
             if char == "\\":
                 if i + 1 == n:
                     return stack, True, False
@@ -47,6 +58,11 @@ def scan(line, stack):
                 break
             elif pair == "<<":
                 return stack, False, True
+            elif char == "`" and top == "`":
+                stack.pop()
+            elif pair == "$'":
+                stack.append(pair)
+                i += 1
             elif char in ("'", '"', "`", "("):
                 stack.append(char)
             elif pair == "${":
@@ -66,9 +82,25 @@ def keys(text):
             match = ASSIGNMENT.fullmatch(line)
             if match:
                 yield match[1]
-        stack, joined, heredoc = scan(line, stack)
-        if heredoc:
-            return  # A heredoc body is data; stop rather than find its end.
+        stack, joined, stop = scan(line, stack)
+        # A heredoc body is data, and a command substitution, group or array
+        # left open across lines can hold a ) that is not its end (a case
+        # pattern): stop rather than guess where either ends.
+        if stop or any(entry not in QUOTES for entry in stack):
+            return
+
+
+def read_regular_file(path):
+    """Read path only when its last component is a regular file, not a link.
+
+    The name check covers the operand, not what a link named .env points at,
+    such as a private key whose padded base64 lines would read as keys.
+    """
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file")
+        return handle.read().decode("utf-8", "replace")
 
 
 def main(argv):
@@ -82,9 +114,12 @@ def main(argv):
     status = 0
     for arg in argv:
         try:
-            text = Path(arg).read_bytes().decode("utf-8", "replace")
+            text = read_regular_file(arg)
         except OSError as error:
-            print(f"env-keys: {arg}: {error.strerror}", file=sys.stderr)
+            reason = error.strerror
+            if error.errno == errno.ELOOP:
+                reason = "a symbolic link; name the dotenv file itself"
+            print(f"env-keys: {arg}: {reason}", file=sys.stderr)
             status = 1
             continue
         for key in keys(text):
