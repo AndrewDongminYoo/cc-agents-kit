@@ -77,7 +77,8 @@ The old inspector approval and exact-command consumer policies are not part of t
 
 `env-keys <dotenv file>...` ships in the plugin's `bin/` and prints only the names that start an assignment line, one per line, prefixed with the file when more than one is named.
 It reads the file the way the shell would split it: lines inside an open `'...'`, `"..."` or `$'...'` quote and lines joined by a trailing backslash print nothing, and a heredoc, or a `$(...)`, backtick, `(...)` or `${...}` left open at the end of a line, ends the listing.
-A misread can hide a later key but is meant never to print part of a value.
+A `#` starts a comment only at the start of a line that does not continue a word, or after unescaped whitespace.
+A misread can hide a later key but is meant never to print part of a value; `bin/env-keys.test.py` checks that against bash itself over 5,000 generated files, and the check fails on the two earlier parsers that review found leaking.
 It refuses a file whose name is not a dotenv name, a dotenv name that is a symbolic link or not a regular file (a `.env` link to a private key would otherwise pass the name check), and never repeats file content in a message.
 
 A Bash command that is exactly that one command, with plain or single-quoted path words, needs no designation and abstains in every permission mode.

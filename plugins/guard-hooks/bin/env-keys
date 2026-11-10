@@ -23,18 +23,25 @@ USAGE = "usage: env-keys <dotenv file>..."
 QUOTES = ("'", '"', "$'")
 
 
-def scan(line, stack):
+def scan(line, stack, joined=False):
     """Read one line as the shell would and return what is still open after it.
 
     stack holds the open quotes ('...', "...", $'...'), backtick and $( or (
-    groups, and ${ braces. The result is (stack, joined, stop): joined when an
-    unquoted backslash ends the line, stop at a heredoc. A misread must only
-    ever hide a later key, never show part of a value.
+    groups, and ${ braces. joined is True when the previous line ended in an
+    unquoted backslash, so this line continues its last word. The result is
+    (stack, joined, stop): joined when an unquoted backslash ends this line,
+    stop at a heredoc. A misread must only ever hide a later key, never show
+    part of a value.
     """
     i, n = 0, len(line)
+    # True only where a # starts a comment: at the start of a line that does
+    # not continue a word, or after unescaped unquoted whitespace. Anywhere
+    # else a # is read as data, which can only hide a later key.
+    boundary = not joined
     while i < n:
         char, top = line[i], stack[-1] if stack else None
         pair = line[i : i + 2]
+        unquoted_space = top not in QUOTES and char in " \t"
         if top == "'":
             if char == "'":
                 stack.pop()
@@ -54,7 +61,7 @@ def scan(line, stack):
                 if i + 1 == n:
                     return stack, True, False
                 i += 1
-            elif char == "#" and (i == 0 or line[i - 1] in " \t"):
+            elif char == "#" and boundary:
                 break
             elif pair == "<<":
                 return stack, False, True
@@ -70,6 +77,8 @@ def scan(line, stack):
                 i += 1
             elif (char == ")" and top == "(") or (char == "}" and top == "{"):
                 stack.pop()
+        # An escaped space skipped above never reaches this as char.
+        boundary = unquoted_space
         i += 1
     return stack, False, False
 
@@ -82,7 +91,7 @@ def keys(text):
             match = ASSIGNMENT.fullmatch(line)
             if match:
                 yield match[1]
-        stack, joined, stop = scan(line, stack)
+        stack, joined, stop = scan(line, stack, joined)
         # A heredoc body is data, and a command substitution, group or array
         # left open across lines can hold a ) that is not its end (a case
         # pattern): stop rather than guess where either ends.

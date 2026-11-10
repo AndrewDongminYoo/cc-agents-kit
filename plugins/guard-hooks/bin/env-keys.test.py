@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
 """Prove env-keys prints key names only; every value here is synthetic."""
 
+import importlib.util
 import os
+import random
 import subprocess
+import sys
 import tempfile
 import unittest
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 TOOL = Path(__file__).resolve().with_name("env-keys")
+# The parser in-process, so the differential check spawns only bash. No
+# bytecode: a __pycache__ beside the tool would land in the plugin's bin/.
+sys.dont_write_bytecode = True
+_LOADER = SourceFileLoader("env_keys", str(TOOL))
+_MODULE = importlib.util.module_from_spec(
+    importlib.util.spec_from_loader("env_keys", _LOADER)
+)
+_LOADER.exec_module(_MODULE)
+KEYS_OF = _MODULE.keys
 
 FIXTURE = """\
 # comment=VALUE_IN_COMMENT
@@ -105,6 +118,75 @@ class EnvKeysTests(unittest.TestCase):
     def test_crlf_lines_keep_a_backslash_continuation(self):
         self.env.write_bytes(b"A=first \\\r\nleak=crlf-value\r\nB=b\r\n")
         self.assertEqual(self.run_tool(self.env).stdout, "A\nB\n")
+
+    def test_a_hash_inside_a_word_is_not_a_comment(self):
+        # bash reads each SECRET line here as part of a quoted value.
+        for text in (
+            'A=prefix\\ #"\nSECRET0==\n"\nB=b\n',
+            'A=prefix\\\n#"\nSECRET0==\n"\nB=b\n',
+            "A=x#'\nSECRET0==\n'\nB=b\n",
+        ):
+            with self.subTest(text=text):
+                self.env.write_text(text, encoding="utf-8")
+                self.assertEqual(self.run_tool(self.env).stdout, "A\nB\n")
+
+    def test_bash_never_reads_a_printed_key_as_part_of_a_value(self):
+        """Differential check against bash over generated shell syntax.
+
+        Each SECRETn== line is a key when bash assigns it at the top level and
+        part of a value otherwise. Words are uppercase and PATH is empty, so a
+        generated word runs neither a builtin nor a program. A file bash
+        cannot parse is skipped: sourcing stops at the error, so later real
+        assignments would read as undefined.
+        """
+        tokens = ["X", " ", "\t", "'", '"', "\\", "\\ ", "#", "$", "$'", "$(",
+                  "${", "(", ")", "{", "}", "`", ";", "="]  # fmt: skip
+        rng = random.Random(4)
+        env = {"PATH": "/nonexistent"}
+        checked = 0
+        for _ in range(5000):
+            lines, secret = [], 0
+            for _ in range(rng.randint(3, 9)):
+                junk = "".join(rng.choice(tokens) for _ in range(rng.randint(0, 6)))
+                roll = rng.random()
+                if roll < 0.4:
+                    lines.append(f"K{len(lines)}={junk}")
+                elif roll < 0.75:
+                    lines.append(f"SECRET{secret}==")
+                    secret += 1
+                else:
+                    lines.append(junk)
+            text = "\n".join(lines) + "\n"
+            printed = [k for k in KEYS_OF(text) if k.startswith("SECRET")]
+            if not printed:
+                continue
+            self.env.write_text(text, encoding="utf-8")
+            # bash 3.2 -n can report a syntax error and still exit 0.
+            parse = subprocess.run(
+                ["/bin/bash", "-n", str(self.env)],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            if parse.returncode or parse.stderr:
+                continue
+            script = f'source "{self.env}" >/dev/null 2>&1 </dev/null; compgen -v'
+            defined = subprocess.run(
+                ["/bin/bash", "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout.split()
+            checked += 1
+            self.assertEqual(
+                [k for k in printed if k not in defined],
+                [],
+                self.env.read_text(encoding="utf-8"),
+            )
+        self.assertGreater(
+            checked, 100, "the generator stopped producing comparable files"
+        )
 
     def test_a_heredoc_ends_the_listing(self):
         for text in (
