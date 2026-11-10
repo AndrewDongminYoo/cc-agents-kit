@@ -75,6 +75,7 @@ STOPS = (
     ("OK=1\nA=x;#'\nB=\"\n'\nSECRET0==\n\"\n", "OK"),
     ("OK=1\nA=$'first\\'\nSECRET0==\n'\nB=b\n", "OK"),
     ('OK=1\nA="x\n$(echo "\nSECRET0==\n")"\nB=b\n', "OK A"),
+    ('OK=1\nA="x\n$y\n"\nB=b\n', "OK A"),
     ('OK=1\nA="a \\" b\nescaped=v\n"\nB=b\n', "OK"),
     ('OK=1\nA="x\\"\nSECRET0==\n"\nB=b\n', "OK"),
     ("OK=1\nA=x; B=y\nC=c\n", "OK"),
@@ -119,9 +120,12 @@ class EnvKeysTests(unittest.TestCase):
             [f"{self.env}:{k}" for k in KEYS] + [f"{other}:LOCAL"],
         )
 
-    def test_unclosed_quote_hides_the_rest_of_the_file(self):
-        self.env.write_text('A="open\nB=hidden-value\n', encoding="utf-8")
-        self.assertEqual(self.run_tool(self.env).stdout, "A\n")
+    def test_unclosed_quote_hides_the_rest_of_the_file_and_says_so(self):
+        self.env.write_text('OK=1\nA="open\nB=hidden-value\n', encoding="utf-8")
+        result = self.run_tool(self.env)
+        self.assertEqual(result.stdout, "OK\nA\n")
+        self.assertIn("stopped at line 2", result.stderr)
+        self.assertNotIn("hidden", result.stderr)
 
     def test_crlf_lines_are_read_without_the_carriage_return(self):
         self.env.write_bytes(b"A=a\r\nB='x\r\ny'\r\nC=c\r\n")

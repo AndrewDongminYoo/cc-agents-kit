@@ -46,7 +46,7 @@ Auto mode can ask or refuse; abstention does not promise a classifier call or au
 Every other mode retains the existing dotenv denial for designated paths.
 
 Direct file tools can use an exact absolute path or a relative path resolved against the tool event's normalized, absolute, existing and symlink-free `cwd`.
-Bash commands spell the designated absolute path literally, quoted when needed, with one exception: the operand of a `source` or `.` that is the first command, or that follows only an exact leading `set -a;`, may be relative.
+Bash commands spell the designated absolute path literally, quoted when needed, with one exception: the operand of a `source` or `.` that is the first command, or that follows only an exact leading `set -a;`, may be relative, as long as it has no `..` component (`source ../.env.development` keeps the denial even when the file it names is designated; spell that one absolute).
 It resolves against the same `cwd` as a direct tool path, because no `cd`, function or subshell can run before the first command.
 The hook assumes the event's `cwd` is the directory the Bash command starts in, including a `cd` carried over from an earlier call.
 The resolved file must exist, since zsh `source` searches `PATH` for a missing one.
@@ -77,7 +77,7 @@ The old inspector approval and exact-command consumer policies are not part of t
 
 `env-keys <dotenv file>...` ships in the plugin's `bin/` and prints only the names that start an assignment line, one per line, prefixed with the file when more than one is named.
 It does not imitate the shell's lexer; each version that did missed one more quoting spelling (`$'...'`, a `#` after `;` or an escaped space, a `$` joined to `'...'` by a line continuation) that let part of a value print as a key.
-It accepts only these line shapes, and stops at the first line that is anything else, saying on standard error which line number stopped it:
+It accepts only these line shapes, and stops at the first line that is anything else, saying on standard error which line number stopped it; a quote still open at the end of the file stops at the line that opened it:
 
 - a blank line, or a line whose first non-blank character is `#`;
 - `NAME=value`, optionally after `export` and with spaces around `=`, where the value is a word of letters, digits and `_./:@%+,=#~^-`, a `'...'` closed on the line, or a `"..."` with no `\`, `$` or backtick closed on the line, followed by nothing or by whitespace and a comment;

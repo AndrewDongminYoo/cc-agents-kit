@@ -44,8 +44,12 @@ OPENS = (
 
 
 def listing(text):
-    """Return (keys, stop_line): stop_line is the 1-based line not accepted."""
-    found, inside = [], None
+    """Return (keys, stop_line): stop_line is the 1-based line not accepted.
+
+    A quote still open at the end of the file stops at the line that opened
+    it, so a listing cut short by it is reported like any other stop.
+    """
+    found, inside, opened = [], None, None
     for number, line in enumerate(text.split("\n"), 1):
         line = line[:-1] if line.endswith("\r") else line
         if inside:
@@ -66,11 +70,11 @@ def listing(text):
             match = opener.fullmatch(line)
             if match:
                 found.append(match[1])
-                inside = (body, quote)
+                inside, opened = (body, quote), number
                 break
         else:
             return found, number
-    return found, None
+    return found, opened if inside else None
 
 
 def keys(text):
