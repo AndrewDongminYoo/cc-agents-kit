@@ -38,26 +38,30 @@ Its symlink check is not atomic with the later tool operation; keep selected pat
 
 ## Use the ordinary development workflow
 
-Only `permission_mode: auto` is eligible.
+For designated paths, only `permission_mode: auto` is eligible; the key-name listing below is the one exception that needs neither.
 For a tool call whose recognized live dotenv references all identify designated paths, this hook exits silently without a permission decision.
 It does not return `allow` or `ask`.
 Existing auto evaluation, explicit permissions, other hooks and the sandbox still decide whether the action runs.
 Auto mode can ask or refuse; abstention does not promise a classifier call or automatic success.
-Every other mode retains the existing dotenv denial.
+Every other mode retains the existing dotenv denial for designated paths.
 
 Direct file tools can use an exact absolute path or a relative path resolved against the tool event's normalized, absolute, existing and symlink-free `cwd`.
-Bash commands must spell the designated absolute path literally, quoted when needed.
-This avoids guessing the working directory after `cd`, subshells or functions.
+Bash commands spell the designated absolute path literally, quoted when needed, with one exception: the operand of a `source` or `.` that is the first command, or that follows only an exact leading `set -a;`, may be relative.
+It resolves against the same `cwd` as a direct tool path, because no `cd`, function or subshell can run before the first command.
+The hook assumes the event's `cwd` is the directory the Bash command starts in, including a `cd` carried over from an earlier call.
+The resolved file must exist, since zsh `source` searches `PATH` for a missing one.
+A name without a slash (`.env.development`) is also refused when a directory on the hook's `PATH` holds that name, because bash `source` and `.` search `PATH` first; `./.env.development` skips that search.
 For example, after the user designates their actual development file:
 
 ```bash
 source '/absolute/project/.env.development' && npm run dev
-set -a; . '/absolute/project/.env.development'; set +a; npm test
+source .env.development && npm run dev
+set -a; . ./.env.development; set +a; npm test
 python3 development-job.py --env-file='/absolute/project/.env.development'
 ```
 
 These commands go through the normal tool/permission workflow without a special runner or repeated whole-script pasting through `!`.
-Relative Bash dotenv references, globs, ambiguous expressions and an additional unregistered dotenv reference keep the original guard decision.
+Other relative Bash dotenv references, globs, ambiguous expressions and an additional unregistered dotenv reference keep the original guard decision.
 An option or assignment prefix before `=` cannot hide another live dotenv reference.
 Exact template variants such as `.env.example` retain their existing treatment.
 The Keychain-derived `.zprofile.secrets` check runs before this policy and cannot be exempted.
@@ -68,6 +72,21 @@ Sourcing executes shell code, so review the development file's provenance as wel
 Use the values only for the requested development work; avoid unnecessary printing, logging or replication.
 No entry-script hash, command identity, dependency safety or output/network isolation is promised.
 The old inspector approval and exact-command consumer policies are not part of this design.
+
+## List key names without values
+
+`env-keys <dotenv file>...` ships in the plugin's `bin/` and prints only the names that start an assignment line, one per line, prefixed with the file when more than one is named.
+It reads the file the way the shell would split it: lines inside an open quote, `$(...)`, `(...)` or `${...}` and lines joined by a trailing backslash print nothing, and a heredoc ends the listing.
+A misread can hide a later key but is meant never to print part of a value.
+It refuses a file whose name is not a dotenv name and never repeats file content in a message.
+
+A Bash command that is exactly that one command, with plain or single-quoted path words, needs no designation and abstains in every permission mode.
+The program word is the bare `env-keys` or the plugin's own absolute path.
+Anything else in the command (a pipe, a redirection, a second command, a variable, a glob, an assignment or runner prefix, a function definition) keeps the original decision, because an abstention skips every later check of the command.
+
+The exemption reads the command text, not what the shell will run.
+A shell function, an alias or an earlier `PATH` entry named `env-keys`, defined outside the command, runs instead of the plugin's tool and could print values; the same shell-function lookup is why the old inspector's value-free guarantee was withdrawn (#41).
+This listing therefore inherits the guard's accidental-access scope: it expects no such name in the user's shell, and it is not protection against an agent that plants one.
 
 ## Protection boundaries and overlapping denials
 

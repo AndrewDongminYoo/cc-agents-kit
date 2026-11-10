@@ -39,3 +39,12 @@ No test executes a secret-consuming payload or reads a real dotenv file.
 Caller Python shims must not manufacture abstention.
 Run all repository checks and current-head CI/reviews within the approved review boundary.
 Visual approval is not applicable.
+
+## Reconciliation, 2026-11-10 (guard-hooks 0.6.0)
+
+Two statements above no longer describe the shipped code; `plugins/guard-hooks/hooks/_dev_env_paths.py` and `docs/environment-access.md` are the authority.
+
+- "Relative Bash paths ... retain the existing decision": a relative designated path is now accepted as the operand of a `source` or `.` that starts the command, optionally after `set -a;`, because nothing can change the directory before the first command. Tests: `test_leading_relative_source_resolves_against_cwd` and its two neighbours in `dev-env-paths.test.py`.
+- "Remove ... inspector-specific approval path": a key-name listing came back as `bin/env-keys`, exempt in every mode when it is the whole command. It does not restore the withdrawn guarantee: the shell-function lookup that invalidated the inspector applies to it too, and the environment guide says so. Tests: `KeysOnlyTests` in `dev-env-paths.test.py` and `bin/env-keys.test.py`.
+
+The change was made because a guard that refused every key listing and every relative `source` was turned off entirely, which protected nothing.
