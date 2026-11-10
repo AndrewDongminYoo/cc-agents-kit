@@ -22,53 +22,70 @@ _MODULE = importlib.util.module_from_spec(
 _LOADER.exec_module(_MODULE)
 KEYS_OF = _MODULE.keys
 
+# Every line shape env-keys accepts.
 FIXTURE = """\
 # comment=VALUE_IN_COMMENT
 # don't let this apostrophe hide the next key
+
 PLAIN=plain-value
 export EXPORTED=exported-value
   SPACED = spaced-value
 EMPTY=
+URL=https://host:8080/path#fragment
 PEM="-----BEGIN KEY-----
 QUJDREVGR0hJSktMTU5PUFFSU1RVVldY==
 padded=continuation-value
 -----END KEY-----"
 SINGLE='first line
 inner=single-continuation
-last line'
-ESCAPED="a \\" b
-escaped=escaped-continuation
-"
-AFTER=after-value
-not a key line
-lower_case=lower-value
-FEED=feed-value\fformfeed=feed-continuation
-MIDDLE=abc"
-middle=middle-continuation"
-ANSI=$'first\\'
-QUJDREVGR0g==
-'
-ONELINE=$'it\\'s' "$(echo ok)" `echo ok`
+last line'  # closing-comment
+QUOTED='it is "fine"'
+DOUBLE="no specials here" # comment
 COMMENTED=commented-value # it's fine
 TRAILING=trailing-value\r
+lower_case=lower-value
 """
 KEYS = [
     "PLAIN",
     "EXPORTED",
     "SPACED",
     "EMPTY",
+    "URL",
     "PEM",
     "SINGLE",
-    "ESCAPED",
-    "AFTER",
-    "lower_case",
-    "FEED",
-    "MIDDLE",
-    "ANSI",
-    "ONELINE",
+    "QUOTED",
+    "DOUBLE",
     "COMMENTED",
     "TRAILING",
+    "lower_case",
 ]
+
+# Text -> the keys printed before the listing stops. Each SECRET or lower-case
+# line is part of a value in bash; several are leaks found in review of a
+# parser that imitated the shell lexer.
+STOPS = (
+    ("OK=1\nA=$(cat <<EOF\nbody=v\nEOF\n)\nB=b\n", "OK"),
+    ("OK=1\nA=a\ncat <<EOF\nbody=v\nEOF\nB=b\n", "OK A"),
+    ("OK=1\nA=$(printf '%s' x\nsubst=v\n)\nB=b\n", "OK"),
+    ('OK=1\nA="$(echo "\nnested=v\n")"\nB=b\n', "OK"),
+    ("OK=1\nA=$(case x in\na) echo x\ncase=v ;; esac)\nB=b\n", "OK"),
+    ("OK=1\nA=first \\\nleak=v\nB=b\n", "OK"),
+    ("OK=1\nA=$\\\n'first\\'\nSECRET0==\n'\nB=b\n", "OK"),
+    ('OK=1\nA=prefix\\ #"\nSECRET0==\n"\nB=b\n', "OK"),
+    ("OK=1\nA=x;#'\nB=\"\n'\nSECRET0==\n\"\n", "OK"),
+    ("OK=1\nA=$'first\\'\nSECRET0==\n'\nB=b\n", "OK"),
+    ('OK=1\nA="x\n$(echo "\nSECRET0==\n")"\nB=b\n', "OK A"),
+    ('OK=1\nA="a \\" b\nescaped=v\n"\nB=b\n', "OK"),
+    ('OK=1\nA="x\\"\nSECRET0==\n"\nB=b\n', "OK"),
+    ("OK=1\nA=x; B=y\nC=c\n", "OK"),
+    ('OK=1\nA=abc"\nmiddle=v"\nB=b\n', "OK"),
+    ("OK=1\nnot a key line\nB=b\n", "OK"),
+    ("OK=1\nFEED=v\fformfeed=x\nB=b\n", "OK"),
+    ("OK=1\nA='x'y\nB=b\n", "OK"),
+    ("OK=1\nA=x\nexport A B\nB=b\n", "OK A"),
+    ('OK=1\nA="$HOME"\nB=b\n', "OK"),
+    ("OK=1\nA='x\ny' trailing\nB=b\n", "OK A"),
+)
 
 
 class EnvKeysTests(unittest.TestCase):
@@ -87,16 +104,9 @@ class EnvKeysTests(unittest.TestCase):
     def test_prints_exactly_the_keys(self):
         result = self.run_tool(self.env)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
         self.assertEqual(result.stdout.splitlines(), KEYS)
-        for value in (
-            "value",
-            "QUJD",
-            "padded",
-            "inner",
-            "escaped",
-            "continuation",
-            "comment",
-        ):
+        for value in ("value", "QUJD", "padded", "inner", "continuation"):
             self.assertNotIn(value, result.stdout)
 
     def test_multiple_files_prefix_each_key_with_its_file(self):
@@ -113,31 +123,20 @@ class EnvKeysTests(unittest.TestCase):
         self.env.write_text('A="open\nB=hidden-value\n', encoding="utf-8")
         self.assertEqual(self.run_tool(self.env).stdout, "A\n")
 
-    def test_a_line_continuation_ends_the_listing(self):
-        # bash joins each pair of lines here, so the next line is a value.
-        for text in (
-            b"A=first \\\nleak=joined-value\nB=b\n",
-            b"A=first \\\r\nleak=crlf-value\r\nB=b\r\n",
-            b"A=$\\\n'first\\'\nSECRET0==\n'\nB=b\n",
-            b'A="$\\\n(echo "\nSECRET0==\n")"\nB=b\n',
-            b'A=prefix\\\n#"\nSECRET0==\n"\nB=b\n',
-        ):
-            with self.subTest(text=text):
-                self.env.write_bytes(text)
-                self.assertEqual(self.run_tool(self.env).stdout, "A\n")
-        # A backslash inside '...' is literal, so the listing goes on.
-        self.env.write_text("A='x\\\ny'\nB=b\n", encoding="utf-8")
-        self.assertEqual(self.run_tool(self.env).stdout, "A\nB\n")
+    def test_crlf_lines_are_read_without_the_carriage_return(self):
+        self.env.write_bytes(b"A=a\r\nB='x\r\ny'\r\nC=c\r\n")
+        self.assertEqual(self.run_tool(self.env).stdout, "A\nB\nC\n")
 
-    def test_a_hash_inside_a_word_is_not_a_comment(self):
-        # bash reads each SECRET line here as part of a quoted value.
-        for text in (
-            'A=prefix\\ #"\nSECRET0==\n"\nB=b\n',
-            "A=x#'\nSECRET0==\n'\nB=b\n",
-        ):
+    def test_any_other_shape_stops_the_listing(self):
+        for text, expected in STOPS:
             with self.subTest(text=text):
                 self.env.write_text(text, encoding="utf-8")
-                self.assertEqual(self.run_tool(self.env).stdout, "A\nB\n")
+                result = self.run_tool(self.env)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout.split(), expected.split())
+                self.assertIn("stopped at line", result.stderr)
+                for value in ("SECRET", "=v", "body", "leak"):
+                    self.assertNotIn(value, result.stderr)
 
     def test_bash_never_reads_a_printed_key_as_part_of_a_value(self):
         """Differential check against bash over generated shell syntax.
@@ -196,29 +195,6 @@ class EnvKeysTests(unittest.TestCase):
         self.assertGreater(
             checked, 100, "the generator stopped producing comparable files"
         )
-
-    def test_a_heredoc_ends_the_listing(self):
-        for text in (
-            "A=$(cat <<EOF\nbody=heredoc-value\nEOF\n)\nB=b\n",
-            "A=a\ncat <<EOF\nbody=heredoc-value\nEOF\nB=b\n",
-        ):
-            with self.subTest(text=text):
-                self.env.write_text(text, encoding="utf-8")
-                self.assertEqual(self.run_tool(self.env).stdout, "A\n")
-
-    def test_an_open_substitution_or_group_ends_the_listing(self):
-        for value in (
-            "$(printf '%s' x\nsubst=subst-value\n)",
-            '"$(echo "\nnested=nested-value\n")"',
-            '"`echo "\nbacktick=backtick-value\n"`"',
-            '`echo "\nplain=plain-value\n"`',
-            "${X:-\nbrace=brace-value\n}",
-            "(\narray=array-value\n)",
-            "$(case x in\na) echo x\ncase=case-value ;; esac)",
-        ):
-            with self.subTest(value=value):
-                self.env.write_text("A=" + value + "\nB=b\n", encoding="utf-8")
-                self.assertEqual(self.run_tool(self.env).stdout, "A\n")
 
     def test_refuses_other_file_names_before_reading_anything(self):
         secret = self.root / "id_rsa"

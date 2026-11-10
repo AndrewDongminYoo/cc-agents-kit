@@ -3,8 +3,13 @@
 
 secrets-path-guard leaves a command that is exactly `env-keys <dotenv path>...`
 to the ordinary permission decision in every mode, so this output must stay
-value-free: only names that start an assignment line are printed, lines inside
-a quoted multi-line value are skipped, and no message repeats file content.
+value-free, and no message repeats file content.
+
+It does not imitate a shell lexer: every attempt to track bash's quoting
+rules missed one more spelling that let part of a value print as a key.
+It accepts only line shapes that bash reads one way, listed below, and
+stops listing at the first line that is anything else. Widen a shape only
+with a stopping case for what it must still refuse.
 """
 
 import errno
@@ -15,91 +20,61 @@ import sys
 from pathlib import Path
 
 NAME = re.compile(r"\.env(?:\.[A-Za-z0-9-]+)*", re.I)
-ASSIGNMENT = re.compile(r"[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=.*")
 USAGE = "usage: env-keys <dotenv file>..."
 
+# An unquoted value word: no quote, backslash, $, backtick, space, glob,
+# brace, or operator character. A # inside it is literal; it is never at the
+# start of a word, because the word starts at the name.
+WORD = r"[A-Za-z0-9_./:@%+,=#~^-]*"
+SINGLE_BODY = r"[^']*"
+# Inside "...", a backslash, $ or backtick starts an escape or expansion.
+DOUBLE_BODY = r"[^\"\\$`]*"
+# After a value, only whitespace or whitespace and a comment.
+TAIL = r"(?:[ \t]+#.*)?[ \t]*"
+HEAD = r"[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*"
 
-# Quotes that may stay open across lines and are tracked exactly.
-QUOTES = ("'", '"', "$'")
+SKIP = re.compile(r"[ \t]*(?:#.*)?")
+ONE_LINE = re.compile(HEAD + rf"(?:{WORD}|'{SINGLE_BODY}'|\"{DOUBLE_BODY}\"){TAIL}")
+# A quoted value that continues on the next line: the quote and what is
+# allowed inside it until the line that closes it.
+OPENS = (
+    (re.compile(HEAD + rf"'{SINGLE_BODY}"), SINGLE_BODY, "'"),
+    (re.compile(HEAD + rf"\"{DOUBLE_BODY}"), DOUBLE_BODY, '"'),
+)
 
 
-def scan(line, stack):
-    """Read one line as the shell would and return what is still open after it.
-
-    stack holds the open quotes ('...', "...", $'...'), backtick and $( or (
-    groups, and ${ braces. The result is (stack, stop). stop is True at a
-    heredoc, and when a backslash outside '...' ends the line: bash then joins
-    the next line to this one, so a token can span the break ($ then '...'),
-    and only stopping keeps the scan from reading the halves apart. A misread
-    must only ever hide a later key, never show part of a value.
-    """
-    i, n = 0, len(line)
-    # True only where a # starts a comment: at the start of a line, or after
-    # unescaped unquoted whitespace. Anywhere else a # is read as data, which
-    # can only hide a later key.
-    boundary = True
-    while i < n:
-        char, top = line[i], stack[-1] if stack else None
-        pair = line[i : i + 2]
-        unquoted_space = top not in QUOTES and char in " \t"
-        if top == "'":
-            if char == "'":
-                stack.pop()
-        elif top in ('"', "$'"):
-            if char == "\\":
-                if i + 1 == n:
-                    return stack, True
-                i += 1
-            elif char == top[-1]:
-                stack.pop()
-            elif top == '"' and pair in ("$(", "${"):
-                stack.append(pair[1])
-                i += 1
-            elif top == '"' and char == "`":
-                stack.append(char)
-        else:
-            # Unquoted, or inside a backtick, $( or ${: quotes nest here.
-            if char == "\\":
-                if i + 1 == n:
-                    return stack, True
-                i += 1
-            elif char == "#" and boundary:
+def listing(text):
+    """Return (keys, stop_line): stop_line is the 1-based line not accepted."""
+    found, inside = [], None
+    for number, line in enumerate(text.split("\n"), 1):
+        line = line[:-1] if line.endswith("\r") else line
+        if inside:
+            body, quote = inside
+            if re.fullmatch(body, line):
+                continue
+            if re.fullmatch(body + re.escape(quote) + TAIL, line):
+                inside = None
+                continue
+            return found, number
+        if SKIP.fullmatch(line):
+            continue
+        match = ONE_LINE.fullmatch(line)
+        if match:
+            found.append(match[1])
+            continue
+        for opener, body, quote in OPENS:
+            match = opener.fullmatch(line)
+            if match:
+                found.append(match[1])
+                inside = (body, quote)
                 break
-            elif pair == "<<":
-                return stack, True
-            elif char == "`" and top == "`":
-                stack.pop()
-            elif pair == "$'":
-                stack.append(pair)
-                i += 1
-            elif char in ("'", '"', "`", "("):
-                stack.append(char)
-            elif pair == "${":
-                stack.append("{")
-                i += 1
-            elif (char == ")" and top == "(") or (char == "}" and top == "{"):
-                stack.pop()
-        # An escaped space skipped above never reaches this as char.
-        boundary = unquoted_space
-        i += 1
-    return stack, False
+        else:
+            return found, number
+    return found, None
 
 
 def keys(text):
-    stack = []
-    for line in text.split("\n"):
-        line = line[:-1] if line.endswith("\r") else line
-        if not stack:
-            match = ASSIGNMENT.fullmatch(line)
-            if match:
-                yield match[1]
-        stack, stop = scan(line, stack)
-        # A heredoc body is data, a line continuation can join a token across
-        # the break, and a command substitution, group or array left open
-        # across lines can hold a ) that is not its end (a case pattern):
-        # stop rather than guess where any of them ends.
-        if stop or any(entry not in QUOTES for entry in stack):
-            return
+    return listing(text)[0]
 
 
 def read_regular_file(path):
@@ -134,8 +109,15 @@ def main(argv):
             print(f"env-keys: {arg}: {reason}", file=sys.stderr)
             status = 1
             continue
-        for key in keys(text):
+        found, stop_line = listing(text)
+        for key in found:
             print(f"{arg}:{key}" if len(argv) > 1 else key)
+        if stop_line:
+            print(
+                f"env-keys: {arg}: stopped at line {stop_line}, a shape env-keys "
+                "does not read; later keys are not listed",
+                file=sys.stderr,
+            )
     return status
 
 

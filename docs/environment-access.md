@@ -76,9 +76,15 @@ The old inspector approval and exact-command consumer policies are not part of t
 ## List key names without values
 
 `env-keys <dotenv file>...` ships in the plugin's `bin/` and prints only the names that start an assignment line, one per line, prefixed with the file when more than one is named.
-It reads the file the way the shell would split it: lines inside an open `'...'`, `"..."` or `$'...'` quote print nothing, and the listing ends at a heredoc, at a line that ends in a backslash outside `'...'` (bash joins the next line, so a token such as `$` and `'...'` can span the break), and at a `$(...)`, backtick, `(...)` or `${...}` left open at the end of a line.
-A `#` starts a comment only at the start of a line or after unescaped whitespace.
-A misread can hide a later key but is meant never to print part of a value; `bin/env-keys.test.py` checks that against bash itself over 5,000 generated files, and the check fails on the two earlier parsers that review found leaking.
+It does not imitate the shell's lexer; each version that did missed one more quoting spelling (`$'...'`, a `#` after `;` or an escaped space, a `$` joined to `'...'` by a line continuation) that let part of a value print as a key.
+It accepts only these line shapes, and stops at the first line that is anything else, saying on standard error which line number stopped it:
+
+- a blank line, or a line whose first non-blank character is `#`;
+- `NAME=value`, optionally after `export` and with spaces around `=`, where the value is a word of letters, digits and `_./:@%+,=#~^-`, a `'...'` closed on the line, or a `"..."` with no `\`, `$` or backtick closed on the line, followed by nothing or by whitespace and a comment;
+- the same with a `'...'` or such a `"..."` left open, continued by lines without that quote (and, for `"`, without `\`, `$` or backtick), and closed on a line that ends after the quote like the one-line form.
+
+Every other shape (`$'...'`, `$(...)`, `${...}`, a backtick, a line continuation, `;`, a heredoc, a mixed `'a'b` word) ends the listing, so keys after it are not shown.
+`bin/env-keys.test.py` holds each leak that review found as a stopping case, and checks the listing against bash itself over 5,000 generated files.
 It refuses a file whose name is not a dotenv name, a dotenv name that is a symbolic link or not a regular file (a `.env` link to a private key would otherwise pass the name check), and never repeats file content in a message.
 
 A Bash command that is exactly that one command, with plain or single-quoted path words, needs no designation and abstains in every permission mode.
