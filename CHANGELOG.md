@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-11-10
+
+`guard-hooks` opens two legitimate dotenv uses that its secrets guard used to refuse (#101): listing key names without values, and sourcing a designated development file by a relative path.
+`guard-hooks` goes to 0.6.0; `context-handoff` (0.3.0), `context-meter` (0.1.0), `quick-look` (0.1.0), `reply-language` (0.1.0) and `repo-gate` (0.2.12) are unchanged.
+
 ### Added
 
 - `guard-hooks` 0.6.0 ships `bin/env-keys`, which prints the key names of dotenv files without their values. It accepts only plain `NAME=value` lines (an unquoted word, a `'...'`, or a `"..."` without `\`, `$` or backtick, which may span lines), blank lines and comments, and stops at the first other line, naming its number on standard error. It reads only a regular file and refuses a symbolic link named like a dotenv file. A differential test checks the listing against bash over generated files.
