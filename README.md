@@ -174,7 +174,8 @@ Template variants stay readable for key names and documentation. Never copy real
 
 A user can designate exact development dotenv paths with the default-off `CC_GUARD_DEV_ENV_PATHS` JSON array.
 Only in auto mode, recognized references to those paths leave the decision to normal permissions and auto evaluation; the hook never emits `allow` or `ask`.
-The agent can read the selected values and use ordinary absolute-path `source` commands.
+The agent can read the selected values and use ordinary absolute-path `source` commands, or a relative path in a `source` that starts the command.
+A lone `env-keys <dotenv file>...` command, from the plugin's `bin/`, lists key names without values in any mode and needs no designation.
 Unregistered dotenv paths and Keychain protection remain unchanged, and other deny rules still apply.
 See [the development-access contract and tradeoffs](docs/environment-access.md).
 

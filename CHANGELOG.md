@@ -5,6 +5,17 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Added
+
+- `guard-hooks` 0.6.0 ships `bin/env-keys`, which prints the key names of dotenv files without their values. It accepts only plain `NAME=value` lines (an unquoted word, a `'...'`, or a `"..."` without `\`, `$` or backtick, which may span lines), blank lines and comments, and stops at the first other line, naming its number on standard error. It reads only a regular file and refuses a symbolic link named like a dotenv file. A differential test checks the listing against bash over generated files.
+  `secrets-path-guard.sh` leaves a command that is exactly `env-keys <dotenv path>...` to the ordinary permission decision in every mode, with no designation; a pipe, a second command, a variable, a glob or a prefix loses this exemption and keeps the original decision, which for a designated path in auto mode is still the designated-path policy.
+  The exemption reads the command text, so a shell function or alias named `env-keys` would run instead of the tool; see `docs/environment-access.md`.
+
+### Changed
+
+- `guard-hooks` 0.6.0: with `CC_GUARD_DEV_ENV_PATHS` set, a relative designated path is accepted in Bash when it is the operand of a `source` or `.` that starts the command, optionally after `set -a;`, so `source .env.development && npm test` works in auto mode.
+  The file must exist, and a name without a slash is refused when a directory on `PATH` holds the same name.
+
 ## [0.10.0] — 2026-11-09
 
 `reply-language` is a new, temporary plugin for replies that drift out of the `language` setting (#99); it is to be removed once anthropics/claude-code#99704 is fixed.

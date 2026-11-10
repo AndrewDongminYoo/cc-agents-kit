@@ -180,9 +180,68 @@ class DevelopmentPathsTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 2)
 
-    def test_relative_bash_and_ambiguous_paths_keep_denial(self):
+    def test_leading_relative_source_resolves_against_cwd(self):
         for command in (
             "source .env.dev",
+            ". ./.env.dev",
+            "source '.env.dev' && npm test",
+            "set -a; . ./.env.dev; set +a; npm run dev",
+        ):
+            with self.subTest(command=command):
+                self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 0)
+        self.expect(
+            self.invoke(
+                {"command": "source .env.dev"}, mode="default", paths=[str(self.dev)]
+            ),
+            2,
+        )
+        # The same word from another cwd names an unregistered file.
+        self.expect(
+            self.invoke(
+                {"command": "source .env.dev"}, cwd=self.root, paths=[str(self.dev)]
+            ),
+            2,
+        )
+
+    def test_relative_source_needs_the_file_and_no_path_shadow(self):
+        missing = self.project / ".env.new"
+        self.expect(
+            self.invoke({"command": "source .env.new"}, paths=[str(missing)]), 2
+        )
+        shadow = self.root / "bin"
+        shadow.mkdir()
+        (shadow / ".env.dev").touch()
+        path = {"PATH": str(shadow) + os.pathsep + os.environ["PATH"]}
+        self.expect(
+            self.invoke(
+                {"command": "source .env.dev"}, paths=[str(self.dev)], extra=path
+            ),
+            2,
+        )
+        # A slash keeps bash and zsh from searching PATH.
+        self.expect(
+            self.invoke(
+                {"command": "source ./.env.dev"}, paths=[str(self.dev)], extra=path
+            ),
+            0,
+        )
+
+    def test_relative_source_after_any_other_command_keeps_denial(self):
+        for command in (
+            "foo; source .env.dev",
+            "true\nsource .env.dev",
+            "(source .env.dev)",
+            "{ source .env.dev; }",
+            "set -a && source .env.dev",
+            "source " + shlex.quote(str(self.dev)) + "; source .env.dev",
+            "cat .env.dev",
+            "source ../" + shlex.quote(self.project.name) + "/.env.dev",
+        ):
+            with self.subTest(command=command):
+                self.expect(self.invoke({"command": command}, paths=[str(self.dev)]), 2)
+
+    def test_relative_bash_and_ambiguous_paths_keep_denial(self):
+        for command in (
             "cd elsewhere && source .env.dev",
             "cat " + shlex.quote(str(self.dev)) + "*",
             "cat " + shlex.quote(str(self.project / ".." / ".env.dev")),
@@ -331,6 +390,48 @@ class DevelopmentPathsTests(unittest.TestCase):
             ),
             2,
         )
+
+
+class KeysOnlyTests(unittest.TestCase):
+    """`env-keys <dotenv path>...` alone needs no designation, in any mode."""
+
+    TOOL = str(HOOK.parent.parent / "bin" / "env-keys")
+    setUp = DevelopmentPathsTests.setUp
+    invoke = DevelopmentPathsTests.invoke
+    expect = DevelopmentPathsTests.expect
+
+    def test_a_lone_env_keys_command_abstains_in_every_mode(self):
+        for command in (
+            "env-keys .env",
+            "env-keys .env.production " + shlex.quote(str(self.production)),
+            "  env-keys ~/project/.env.local\t",
+            self.TOOL + " .env",
+            shlex.quote(self.TOOL) + " .env",
+        ):
+            for mode in ("auto", "default", "plan", "bypassPermissions"):
+                with self.subTest(command=command, mode=mode):
+                    self.expect(self.invoke({"command": command}, mode=mode), 0)
+
+    def test_anything_beside_env_keys_keeps_denial(self):
+        for command in (
+            "env-keys .env && grep -rn . .",
+            "env-keys .env | grep -r x .",
+            "env-keys .env; cat .env",
+            "env-keys .env\ncat .env",
+            "env-keys .env > keys.txt",
+            'env-keys(){ cat "$1";}; env-keys .env',
+            "./env-keys .env",
+            "PATH=/x:$PATH env-keys .env",
+            "command env-keys .env",
+            "env-keys $HOME/.env",
+            "env-keys .env*",
+            "env-keys .env'x'",
+            "env-keys notes.txt .env",
+            "env-keys ~/.zprofile.secrets .env",
+            "cat .env",
+        ):
+            with self.subTest(command=command):
+                self.expect(self.invoke({"command": command}, mode="default"), 2)
 
 
 if __name__ == "__main__":

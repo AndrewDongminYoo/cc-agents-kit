@@ -1,0 +1,129 @@
+#!/usr/bin/python3 -IS
+"""Print the key names of dotenv files, never their values.
+
+secrets-path-guard leaves a command that is exactly `env-keys <dotenv path>...`
+to the ordinary permission decision in every mode, so this output must stay
+value-free, and no message repeats file content.
+
+It does not imitate a shell lexer: every attempt to track bash's quoting
+rules missed one more spelling that let part of a value print as a key.
+It accepts only line shapes that bash reads one way, listed below, and
+stops listing at the first line that is anything else. Widen a shape only
+with a stopping case for what it must still refuse.
+"""
+
+import errno
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+NAME = re.compile(r"\.env(?:\.[A-Za-z0-9-]+)*", re.I)
+USAGE = "usage: env-keys <dotenv file>..."
+
+# An unquoted value word: no quote, backslash, $, backtick, space, glob,
+# brace, or operator character. A # inside it is literal; it is never at the
+# start of a word, because the word starts at the name.
+WORD = r"[A-Za-z0-9_./:@%+,=#~^-]*"
+SINGLE_BODY = r"[^']*"
+# Inside "...", a backslash, $ or backtick starts an escape or expansion.
+DOUBLE_BODY = r"[^\"\\$`]*"
+# After a value, only whitespace or whitespace and a comment.
+TAIL = r"(?:[ \t]+#.*)?[ \t]*"
+HEAD = r"[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*"
+
+SKIP = re.compile(r"[ \t]*(?:#.*)?")
+ONE_LINE = re.compile(HEAD + rf"(?:{WORD}|'{SINGLE_BODY}'|\"{DOUBLE_BODY}\"){TAIL}")
+# A quoted value that continues on the next line: the quote and what is
+# allowed inside it until the line that closes it.
+OPENS = (
+    (re.compile(HEAD + rf"'{SINGLE_BODY}"), SINGLE_BODY, "'"),
+    (re.compile(HEAD + rf"\"{DOUBLE_BODY}"), DOUBLE_BODY, '"'),
+)
+
+
+def listing(text):
+    """Return (keys, stop_line): stop_line is the 1-based line not accepted.
+
+    A quote still open at the end of the file stops at the line that opened
+    it, so a listing cut short by it is reported like any other stop.
+    """
+    found, inside, opened = [], None, None
+    for number, line in enumerate(text.split("\n"), 1):
+        line = line[:-1] if line.endswith("\r") else line
+        if inside:
+            body, quote = inside
+            if re.fullmatch(body, line):
+                continue
+            if re.fullmatch(body + re.escape(quote) + TAIL, line):
+                inside = None
+                continue
+            return found, number
+        if SKIP.fullmatch(line):
+            continue
+        match = ONE_LINE.fullmatch(line)
+        if match:
+            found.append(match[1])
+            continue
+        for opener, body, quote in OPENS:
+            match = opener.fullmatch(line)
+            if match:
+                found.append(match[1])
+                inside, opened = (body, quote), number
+                break
+        else:
+            return found, number
+    return found, opened if inside else None
+
+
+def keys(text):
+    return listing(text)[0]
+
+
+def read_regular_file(path):
+    """Read path only when its last component is a regular file, not a link.
+
+    The name check covers the operand, not what a link named .env points at,
+    such as a private key whose padded base64 lines would read as keys.
+    """
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file")
+        return handle.read().decode("utf-8", "replace")
+
+
+def main(argv):
+    if not argv or any(arg.startswith("-") for arg in argv):
+        print(USAGE, file=sys.stderr)
+        return 2
+    for arg in argv:
+        if not NAME.fullmatch(Path(arg).name):
+            print(f"env-keys: {arg}: not a dotenv file name", file=sys.stderr)
+            return 2
+    status = 0
+    for arg in argv:
+        try:
+            text = read_regular_file(arg)
+        except OSError as error:
+            reason = error.strerror
+            if error.errno == errno.ELOOP:
+                reason = "a symbolic link; name the dotenv file itself"
+            print(f"env-keys: {arg}: {reason}", file=sys.stderr)
+            status = 1
+            continue
+        found, stop_line = listing(text)
+        for key in found:
+            print(f"{arg}:{key}" if len(argv) > 1 else key)
+        if stop_line:
+            print(
+                f"env-keys: {arg}: stopped at line {stop_line}, a shape env-keys "
+                "does not read; later keys are not listed",
+                file=sys.stderr,
+            )
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
