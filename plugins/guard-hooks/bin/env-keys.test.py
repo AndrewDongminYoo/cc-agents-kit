@@ -24,6 +24,7 @@ KEYS_OF = _MODULE.keys
 
 FIXTURE = """\
 # comment=VALUE_IN_COMMENT
+# don't let this apostrophe hide the next key
 PLAIN=plain-value
 export EXPORTED=exported-value
   SPACED = spaced-value
@@ -44,8 +45,6 @@ lower_case=lower-value
 FEED=feed-value\fformfeed=feed-continuation
 MIDDLE=abc"
 middle=middle-continuation"
-JOINED=first \\
-joined=joined-continuation
 ANSI=$'first\\'
 QUJDREVGR0g==
 '
@@ -65,7 +64,6 @@ KEYS = [
     "lower_case",
     "FEED",
     "MIDDLE",
-    "JOINED",
     "ANSI",
     "ONELINE",
     "COMMENTED",
@@ -115,15 +113,26 @@ class EnvKeysTests(unittest.TestCase):
         self.env.write_text('A="open\nB=hidden-value\n', encoding="utf-8")
         self.assertEqual(self.run_tool(self.env).stdout, "A\n")
 
-    def test_crlf_lines_keep_a_backslash_continuation(self):
-        self.env.write_bytes(b"A=first \\\r\nleak=crlf-value\r\nB=b\r\n")
+    def test_a_line_continuation_ends_the_listing(self):
+        # bash joins each pair of lines here, so the next line is a value.
+        for text in (
+            b"A=first \\\nleak=joined-value\nB=b\n",
+            b"A=first \\\r\nleak=crlf-value\r\nB=b\r\n",
+            b"A=$\\\n'first\\'\nSECRET0==\n'\nB=b\n",
+            b'A="$\\\n(echo "\nSECRET0==\n")"\nB=b\n',
+            b'A=prefix\\\n#"\nSECRET0==\n"\nB=b\n',
+        ):
+            with self.subTest(text=text):
+                self.env.write_bytes(text)
+                self.assertEqual(self.run_tool(self.env).stdout, "A\n")
+        # A backslash inside '...' is literal, so the listing goes on.
+        self.env.write_text("A='x\\\ny'\nB=b\n", encoding="utf-8")
         self.assertEqual(self.run_tool(self.env).stdout, "A\nB\n")
 
     def test_a_hash_inside_a_word_is_not_a_comment(self):
         # bash reads each SECRET line here as part of a quoted value.
         for text in (
             'A=prefix\\ #"\nSECRET0==\n"\nB=b\n',
-            'A=prefix\\\n#"\nSECRET0==\n"\nB=b\n',
             "A=x#'\nSECRET0==\n'\nB=b\n",
         ):
             with self.subTest(text=text):

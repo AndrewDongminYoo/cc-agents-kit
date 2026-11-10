@@ -23,21 +23,21 @@ USAGE = "usage: env-keys <dotenv file>..."
 QUOTES = ("'", '"', "$'")
 
 
-def scan(line, stack, joined=False):
+def scan(line, stack):
     """Read one line as the shell would and return what is still open after it.
 
     stack holds the open quotes ('...', "...", $'...'), backtick and $( or (
-    groups, and ${ braces. joined is True when the previous line ended in an
-    unquoted backslash, so this line continues its last word. The result is
-    (stack, joined, stop): joined when an unquoted backslash ends this line,
-    stop at a heredoc. A misread must only ever hide a later key, never show
-    part of a value.
+    groups, and ${ braces. The result is (stack, stop). stop is True at a
+    heredoc, and when a backslash outside '...' ends the line: bash then joins
+    the next line to this one, so a token can span the break ($ then '...'),
+    and only stopping keeps the scan from reading the halves apart. A misread
+    must only ever hide a later key, never show part of a value.
     """
     i, n = 0, len(line)
-    # True only where a # starts a comment: at the start of a line that does
-    # not continue a word, or after unescaped unquoted whitespace. Anywhere
-    # else a # is read as data, which can only hide a later key.
-    boundary = not joined
+    # True only where a # starts a comment: at the start of a line, or after
+    # unescaped unquoted whitespace. Anywhere else a # is read as data, which
+    # can only hide a later key.
+    boundary = True
     while i < n:
         char, top = line[i], stack[-1] if stack else None
         pair = line[i : i + 2]
@@ -47,6 +47,8 @@ def scan(line, stack, joined=False):
                 stack.pop()
         elif top in ('"', "$'"):
             if char == "\\":
+                if i + 1 == n:
+                    return stack, True
                 i += 1
             elif char == top[-1]:
                 stack.pop()
@@ -59,12 +61,12 @@ def scan(line, stack, joined=False):
             # Unquoted, or inside a backtick, $( or ${: quotes nest here.
             if char == "\\":
                 if i + 1 == n:
-                    return stack, True, False
+                    return stack, True
                 i += 1
             elif char == "#" and boundary:
                 break
             elif pair == "<<":
-                return stack, False, True
+                return stack, True
             elif char == "`" and top == "`":
                 stack.pop()
             elif pair == "$'":
@@ -80,21 +82,22 @@ def scan(line, stack, joined=False):
         # An escaped space skipped above never reaches this as char.
         boundary = unquoted_space
         i += 1
-    return stack, False, False
+    return stack, False
 
 
 def keys(text):
-    stack, joined = [], False
+    stack = []
     for line in text.split("\n"):
         line = line[:-1] if line.endswith("\r") else line
-        if not stack and not joined:
+        if not stack:
             match = ASSIGNMENT.fullmatch(line)
             if match:
                 yield match[1]
-        stack, joined, stop = scan(line, stack, joined)
-        # A heredoc body is data, and a command substitution, group or array
-        # left open across lines can hold a ) that is not its end (a case
-        # pattern): stop rather than guess where either ends.
+        stack, stop = scan(line, stack)
+        # A heredoc body is data, a line continuation can join a token across
+        # the break, and a command substitution, group or array left open
+        # across lines can hold a ) that is not its end (a case pattern):
+        # stop rather than guess where any of them ends.
         if stop or any(entry not in QUOTES for entry in stack):
             return
 
