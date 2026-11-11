@@ -132,7 +132,9 @@ with tempfile.TemporaryDirectory() as config, tempfile.TemporaryDirectory() as p
 # --- CC_REPLY_LANGUAGE_MODELS limits the reminder to the named models ---
 def transcript(directory, *entries):
     path = Path(directory, "transcript.jsonl")
-    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries))
+    path.write_text(
+        "".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8"
+    )
     return str(path)
 
 
