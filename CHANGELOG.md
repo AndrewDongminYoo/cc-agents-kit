@@ -5,6 +5,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Added
+
+- `reply-language` 0.2.0: `CC_REPLY_LANGUAGE_MODELS` limits both hooks to sessions whose current model ID contains one of its comma-separated substrings (for example `opus-5-5`), so a model that does not drift no longer receives a reminder after every tool call. Unset, every model is covered as before; an unknown model stays in scope.
+
 ## [0.11.0] — 2026-11-10
 
 `guard-hooks` opens two legitimate dotenv uses that its secrets guard used to refuse (#101): listing key names without values, and sourcing a designated development file by a relative path.
