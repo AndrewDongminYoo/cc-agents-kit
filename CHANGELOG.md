@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-11
+
+`reply-language` can be limited to the models that drift (#103), so a session on another model no longer receives a language reminder after every tool call.
+`reply-language` goes to 0.2.0; `context-handoff` (0.3.0), `context-meter` (0.1.0), `guard-hooks` (0.6.0), `quick-look` (0.1.0) and `repo-gate` (0.2.12) are unchanged.
+
 ### Added
 
 - `reply-language` 0.2.0: `CC_REPLY_LANGUAGE_MODELS` limits both hooks to sessions whose current model ID contains one of its comma-separated substrings (for example `opus-5-5`), so a model that does not drift no longer receives a reminder after every tool call. Unset, every model is covered as before; an unknown model stays in scope.
