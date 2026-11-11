@@ -355,9 +355,64 @@ def drifted(blocks, language):
     return letters >= MIN_LETTERS and share < MAX_SHARE
 
 
+MODEL_TAIL_BYTES = 262144
+
+
+def session_model(path):
+    """Model ID of the main thread's latest response, or "" when unknown.
+
+    Reads only the end of the transcript: the reminder runs after every tool
+    call, and a long transcript must not be parsed in full each time.
+    """
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - MODEL_TAIL_BYTES))
+            # split on "\n" only, as stop_window does: splitlines() also breaks
+            # at U+2028 and U+0085, which JSONL may carry unescaped in a line
+            lines = fh.read().decode("utf-8", "replace").split("\n")
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        if '"assistant"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue  # the first line of the tail is usually cut mid-entry
+        if not isinstance(entry, dict) or entry.get("type") != "assistant":
+            continue
+        if entry.get("isSidechain"):
+            continue
+        model = (entry.get("message") or {}).get("model")
+        if isinstance(model, str) and model and not model.startswith("<"):
+            return model
+    return ""
+
+
+def model_in_scope(event):
+    """False only when CC_REPLY_LANGUAGE_MODELS is set and the session's model
+    is known and matches none of its comma-separated substrings. An unknown
+    model (a new session, an unreadable transcript) stays in scope."""
+    wanted = [
+        part.strip().lower()
+        for part in os.environ.get("CC_REPLY_LANGUAGE_MODELS", "").split(",")
+        if part.strip()
+    ]
+    if not wanted:
+        return True
+    model = event.get("model")
+    if not isinstance(model, str) or not model:
+        path = event.get("transcript_path")
+        model = session_model(path) if isinstance(path, str) and path else ""
+    if not model:
+        return True
+    return any(part in model.lower() for part in wanted)
+
+
 def remind(event):
     language = target_language(event.get("cwd"))
-    if not language:
+    if not language or not model_in_scope(event):
         return None
     name = event.get("hook_event_name") or ""
     if name not in ("UserPromptSubmit", "PostToolUse"):
@@ -376,6 +431,8 @@ def check(event):
     language = target_language(event.get("cwd"))
     path = event.get("transcript_path")
     if not language or not isinstance(path, str) or not path:
+        return None
+    if not model_in_scope(event):
         return None
     try:
         shown, human, entrypoint = stop_window(path)

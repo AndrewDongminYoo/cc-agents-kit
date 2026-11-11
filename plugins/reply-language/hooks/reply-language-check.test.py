@@ -91,13 +91,15 @@ def transcript(entries):
     return path
 
 
-def run(entries=None, language="Korean", raw=None, **extra):
+def run(entries=None, language="Korean", raw=None, models=None, **extra):
     env = {
         k: v
         for k, v in os.environ.items()
         if not k.startswith("CC_") and k != "CLAUDE_PROJECT_DIR"
     }
     env.update(CLAUDE_CONFIG_DIR=WORK, HOME=WORK)
+    if models is not None:
+        env["CC_REPLY_LANGUAGE_MODELS"] = models
     if language is not None:
         env["CC_REPLY_LANGUAGE"] = language
     if raw is None:
@@ -363,6 +365,30 @@ check(
     f"exit={code} out={out!r}",
 )
 fails += _optout.drain(HOOK, DISABLE_VAR)
+
+
+# --- CC_REPLY_LANGUAGE_MODELS limits the check to the named models ---
+def say_as(model, text):
+    entry = say(text)
+    entry["message"]["model"] = model
+    return entry
+
+
+blocks(
+    "model scope: an English answer from a named model",
+    [human(KO_ASK), say_as("claude-opus-5-5", EN_REPLY)],
+    models="opus-5-5",
+)
+silent(
+    "model scope: an English answer from another model",
+    [human(KO_ASK), say_as("claude-fable-5-2", EN_REPLY)],
+    models="opus-5-5",
+)
+blocks(
+    "model scope: a transcript without a model is still checked",
+    [human(KO_ASK), say(EN_REPLY)],
+    models="opus-5-5",
+)
 
 print(f"\n{'ALL PASSED' if not fails else f'{fails} FAILED'}")
 sys.exit(1 if fails else 0)

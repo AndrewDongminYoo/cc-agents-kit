@@ -415,6 +415,8 @@ It reads the target language from the `language` setting (user, then project, th
 A language chosen with `--settings` or in managed settings is not visible to a hook, so set `CC_REPLY_LANGUAGE` to the same value in that case.
 Only languages with a script of their own are supported: Korean, Japanese, Chinese, Russian and other Cyrillic, Persian, Arabic, Urdu, Hindi, Thai, Greek and Hebrew.
 A Latin-script language cannot be told apart from English by script, so it is left alone.
+To run both hooks only for the models that drift, set `CC_REPLY_LANGUAGE_MODELS` to a comma-separated list of model ID substrings, for example `opus-5-5`.
+The model is the one that wrote the main thread's latest response in the transcript, so the first turn after a model switch still follows the earlier model, and a session whose model is not known yet is treated as in scope.
 
 | Hook                         | Event · matcher                     | Does                                                                                                                                                                                                                         | Opt-out                                      |
 | ---------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |

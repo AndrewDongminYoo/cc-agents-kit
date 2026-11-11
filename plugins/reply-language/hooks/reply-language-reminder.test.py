@@ -18,7 +18,7 @@ DISABLE_VAR = "CC_GUARD_DISABLE_REPLY_LANGUAGE_REMINDER"
 CONFIG = tempfile.mkdtemp(prefix="reply-language-config-")
 
 
-def run(payload, language=None, config=CONFIG, project=None):
+def run(payload, language=None, config=CONFIG, project=None, models=None):
     # No real settings may leak in: an empty config dir and HOME, no inherited
     # project dir, and the language only from the case itself.
     env = {
@@ -31,6 +31,8 @@ def run(payload, language=None, config=CONFIG, project=None):
         env["CLAUDE_PROJECT_DIR"] = project
     if language is not None:
         env["CC_REPLY_LANGUAGE"] = language
+    if models is not None:
+        env["CC_REPLY_LANGUAGE_MODELS"] = models
     proc = subprocess.run(
         ["/bin/bash", HOOK], input=payload, capture_output=True, text=True, env=env
     )
@@ -125,6 +127,94 @@ with tempfile.TemporaryDirectory() as config, tempfile.TemporaryDirectory() as p
         "ユーザー" in out,
         out,
     )
+
+
+# --- CC_REPLY_LANGUAGE_MODELS limits the reminder to the named models ---
+def transcript(directory, *entries):
+    path = Path(directory, "transcript.jsonl")
+    path.write_text(
+        "".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8"
+    )
+    return str(path)
+
+
+def reply(model, **extra):
+    body = {"type": "assistant", "message": {"model": model, "content": []}}
+    body.update(extra)
+    return body
+
+
+with tempfile.TemporaryDirectory() as work:
+    opus = transcript(work, reply("claude-fable-5-2"), reply("claude-opus-5-5"))
+    code, out, _ = run(
+        event("PostToolUse", tool_name="Bash", transcript_path=opus),
+        "Korean",
+        models="opus-5-5",
+    )
+    check("model scope: the latest model matches, so it reminds", "한국어" in out, out)
+
+    fable = transcript(
+        work,
+        reply("claude-opus-5-5"),
+        reply("claude-fable-5-2"),
+        reply("claude-opus-5-5", isSidechain=True),
+        reply("<synthetic>"),
+    )
+    for name in ("UserPromptSubmit", "PostToolUse"):
+        code, out, err = run(
+            event(name, tool_name="Bash", transcript_path=fable),
+            "Korean",
+            models="opus-5-5, sonnet-5",
+        )
+        check(
+            f"model scope, {name}: another model is silent",
+            code == 0 and out == "" and err == "",
+            f"exit={code} out={out!r} err={err!r}",
+        )
+
+    code, out, _ = run(
+        event("PostToolUse", tool_name="Bash", transcript_path=fable), "Korean"
+    )
+    check("model scope unset: every model is reminded", "한국어" in out, out)
+
+    code, out, _ = run(
+        event("UserPromptSubmit", transcript_path=fable, model="claude-opus-5-5"),
+        "Korean",
+        models="opus-5-5",
+    )
+    check("model scope: a model in the hook input wins", "사용자가 읽는" in out, out)
+
+    # A raw U+2028 inside one JSONL line must not split that line.
+    separated = Path(work, "separator.jsonl")
+    separated.write_text(
+        json.dumps(reply("claude-fable-5-2"))
+        + "\n"
+        + json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "model": "claude-opus-5-5",
+                    "content": [{"type": "text", "text": "a b"}],
+                },
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    code, out, _ = run(
+        event("PostToolUse", tool_name="Bash", transcript_path=str(separated)),
+        "Korean",
+        models="opus-5-5",
+    )
+    check("model scope: a raw U+2028 keeps the line whole", "한국어" in out, out)
+
+    empty = transcript(work)
+    for label, path in (("empty", empty), ("missing", str(Path(work, "none.jsonl")))):
+        code, out, _ = run(
+            event("UserPromptSubmit", transcript_path=path), "Korean", models="opus-5-5"
+        )
+        check(f"model scope: {label} transcript still reminds", "사용자" in out, out)
 
 # --- silent cases ---
 for label, payload, language in (
