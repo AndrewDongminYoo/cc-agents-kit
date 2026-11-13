@@ -2638,6 +2638,43 @@ for label, command in (
         f"stderr={err.strip()[:160]}",
     )
 
+# A process substitution in an argument leaves the command it sits in at that
+# argument, as a command substitution does. When it closes, the next word is
+# another argument, so a later <( or >( is not a redirection before a program.
+# No git runs in these commands, so they pass even with a credential staged.
+procsub_secret = repo({"config.txt": f"{GITHUB}\n"})
+for label, command in (
+    ("comm over two substitutions", """comm -13 <(printf '%s\\n' "$prev") <(printf '%s\\n' "$cur")"""),
+    ("an expansion in the second input substitution", 'cat <(echo a) <(echo "$q")'),
+    ("an unquoted expansion in the second substitution", "cat <(echo a) <(echo $q)"),
+    ("diff over two sorted inputs", 'diff <(sort "$a") <(sort "$b")'),
+    ("tee into two output substitutions", 'tee >(cat "$p") >(cat "$q")'),
+    ("an expansion argument after a substitution", 'cat <(echo a) "$x"'),
+):
+    for directory in (plain, procsub_secret):
+        rc, err = check_hook(command, directory)
+        check(
+            f"{label} passes",
+            rc == 0,
+            f"exit={rc} stderr={err.strip()[:160]}",
+        )
+
+# The command still ends at ; | && after the substitution, and a commit inside
+# one is still a command of its own, so each of these commits is scanned.
+for label, command in (
+    ("a commit after ; following a substitution", "cat <(echo a); git commit -m x"),
+    (
+        "a commit after && following two substitutions",
+        'diff <(echo a) <(echo "$q") && git commit -m x',
+    ),
+    ("a commit after | following a substitution", 'cat <(echo "$q") | git commit -m x'),
+    ("a commit inside a second substitution", 'cat <(echo "$q") <(git commit -m x)'),
+):
+    rc, err = check_hook(command, procsub_secret)
+    check(f"{label} is refused", rc == 2, f"exit={rc} stderr={err.strip()[:160]}")
+    rc, err = check_hook(command, plain)
+    check(f"{label} passes when clean", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+
 # A variable the same command visibly assigns a git, /git or commit word to,
 # read as an env -S string reads a word, is read as that value where it names
 # the program or an env -S string's words (#71). The values are not evaluated:
