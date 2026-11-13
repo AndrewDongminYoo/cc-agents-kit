@@ -1603,7 +1603,18 @@ while :; do
     env_value_continues=""
     env_restore=""
     case "$current" in
-      "$BOUNDARY_PREFIX(") paren_stack="${paren_stack}p" ;;
+      "$BOUNDARY_PREFIX(")
+        # A process substitution (`<(`, `>(`) is a word of the command around
+        # it, as `$(` is: when it closes, that command resumes where it was, so
+        # `cat <(a) <(b "$x")` does not read the second < as a redirection
+        # before a program. A subshell `(` closes at a command start.
+        if ((token_index > 0)) && [[ "${TOKENS[token_index - 1]}" == [\<\>] \
+          && -z "${TOKEN_QUOTED[token_index - 1]-}${TOKEN_EXPANSION[token_index - 1]-}" ]]; then
+          paren_stack="${paren_stack}${at_command_start}"
+        else
+          paren_stack="${paren_stack}p"
+        fi
+        ;;
       "$BOUNDARY_PREFIX\$(")
         if [[ -n "$env_value_subst" ]]; then
           paren_stack="${paren_stack}${env_value_subst}"
