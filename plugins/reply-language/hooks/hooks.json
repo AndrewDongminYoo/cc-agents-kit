@@ -1,5 +1,5 @@
 {
-  "description": "Temporary workaround for anthropics/claude-code#99704: remind the reply language by who reads the text, and ask for a restatement when a turn's user-facing text drifted into another language.",
+  "description": "Temporary workaround for anthropics/claude-code#99704: remind the reply language by who reads the text, refuse an AskUserQuestion written in another language, and ask for a restatement when a turn's user-facing text drifted into another language.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -8,6 +8,18 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/reply-language-reminder.sh\"",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/reply-language-ask.sh\"",
+            "timeout": 10
           }
         ]
       }
