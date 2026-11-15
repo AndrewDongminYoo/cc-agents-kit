@@ -20,7 +20,7 @@ Describe your current setup in the new chat; installation and configuration chan
 | The code works, but commits, CI, and lint findings still take work.                       | [`repo-gate`](#repo-gate)             | 6 skills           |
 | Advisor turns make the harness read the context as about twice as full and compact early. | [`context-meter`](#context-meter)     | 1 mod              |
 | You want to look at the files the agent just touched, on a Mac.                           | [`quick-look`](#quick-look)           | 1 mod              |
-| Replies drift into English although `language` names another language (temporary).        | [`reply-language`](#reply-language)   | 2 hooks            |
+| Replies drift into English although `language` names another language (temporary).        | [`reply-language`](#reply-language)   | 3 hooks            |
 
 ## See it run
 
@@ -421,6 +421,7 @@ The model is the one that wrote the main thread's latest response in the transcr
 | Hook                         | Event · matcher                     | Does                                                                                                                                                                                                                         | Opt-out                                      |
 | ---------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | `reply-language-reminder.sh` | UserPromptSubmit; PostToolUse (all) | On a user message and after `Agent` or `SendMessage`, adds one sentence that allows English only for what someone other than the user reads. After every other tool result, adds a one-line reminder in the target language. | `CC_GUARD_DISABLE_REPLY_LANGUAGE_REMINDER=1` |
+| `reply-language-ask.sh`      | PreToolUse · `AskUserQuestion`      | When the question, header, option labels and descriptions are under 30% target-script letters, refuses the call and asks for the same question in the target language.                                                       | `CC_GUARD_DISABLE_REPLY_LANGUAGE_ASK=1`      |
 | `reply-language-check.sh`    | Stop                                | When the text shown in this response, or its last block, is under 30% target-script letters, blocks the stop once and asks for the same content in the target language with no new tool work.                                | `CC_GUARD_DISABLE_REPLY_LANGUAGE_CHECK=1`    |
 
 A response here is the text written since the last input that started a turn: a user message, a task notification, a subagent's report or a queued message, so text already restated is not judged again at the next notification's stop.
@@ -429,7 +430,11 @@ Replayed over 189 of my own sessions, judged against Korean, it would have block
 Of the 31 times my next message asked for Korean or said the reply was in English (found by a regular expression over my messages), the stops before 30 of them would have been blocked.
 The one it missed carried its only progress line in a thinking block, which the check does not read, because a non-empty thinking block may be reasoning the language rule does not cover.
 It cannot hide the English draft the user already saw; it only gets the restatement written without the user asking.
-Both hooks need `python3` and fail open without it.
+
+An `AskUserQuestion` dialog is tool input, not a text block, so neither the reminder (it runs after a tool returns) nor the stop check sees it; `reply-language-ask.sh` judges it before the dialog opens, so the English draft never reaches the user.
+It applies the stop check's stripping, thresholds and silences to each question, header, option label and option description, and leaves out option previews and markdown table rows, which hold mockups, code, or titles shown as they will be published.
+Replayed over 395 past calls judged against Korean, it would have refused 7, each a question whose sentences were English.
+All three hooks need `python3` and fail open without it.
 
 ## Licence
 

@@ -4,6 +4,7 @@ Usage (the hook's JSON on stdin):
 
     python3 -I -S _reply_language.py remind   # prints the reminder sentence, or nothing
     python3 -I -S _reply_language.py check    # prints a Stop block decision, or nothing
+    python3 -I -S _reply_language.py ask      # prints the reason to refuse AskUserQuestion, or nothing
 
 Both modes print nothing, and exit 0, whenever they cannot judge: no target
 language, a language this helper has no script for, an unreadable transcript,
@@ -124,6 +125,28 @@ REWRITE_EN = (
     "The text shown to the user in this response is mostly not in {name}. "
     "Without new tool work, restate it in {name}. Leave code, identifiers, paths and "
     "verbatim quotes as they are."
+)
+
+# AskUserQuestion puts its text in the tool input, where neither the reminder
+# (it runs after a tool returns) nor the Stop check (it reads text blocks)
+# sees it. The PreToolUse guard refuses the call with this reason instead.
+ASK_REWRITE = {
+    "korean": (
+        "사용자에게 보일 질문과 선택지가 대부분 한국어가 아닙니다. "
+        "질문, 헤더, 선택지 이름과 설명을 한국어로 다시 써서 AskUserQuestion을 다시 호출하세요. "
+        "코드, 식별자, 경로, 원문 인용은 그대로 둡니다."
+    ),
+    "japanese": (
+        "ユーザーに見える質問と選択肢の大部分が日本語ではありません。"
+        "質問、ヘッダー、選択肢の名前と説明を日本語で書き直して、AskUserQuestion を呼び直してください。"
+        "コード、識別子、パス、原文の引用はそのままにします。"
+    ),
+}
+ASK_REWRITE_EN = (
+    "The question and options the user would see are mostly not written in {name}. "
+    "Call AskUserQuestion again with the question, header, option labels and "
+    "descriptions written in {name}. Leave code, identifiers, paths and verbatim "
+    "quotes as they are."
 )
 
 MIN_LETTERS = 40  # below this, a short line of paths or names decides nothing
@@ -463,8 +486,72 @@ def check(event):
     return {"decision": "block", "reason": reason}
 
 
+TABLE_ROW = re.compile(r"^[ \t]*\|.*$", re.M)
+
+
+def question_text(tool_input):
+    """The text AskUserQuestion shows as prose: each question, its header, and
+    each option's label and description. A preview holds a mockup or code, so
+    it is left out, and so are markdown table rows: a question that lists
+    issue or PR titles for approval shows them as they will be published,
+    which is often English."""
+    parts = []
+    questions = tool_input.get("questions")
+    if not isinstance(questions, list):
+        return ""
+    for item in questions:
+        if not isinstance(item, dict):
+            continue
+        parts += [item.get("question"), item.get("header")]
+        options = item.get("options")
+        if isinstance(options, list):
+            for option in options:
+                if isinstance(option, dict):
+                    parts += [option.get("label"), option.get("description")]
+    return TABLE_ROW.sub(" ", "\n".join(p for p in parts if isinstance(p, str)))
+
+
+def ask(event):
+    """The reason to refuse an AskUserQuestion call, or None to let it run."""
+    if event.get("tool_name") != "AskUserQuestion":
+        return None
+    tool_input = event.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    language = target_language(event.get("cwd"))
+    if not language or not model_in_scope(event):
+        return None
+    path = event.get("transcript_path")
+    if isinstance(path, str) and path:
+        try:
+            _, human, entrypoint = stop_window(path)
+        except OSError:
+            human, entrypoint = None, ""
+        if entrypoint.startswith("sdk"):
+            return None  # the same scope as the Stop check
+        if human is not None:
+            h_letters, h_share = script_share(human, language)
+            if h_letters >= MIN_LETTERS // 2 and h_share < USER_SHARE:
+                return None  # the user wrote in another language this turn
+    letters, share = script_share(question_text(tool_input), language)
+    if letters < MIN_LETTERS or share >= MAX_SHARE:
+        return None
+    return ASK_REWRITE.get(language) or ASK_REWRITE_EN.format(
+        name=language.capitalize()
+    )
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "ask":
+        try:
+            event = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            return
+        reason = ask(event) if isinstance(event, dict) else None
+        if reason:
+            sys.stdout.write(reason)
+        return
     try:
         event = json.loads(sys.stdin.read() or "{}")
     except ValueError:

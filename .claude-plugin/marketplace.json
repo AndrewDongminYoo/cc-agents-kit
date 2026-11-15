@@ -39,7 +39,7 @@
     {
       "name": "reply-language",
       "source": "./plugins/reply-language",
-      "description": "Temporary workaround for anthropics/claude-code#99704, to be removed once it is fixed: keeps user-facing text in the language set by `language` (Korean, Japanese, Chinese and other non-Latin scripts) by restating the rule after tool results, and asks for a restatement when a turn drifted into English.",
+      "description": "Temporary workaround for anthropics/claude-code#99704, to be removed once it is fixed: keeps user-facing text in the language set by `language` (Korean, Japanese, Chinese and other non-Latin scripts) by restating the rule after tool results, refusing an AskUserQuestion dialog written in English, and asking for a restatement when a turn drifted into English.",
       "category": "productivity"
     }
   ]
