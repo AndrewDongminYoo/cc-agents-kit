@@ -5,6 +5,20 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-15
+
+`reply-language` now covers `AskUserQuestion` dialogs (#107) and keeps checking the turns that follow an interrupt (#106); `guard-hooks` no longer refuses a command that reads two process substitutions (#105).
+`reply-language` goes to 0.3.0 and `guard-hooks` to 0.6.1; `context-handoff` (0.3.0), `context-meter` (0.1.0), `quick-look` (0.1.0) and `repo-gate` (0.2.12) are unchanged.
+
+### Added
+
+- `reply-language` 0.3.0 adds `reply-language-ask.sh`, a `PreToolUse` hook for `AskUserQuestion`. A dialog carries its text in the tool input, so neither the reminder nor the Stop check saw it, and an English question could reach the user. The hook judges each question with its header, option labels and option descriptions, and the dialog as a whole, with the Stop check's thresholds, and refuses the call with a request to rewrite it in the target language. Option previews and markdown table rows are not judged. Opt-out: `CC_GUARD_DISABLE_REPLY_LANGUAGE_ASK=1` (#107).
+
+### Fixed
+
+- `reply-language` 0.2.1: the Stop check no longer reads the harness's `[Request interrupted by user]` marker as the user's last message. The marker looks like an English prompt, so every turn after an interrupt was skipped as "the user wrote in another language" (#106).
+- `guard-hooks` 0.6.1 `staged-secret-guard` resumes the outer command after a process substitution closes, so a command with no git in it, such as `comm -13 <(printf '%s\n' "$prev") <(printf '%s\n' "$cur")`, is no longer refused as an unreadable commit (#105).
+
 ## [0.12.0] — 2026-11-11
 
 `reply-language` can be limited to the models that drift (#103), so a session on another model no longer receives a language reminder after every tool call.
