@@ -320,6 +320,39 @@ blocks(
     ],
 )
 
+
+def interrupt_marker(text="[Request interrupted by user]"):
+    # The shape the harness writes when the user presses Esc: no origin, one
+    # text block (2.1.325 transcript, 2026-11-15).
+    return {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+    }
+
+
+blocks(
+    "an interrupt marker is not the user writing in English",
+    [human(KO_ASK), say(KO_REPLY), interrupt_marker(), say(EN_REPLY)],
+)
+blocks(
+    "a tool-use interrupt marker is not the user writing in English",
+    [
+        human(KO_ASK),
+        *tool_round(),
+        interrupt_marker("[Request interrupted by user for tool use]"),
+        say(EN_STATUS),
+        say(EN_REPLY),
+    ],
+)
+silent(
+    "an interrupt marker does not hide a turn the user opened in English",
+    [
+        human("Please update the documentation site to the latest release."),
+        interrupt_marker(),
+        say(EN_REPLY),
+    ],
+)
+
 sidechain_brief = human(
     "Survey the repository and report every hook script with its event in English."
 )
