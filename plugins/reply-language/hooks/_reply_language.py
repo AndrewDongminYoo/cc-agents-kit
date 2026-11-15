@@ -231,6 +231,8 @@ def _is_human(entry):
         return False
     if entry.get("isCompactSummary"):
         return True  # a turn boundary whose language _human_text leaves unknown
+    if _is_interrupt_marker(entry):
+        return False
     origin = entry.get("origin")
     if isinstance(origin, dict):
         return origin.get("kind") == "human"
@@ -248,6 +250,17 @@ def _is_human(entry):
     return not head.startswith("<") or head.startswith(
         ("<command-name>", "<command-message>")
     )
+
+
+INTERRUPT = "[Request interrupted by user"
+
+
+def _is_interrupt_marker(entry):
+    """The line the harness writes when the user presses Esc. It carries no
+    origin and looks like an English prompt, but the user did not type it, so
+    it must not stand in for the language of the user's last message."""
+    text = _content_text((entry.get("message") or {}).get("content"))
+    return text.strip().startswith(INTERRUPT)
 
 
 COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
