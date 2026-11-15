@@ -489,26 +489,40 @@ def check(event):
 TABLE_ROW = re.compile(r"^[ \t]*\|.*$", re.M)
 
 
-def question_text(tool_input):
-    """The text AskUserQuestion shows as prose: each question, its header, and
-    each option's label and description. A preview holds a mockup or code, so
-    it is left out, and so are markdown table rows: a question that lists
-    issue or PR titles for approval shows them as they will be published,
-    which is often English."""
-    parts = []
+def question_texts(tool_input):
+    """The prose AskUserQuestion shows, one string per question: the question,
+    its header, and each option's label and description. A preview holds a
+    mockup or code, so it is left out, and so are markdown table rows: a
+    question that lists issue or PR titles for approval shows them as they
+    will be published, which is often English."""
+    texts = []
     questions = tool_input.get("questions")
     if not isinstance(questions, list):
-        return ""
+        return texts
     for item in questions:
         if not isinstance(item, dict):
             continue
-        parts += [item.get("question"), item.get("header")]
+        parts = [item.get("question"), item.get("header")]
         options = item.get("options")
         if isinstance(options, list):
             for option in options:
                 if isinstance(option, dict):
                     parts += [option.get("label"), option.get("description")]
-    return TABLE_ROW.sub(" ", "\n".join(p for p in parts if isinstance(p, str)))
+        texts.append(
+            TABLE_ROW.sub(" ", "\n".join(p for p in parts if isinstance(p, str)))
+        )
+    return texts
+
+
+def ask_drifted(texts, language):
+    """True when any one question drifted, so a long question in the target
+    language cannot mask another beside it, or when the dialog as a whole
+    did, so several short questions under the letter minimum still count."""
+    for text in [*texts, "\n".join(texts)]:
+        letters, share = script_share(text, language)
+        if letters >= MIN_LETTERS and share < MAX_SHARE:
+            return True
+    return False
 
 
 def ask(event):
@@ -533,8 +547,7 @@ def ask(event):
             h_letters, h_share = script_share(human, language)
             if h_letters >= MIN_LETTERS // 2 and h_share < USER_SHARE:
                 return None  # the user wrote in another language this turn
-    letters, share = script_share(question_text(tool_input), language)
-    if letters < MIN_LETTERS or share >= MAX_SHARE:
+    if not ask_drifted(question_texts(tool_input), language):
         return None
     return ASK_REWRITE.get(language) or ASK_REWRITE_EN.format(
         name=language.capitalize()

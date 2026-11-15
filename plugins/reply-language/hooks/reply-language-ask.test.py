@@ -203,6 +203,26 @@ refuses(
     "one English question among Korean ones",
     payload([KO_QUESTION, EN_QUESTION]),
 )
+# A long Korean question must not lift the combined share over the threshold
+# and mask a short English one beside it (PR #107 review).
+LONG_KO_QUESTION = question(
+    KO_QUESTION["question"] * 6,
+    "이슈 구성",
+    [(o["label"], o["description"] * 3) for o in KO_QUESTION["options"]],
+)
+SHORT_EN_QUESTION = question(
+    "Should I also open a follow-up issue for the deploy smoke test that failed today?",
+    "Follow-up",
+    [("Open it", "File it now."), ("Skip", "Leave it for later.")],
+)
+refuses(
+    "a long Korean question does not mask a short English one",
+    payload([LONG_KO_QUESTION, SHORT_EN_QUESTION]),
+)
+passes(
+    "the long Korean question alone",
+    payload([LONG_KO_QUESTION]),
+)
 refuses(
     "Japanese target, English question",
     payload([EN_QUESTION]),

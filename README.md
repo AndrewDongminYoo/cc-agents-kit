@@ -432,7 +432,7 @@ The one it missed carried its only progress line in a thinking block, which the 
 It cannot hide the English draft the user already saw; it only gets the restatement written without the user asking.
 
 An `AskUserQuestion` dialog is tool input, not a text block, so neither the reminder (it runs after a tool returns) nor the stop check sees it; `reply-language-ask.sh` judges it before the dialog opens, so the English draft never reaches the user.
-It applies the stop check's stripping, thresholds and silences to each question, header, option label and option description, and leaves out option previews and markdown table rows, which hold mockups, code, or titles shown as they will be published.
+It applies the stop check's stripping, thresholds and silences to each question together with its header, option labels and option descriptions, and to the dialog as a whole, so a long question in the target language cannot mask an English one beside it; it leaves out option previews and markdown table rows, which hold mockups, code, or titles shown as they will be published.
 Replayed over 395 past calls judged against Korean, it would have refused 7, each a question whose sentences were English.
 All three hooks need `python3` and fail open without it.
 
