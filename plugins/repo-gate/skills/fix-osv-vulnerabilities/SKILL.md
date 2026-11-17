@@ -265,7 +265,7 @@ For each candidate override:
 1. In a scratch worktree, delete the override and run `pnpm install --lockfile-only --no-frozen-lockfile` (or the manager's equivalent).
 2. List the versions that the lockfile diff adds for the overridden package.
 3. Read each cited GHSA with `gh api /advisories/<GHSA> --jq '.vulnerabilities[] | "\(.package.name) \(.vulnerable_version_range)"'`.
-4. Keep the override if any added version is inside any range. Otherwise delete it in the real tree, then run osv-scanner with `--show-existing` on the full lockfile and confirm no finding for that package.
+4. Keep the override if any added version is inside any range. Otherwise delete it in the real tree, regenerate the lockfile there with the same command, check that the frozen install passes, then run osv-scanner with `--show-existing` on the full lockfile and confirm no finding for that package.
 
 turbo-flutter-log, 2026-11-17: the repository guard reported all 16 consumer-scoped overrides as unused and Dependabot showed no open alerts. Without the overrides the lockfile resolved minimatch 9 and 10, glob 10 and 13, diff 7 and serialize-javascript 6, each inside its cited range. In the same repository, the MSAL override was correctly retired, because its parent resolved msal-node 7.2.2 outside GHSA-xcx6-jx8p-x3h5.
 
