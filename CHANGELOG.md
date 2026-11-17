@@ -5,6 +5,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `repo-gate` 0.2.13: `fix-osv-vulnerabilities` adds "Retiring an override". It removes a security override only after the graph without it is compared against the cited advisory ranges, and it no longer accepts a fixed Dependabot alert or a guard's "unused" report as proof. The skill now also triggers before an override is removed.
+
 ## [0.13.0] — 2026-11-15
 
 `reply-language` now covers `AskUserQuestion` dialogs (#107) and keeps checking the turns that follow an interrupt (#106); `guard-hooks` no longer refuses a command that reads two process substitutions (#105).
