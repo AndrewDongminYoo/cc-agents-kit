@@ -2644,7 +2644,10 @@ for label, command in (
 # No git runs in these commands, so they pass even with a credential staged.
 procsub_secret = repo({"config.txt": f"{GITHUB}\n"})
 for label, command in (
-    ("comm over two substitutions", """comm -13 <(printf '%s\\n' "$prev") <(printf '%s\\n' "$cur")"""),
+    (
+        "comm over two substitutions",
+        """comm -13 <(printf '%s\\n' "$prev") <(printf '%s\\n' "$cur")""",
+    ),
     ("an expansion in the second input substitution", 'cat <(echo a) <(echo "$q")'),
     ("an unquoted expansion in the second substitution", "cat <(echo a) <(echo $q)"),
     ("diff over two sorted inputs", 'diff <(sort "$a") <(sort "$b")'),
@@ -2673,7 +2676,9 @@ for label, command in (
     rc, err = check_hook(command, procsub_secret)
     check(f"{label} is refused", rc == 2, f"exit={rc} stderr={err.strip()[:160]}")
     rc, err = check_hook(command, plain)
-    check(f"{label} passes when clean", rc == 0, f"exit={rc} stderr={err.strip()[:160]}")
+    check(
+        f"{label} passes when clean", rc == 0, f"exit={rc} stderr={err.strip()[:160]}"
+    )
 
 # A variable the same command visibly assigns a git, /git or commit word to,
 # read as an env -S string reads a word, is read as that value where it names
