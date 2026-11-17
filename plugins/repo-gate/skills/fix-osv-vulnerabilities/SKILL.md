@@ -1,6 +1,6 @@
 ---
 name: fix-osv-vulnerabilities
-description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn or Bundler project and you need to triage and fix them.
+description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn or Bundler project and you need to triage and fix them, or before you remove a security override or resolution because something reports it as unused or resolved.
 metadata:
   category: dependencies
 ---
@@ -216,7 +216,7 @@ Map each override to a check that actually executes it, rather than assuming `pn
 | Lint/AST tooling (`@babel/core`)     | `pnpm lint` — a Next build uses SWC, not Babel  |
 | Script runner (`esbuild` via tsx)    | the test/script command that runs through `tsx` |
 
-Gotcha: `trunk check`'s osv-scanner cache can report a false green after edits — `touch` the lockfiles to bust the cache before trusting a clean run (Dependabot is the independent oracle when in doubt).
+Gotcha: `trunk check`'s osv-scanner cache can report a false green after edits — `touch` the lockfiles to bust the cache before trusting a clean run (Dependabot is the independent oracle when in doubt, but not for a pnpm lockfile with an env document first; see "Retiring an override").
 
 To make that green fail first on the pre-fix tree, pass `--show-existing` and read the output, not the exit code.
 Trunk holds the line against upstream, so a vulnerability already on the base branch is an "existing issue": in a worktree of the pre-fix commit, `trunk check --no-fix --filter=osv-scanner Gemfile.lock` printed `1 existing issue` and `✔ No new issues` and exited 0; only `--show-existing` printed the GHSA line, and that run exited 0 too.
@@ -251,6 +251,24 @@ Once an override is in place, remove any `[[IgnoredVulns]]` entries for the same
 
 If an override was previously set to pin an older version for a GHSA that was "no patch available" at the time, update both the override and remove the ignore entry.
 
+### Retiring an override
+
+Remove an override only when the graph without it stays outside every advisory the override cites.
+Do not decide from these signals, because each one can say "resolved" or "unused" while the override still blocks a vulnerable version:
+
+- A Dependabot alert in the fixed state. A pnpm 12 lockfile with an env document first hides the project graph from GitHub; `manage-dependabot` owns that check.
+- A repository guard or script that reports "no edges", "unused", or "not installed" for an override. Make it fail on a known-needed override before you trust it. A guard that reads the first `snapshots:` block of a multi-document pnpm lockfile reads pnpm's own install graph.
+- An earlier `trunk check` green, which can come from the osv-scanner cache (see the gotcha above).
+
+For each candidate override:
+
+1. In a scratch worktree, delete the override and run `pnpm install --lockfile-only --no-frozen-lockfile` (or the manager's equivalent).
+2. List the versions that the lockfile diff adds for the overridden package.
+3. Read each cited GHSA with `gh api /advisories/<GHSA> --jq '.vulnerabilities[] | "\(.package.name) \(.vulnerable_version_range)"'`.
+4. Keep the override if any added version is inside any range. Otherwise delete it in the real tree, then run osv-scanner with `--show-existing` on the full lockfile and confirm no finding for that package.
+
+turbo-flutter-log, 2026-11-17: the repository guard reported all 16 consumer-scoped overrides as unused and Dependabot showed no open alerts. Without the overrides the lockfile resolved minimatch 9 and 10, glob 10 and 13, diff 7 and serialize-javascript 6, each inside its cited range. In the same repository, the MSAL override was correctly retired, because its parent resolved msal-node 7.2.2 outside GHSA-xcx6-jx8p-x3h5.
+
 ## Common Mistakes
 
 | Mistake                                                   | Fix                                                                                               |
@@ -268,6 +286,7 @@ If an override was previously set to pin an older version for a GHSA that was "n
 | One override per package name when several majors exist   | Scope per major (`minimatch@3` and `minimatch@9`); a merged key downgrades or breaks a consumer   |
 | Deduping advisories to the highest patched version        | The unreachable fix hides the reachable one — scope to the installed major                        |
 | Listing Dependabot alerts without `--paginate`            | Truncates at 30, oldest first, and reads as a complete list                                       |
+| Removing an override because a guard or alert says unused | Re-resolve without it and compare against the advisory ranges ("Retiring an override")            |
 
 ## Provenance
 
