@@ -236,7 +236,10 @@ Then obtain explicit approval for the suppression.
 The approval must name the GHSA and the affected package version.
 
 The evidence is about what ships, not only about the dependency path.
-Build the artifact that the deploy or publish workflow ships, grep it for the package and the parents that would carry it, and grep a string that must be in it within the same scope, so an empty result is not a grep that read nothing.
+Build the artifact that the deploy or publish workflow ships and prove what it includes.
+A minified bundle drops package names and import paths, so an empty grep for the package name is not evidence of absence, and an unrelated control string only proves that the files were read.
+Prefer the bundler's own module list: an esbuild or Vite metafile or manifest, a source map's `sources`, or a Next.js `.nft.json` trace.
+Without one, grep for a literal that survives minification inside the package's own source, such as an error message (`exceeds maximum allowed length` for picomatch), and first confirm that the same probe matches a build or a file known to include the package.
 A server that installs `node_modules` instead of shipping a bundle (Firebase Functions, a Docker image) ships every production dependency, so there a non-empty `pnpm why <pkg> --prod` or `npm ls <pkg> --omit=dev` is the verdict.
 A Next.js build lists `next/dist/compiled/picomatch` in `.next/next-server.js.nft.json`: that is Next's own vendored copy, used for `images` patterns from `next.config`, not the lockfile package that the alert tracks, and no scanner reads it. Exclude that path and judge the remaining hits.
 
