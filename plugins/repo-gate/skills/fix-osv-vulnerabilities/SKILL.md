@@ -238,8 +238,8 @@ The approval must name the GHSA and the affected package version.
 The evidence is about what ships, not only about the dependency path.
 Build the artifact that the deploy or publish workflow ships and prove what it includes.
 A minified bundle drops package names and import paths, so an empty grep for the package name is not evidence of absence, and an unrelated control string only proves that the files were read.
-Prefer the bundler's own module list: an esbuild or Vite metafile or manifest, a source map's `sources`, or a Next.js `.nft.json` trace.
-Without one, grep for a literal that survives minification inside the package's own source, such as an error message (`exceeds maximum allowed length` for picomatch), and first confirm that the same probe matches a build or a file known to include the package.
+Prefer module-level build metadata: an esbuild metafile's `inputs`, a source map's `sources`, or a Next.js `.nft.json` trace. A Vite `manifest.json` is not one, because it lists entry points and output chunks, not the modules bundled into each chunk.
+Without module-level metadata, grep for a literal that survives minification inside the package's own source, such as an error message (`exceeds maximum allowed length` for picomatch). Validate that probe against a build made with the same production configuration that is known to include the package, because minification or dead-code removal can drop the branch that holds the literal while keeping the rest of the package. If no such positive build exists, treat an empty result as inconclusive, not as absence.
 A server that installs `node_modules` instead of shipping a bundle (Firebase Functions, a Docker image) ships every production dependency, so there a non-empty `pnpm why <pkg> --prod` or `npm ls <pkg> --omit=dev` is the verdict.
 A Next.js build lists `next/dist/compiled/picomatch` in `.next/next-server.js.nft.json`: that is Next's own vendored copy, used for `images` patterns from `next.config`, not the lockfile package that the alert tracks, and no scanner reads it. Exclude that path and judge the remaining hits.
 
@@ -282,14 +282,14 @@ turbo-flutter-log, 2026-11-17: the repository guard reported all 16 consumer-sco
 An ignore entry for a withdrawn advisory suppresses nothing, because osv-scanner stops matching the advisory and its Dependabot alert URL answers HTTP 410.
 Read `gh api advisories/<GHSA> --jq .withdrawn_at` for every GHSA that an `[[IgnoredVulns]]` entry, a `[[PackageOverrides]]` entry or an override comment cites.
 Delete the entries whose advisory is withdrawn, together with any comment that described only them, then confirm that `--show-existing` still reports nothing for that package.
-An override whose only cited advisory is withdrawn still goes through the re-resolve check above, because another advisory can cover the same versions.
+This deletes only the ignore and `[[PackageOverrides]]` entries. A dependency override that cites a withdrawn advisory, alone or beside an active one, stays until the re-resolve check above shows that the versions added without it are outside every active advisory's range, including advisories the override does not cite.
 On 2026-11-18, GHSA-gcqx-w48m-w2h4 (deepmerge), GHSA-vfj7-8cjw-p6xm (braces) and GHSA-hp3w-g68c-fv3c (sprintf-js) had been withdrawn for days to weeks while ignore entries for them remained in eight repositories.
 
 ## Many repositories at once
 
 - **Find the targets from lockfiles, not only from open alerts.** Dependabot dismisses a development-scope alert automatically when it creates it (`state: auto_dismissed`), and an alert can be missing for a day after the advisory's `github_reviewed_at`. Query alerts in every state, and also scan each checkout's tracked lockfiles (`git ls-files`). In the 2026-11-18 picomatch sweep, open alerts named 8 repositories and the lockfile scan found 8 more, three of them with an `auto_dismissed` alert.
 - **Let subagents collect evidence, and write the suppression and dismiss the alert in the coordinating session.** The auto mode classifier refused a subagent's `osv-scanner.toml` suppression edit as "Undermining Oversight", and a subagent's dismiss, because the approval reached the subagent only through its brief. Override removals that a subagent verified and pushed were not refused. Have each subagent report the config path, the exact entry text, the lockfile to scan and the dismiss comment.
-- **Read each repository's state before you push.** `git rev-list --count origin/main..main` must equal the number of commits you made, or the push also publishes someone else's unpushed work, as happened once in that sweep. A ruleset that rejects a direct push, or a repository frozen for an external review, is a reason to stop and ask, not to switch to a PR on your own: one PR opened that way had to be closed unmerged.
+- **Read each repository's state before you push.** Read `git log --format='%h %an %ad %s' origin/main..main` and confirm that every listed commit is one you made for this push; a count can match while a different commit sits in the range, and a push publishes all of them, as happened once in that sweep. A ruleset that rejects a direct push, or a repository frozen for an external review, is a reason to stop and ask, not to switch to a PR on your own: one PR opened that way had to be closed unmerged.
 
 ## Common Mistakes
 
