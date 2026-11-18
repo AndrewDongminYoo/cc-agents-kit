@@ -1,6 +1,6 @@
 ---
 name: fix-osv-vulnerabilities
-description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn or Bundler project and you need to triage and fix them, or before you remove a security override or resolution because something reports it as unused or resolved.
+description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn or Bundler project and you need to triage and fix them, including one advisory across many repositories, or before you remove a security override, resolution or ignore entry because something reports it as unused, resolved or withdrawn.
 metadata:
   category: dependencies
 ---
@@ -235,6 +235,14 @@ First collect reachability evidence for the installed package and each affected 
 Then obtain explicit approval for the suppression.
 The approval must name the GHSA and the affected package version.
 
+The evidence is about what ships, not only about the dependency path.
+Build the artifact that the deploy or publish workflow ships and prove what it includes.
+A minified bundle drops package names and import paths, so an empty grep for the package name is not evidence of absence, and an unrelated control string only proves that the files were read.
+Absence needs module-level metadata for the shipped build: an esbuild metafile's `inputs`, or the `sources` of the source maps that ship with each chunk. A Vite `manifest.json` lists entry points and output chunks, and a Next.js `.nft.json` lists runtime files to copy; neither lists the modules bundled into a chunk. A server deployment can also ship packages outside the bundle, so check its runtime file list (`.nft.json`, the deployed `node_modules`) as well.
+A literal from inside the package that survives minification, such as an error message (`exceeds maximum allowed length` for picomatch), can show that the package is included, but tree shaking can drop the branch that holds it while keeping the rest. Without module-level metadata, an empty result is inconclusive, not absence: decide from the dependency path instead, or ask.
+A server that installs `node_modules` instead of shipping a bundle (Firebase Functions, a Docker image) ships every production dependency, so there a non-empty `pnpm why <pkg> --prod` or `npm ls <pkg> --omit=dev` is the verdict.
+A Next.js build lists `next/dist/compiled/picomatch` in `.next/next-server.js.nft.json`: that is Next's own vendored copy, used for `images` patterns from `next.config`, not the lockfile package that the alert tracks, and no scanner reads it. Exclude that path and judge the remaining hits.
+
 After approval, append an `[[IgnoredVulns]]` entry that records the evidence, date, reason, and reevaluation owner:
 
 ```toml
@@ -269,6 +277,21 @@ For each candidate override:
 
 turbo-flutter-log, 2026-11-17: the repository guard reported all 16 consumer-scoped overrides as unused and Dependabot showed no open alerts. Without the overrides the lockfile resolved minimatch 9 and 10, glob 10 and 13, diff 7 and serialize-javascript 6, each inside its cited range. In the same repository, the MSAL override was correctly retired, because its parent resolved msal-node 7.2.2 outside GHSA-xcx6-jx8p-x3h5.
 
+### Withdrawn advisories
+
+An ignore entry for a withdrawn advisory suppresses nothing, because osv-scanner stops matching the advisory and its Dependabot alert URL answers HTTP 410.
+Read `gh api advisories/<GHSA> --jq .withdrawn_at` for every GHSA that an `[[IgnoredVulns]]` entry, a `[[PackageOverrides]]` entry or an override comment cites.
+Delete each `[[IgnoredVulns]]` entry whose advisory is withdrawn, together with any comment that described only it, then confirm that `--show-existing` still reports nothing for that package.
+A `[[PackageOverrides]]` entry applies to the whole package version, not to one GHSA, so remove it only after a `--show-existing` scan with the entry moved aside, and the lockfile touched first so the osv-scanner cache cannot answer, reports no finding for that package.
+A dependency override that cites a withdrawn advisory, alone or beside an active one, stays until the re-resolve check above shows that the versions added without it are outside every active advisory's range, including advisories the override does not cite.
+On 2026-11-18, GHSA-gcqx-w48m-w2h4 (deepmerge), GHSA-vfj7-8cjw-p6xm (braces) and GHSA-hp3w-g68c-fv3c (sprintf-js) had been withdrawn for days to weeks while ignore entries for them remained in eight repositories.
+
+## Many repositories at once
+
+- **Find the targets from lockfiles, not only from open alerts.** Dependabot dismisses a development-scope alert automatically when it creates it (`state: auto_dismissed`), and an alert can be missing for a day after the advisory's `github_reviewed_at`. Query alerts in every state, and also scan each checkout's tracked lockfiles (`git ls-files`). In the 2026-11-18 picomatch sweep, open alerts named 8 repositories and the lockfile scan found 8 more, three of them with an `auto_dismissed` alert.
+- **Let subagents collect evidence, and write the suppression and dismiss the alert in the coordinating session.** The auto mode classifier refused a subagent's `osv-scanner.toml` suppression edit as "Undermining Oversight", and a subagent's dismiss, because the approval reached the subagent only through its brief. Override removals that a subagent verified and pushed were not refused. Have each subagent report the config path, the exact entry text, the lockfile to scan and the dismiss comment.
+- **Read each repository's state before you push.** Run `git fetch` right before the push, then read `git log --format='%h %an %ad %s' origin/main..main` and confirm that every listed commit is one you made for this push; a count can match while a different commit sits in the range, and a push publishes all of them, as happened once in that sweep. A ruleset that rejects a direct push, or a repository frozen for an external review, is a reason to stop and ask, not to switch to a PR on your own: one PR opened that way had to be closed unmerged.
+
 ## Common Mistakes
 
 | Mistake                                                   | Fix                                                                                               |
@@ -287,6 +310,8 @@ turbo-flutter-log, 2026-11-17: the repository guard reported all 16 consumer-sco
 | Deduping advisories to the highest patched version        | The unreachable fix hides the reachable one — scope to the installed major                        |
 | Listing Dependabot alerts without `--paginate`            | Truncates at 30, oldest first, and reads as a complete list                                       |
 | Removing an override because a guard or alert says unused | Re-resolve without it and compare against the advisory ranges ("Retiring an override")            |
+| Keeping an ignore entry for a withdrawn advisory          | Read `withdrawn_at`; the entry suppresses nothing, so delete it ("Withdrawn advisories")          |
+| Choosing sweep targets from open alerts only              | Development-scope alerts are `auto_dismissed`; scan tracked lockfiles too                         |
 
 ## Provenance
 
