@@ -5,10 +5,15 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-11-18
+
+`fix-osv-vulnerabilities` now retires security overrides and ignore entries only against the advisory ranges (#109), and covers withdrawn advisories and one advisory swept across many repositories (#110).
+`repo-gate` goes to 0.2.14; `context-handoff` (0.3.0), `context-meter` (0.1.0), `guard-hooks` (0.6.1), `quick-look` (0.1.0) and `reply-language` (0.3.0) are unchanged.
+
 ### Changed
 
-- `repo-gate` 0.2.13: `fix-osv-vulnerabilities` adds "Retiring an override". It removes a security override only after the graph without it is compared against the cited advisory ranges, and it no longer accepts a fixed Dependabot alert or a guard's "unused" report as proof. The skill now also triggers before an override is removed.
-- `repo-gate` 0.2.14: `fix-osv-vulnerabilities` adds "Withdrawn advisories" and "Many repositories at once". An ignore entry whose advisory is withdrawn is deleted after a `withdrawn_at` check. A sweep finds targets from tracked lockfiles as well as alerts, because development-scope alerts are dismissed automatically. Subagents collect evidence while the coordinating session writes suppressions and dismisses alerts, and no push goes out while local `main` carries commits that are not yours. An empty search of a shipped bundle now counts as absence only with module-level metadata (an esbuild metafile or source map `sources`), and the skill explains Next.js's vendored `next/dist/compiled/picomatch`.
+- `repo-gate` 0.2.13: `fix-osv-vulnerabilities` adds "Retiring an override". It removes a security override only after the graph without it is compared against the cited advisory ranges, and it no longer accepts a fixed Dependabot alert or a guard's "unused" report as proof. The skill now also triggers before an override is removed (#109).
+- `repo-gate` 0.2.14: `fix-osv-vulnerabilities` adds "Withdrawn advisories" and "Many repositories at once". An ignore entry whose advisory is withdrawn is deleted after a `withdrawn_at` check. A sweep finds targets from tracked lockfiles as well as alerts, because development-scope alerts are dismissed automatically. Subagents collect evidence while the coordinating session writes suppressions and dismisses alerts, and no push goes out while local `main` carries commits that are not yours. An empty search of a shipped bundle now counts as absence only with module-level metadata (an esbuild metafile or source map `sources`), and the skill explains Next.js's vendored `next/dist/compiled/picomatch` (#110).
 
 ## [0.13.0] — 2026-11-15
 
