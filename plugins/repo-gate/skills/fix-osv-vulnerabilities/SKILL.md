@@ -1,6 +1,6 @@
 ---
 name: fix-osv-vulnerabilities
-description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn or Bundler project and you need to triage and fix them, or before you remove a security override or resolution because something reports it as unused or resolved.
+description: Use when osv-scanner or trunk check reports dependency vulnerabilities (GHSA-*) in a pnpm/npm/yarn or Bundler project and you need to triage and fix them, including one advisory across many repositories, or before you remove a security override, resolution or ignore entry because something reports it as unused, resolved or withdrawn.
 metadata:
   category: dependencies
 ---
@@ -235,6 +235,11 @@ First collect reachability evidence for the installed package and each affected 
 Then obtain explicit approval for the suppression.
 The approval must name the GHSA and the affected package version.
 
+The evidence is about what ships, not only about the dependency path.
+Build the artifact that the deploy or publish workflow ships, grep it for the package and the parents that would carry it, and grep a string that must be in it within the same scope, so an empty result is not a grep that read nothing.
+A server that installs `node_modules` instead of shipping a bundle (Firebase Functions, a Docker image) ships every production dependency, so there a non-empty `pnpm why <pkg> --prod` or `npm ls <pkg> --omit=dev` is the verdict.
+A Next.js build lists `next/dist/compiled/picomatch` in `.next/next-server.js.nft.json`: that is Next's own vendored copy, used for `images` patterns from `next.config`, not the lockfile package that the alert tracks, and no scanner reads it. Exclude that path and judge the remaining hits.
+
 After approval, append an `[[IgnoredVulns]]` entry that records the evidence, date, reason, and reevaluation owner:
 
 ```toml
@@ -269,6 +274,20 @@ For each candidate override:
 
 turbo-flutter-log, 2026-11-17: the repository guard reported all 16 consumer-scoped overrides as unused and Dependabot showed no open alerts. Without the overrides the lockfile resolved minimatch 9 and 10, glob 10 and 13, diff 7 and serialize-javascript 6, each inside its cited range. In the same repository, the MSAL override was correctly retired, because its parent resolved msal-node 7.2.2 outside GHSA-xcx6-jx8p-x3h5.
 
+### Withdrawn advisories
+
+An ignore entry for a withdrawn advisory suppresses nothing, because osv-scanner stops matching the advisory and its Dependabot alert URL answers HTTP 410.
+Read `gh api advisories/<GHSA> --jq .withdrawn_at` for every GHSA that an `[[IgnoredVulns]]` entry, a `[[PackageOverrides]]` entry or an override comment cites.
+Delete the entries whose advisory is withdrawn, together with any comment that described only them, then confirm that `--show-existing` still reports nothing for that package.
+An override whose only cited advisory is withdrawn still goes through the re-resolve check above, because another advisory can cover the same versions.
+On 2026-11-18, GHSA-gcqx-w48m-w2h4 (deepmerge), GHSA-vfj7-8cjw-p6xm (braces) and GHSA-hp3w-g68c-fv3c (sprintf-js) had been withdrawn for days to weeks while ignore entries for them remained in eight repositories.
+
+## Many repositories at once
+
+- **Find the targets from lockfiles, not only from open alerts.** Dependabot dismisses a development-scope alert automatically when it creates it (`state: auto_dismissed`), and an alert can be missing for a day after the advisory's `github_reviewed_at`. Query alerts in every state, and also scan each checkout's tracked lockfiles (`git ls-files`). In the 2026-11-18 picomatch sweep, open alerts named 8 repositories and the lockfile scan found 8 more, three of them with an `auto_dismissed` alert.
+- **Let subagents collect evidence, and write the suppression and dismiss the alert in the coordinating session.** The auto mode classifier refused a subagent's `osv-scanner.toml` suppression edit as "Undermining Oversight", and a subagent's dismiss, because the approval reached the subagent only through its brief. Override removals that a subagent verified and pushed were not refused. Have each subagent report the config path, the exact entry text, the lockfile to scan and the dismiss comment.
+- **Read each repository's state before you push.** `git rev-list --count origin/main..main` must equal the number of commits you made, or the push also publishes someone else's unpushed work, as happened once in that sweep. A ruleset that rejects a direct push, or a repository frozen for an external review, is a reason to stop and ask, not to switch to a PR on your own: one PR opened that way had to be closed unmerged.
+
 ## Common Mistakes
 
 | Mistake                                                   | Fix                                                                                               |
@@ -287,6 +306,8 @@ turbo-flutter-log, 2026-11-17: the repository guard reported all 16 consumer-sco
 | Deduping advisories to the highest patched version        | The unreachable fix hides the reachable one — scope to the installed major                        |
 | Listing Dependabot alerts without `--paginate`            | Truncates at 30, oldest first, and reads as a complete list                                       |
 | Removing an override because a guard or alert says unused | Re-resolve without it and compare against the advisory ranges ("Retiring an override")            |
+| Keeping an ignore entry for a withdrawn advisory          | Read `withdrawn_at`; the entry suppresses nothing, so delete it ("Withdrawn advisories")          |
+| Choosing sweep targets from open alerts only              | Development-scope alerts are `auto_dismissed`; scan tracked lockfiles too                         |
 
 ## Provenance
 
