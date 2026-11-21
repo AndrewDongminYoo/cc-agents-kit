@@ -14,12 +14,12 @@ Logging them means routing each fact to the store whose reader needs it — neve
 
 ## Route each fact by who must see it
 
-| The fact is...                                                                       | Write to                                                                                                                            | Its reader                           |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| What the next session in THIS project must know at start (convention, gotcha, state) | project memory `~/.claude/projects/<slug>/memory/`, per the memory system prompt                                                    | auto-loaded via MEMORY.md            |
-| A pattern that holds beyond this project                                             | a cross-project store you keep outside any one repo — or, for agent-behaviour guidance confirmed in 2+ projects, `~/.claude/rules/` | whatever retrieves precedent for you |
-| Unfinished work the next session continues                                           | thin handoff (below)                                                                                                                | a SessionStart hook, if you run one  |
-| Engineering record for humans in the repo                                            | `docs/notes/`, or the notes location the repo already uses                                                                          | repo readers                         |
+| The fact is...                                                                       | Write to                                                                                                                        | Its reader                           |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| What the next session in THIS project must know at start (convention, gotcha, state) | project memory `~/.claude/projects/<slug>/memory/`, per the memory system prompt                                                | auto-loaded via MEMORY.md            |
+| A pattern that holds beyond this project                                             | a cross-project store you keep outside any one repo; agent-behaviour guidance confirmed in 2+ projects is proposed, not written | whatever retrieves precedent for you |
+| Unfinished work the next session continues                                           | thin handoff (below)                                                                                                            | a SessionStart hook, if you run one  |
+| Engineering record for humans in the repo                                            | `docs/notes/`, or the notes location the repo already uses                                                                      | repo readers                         |
 
 Rules the routing depends on:
 
@@ -35,6 +35,9 @@ Rules the routing depends on:
   Do not invent a schema, an index, or a command that the store does not define; a plain directory of Markdown files needs none of these steps.
   A page added without the steps its store requires is debt that another session has to diagnose, and an invalid page can turn the shared check red for every other session.
 
+- **Propose a change to the global instruction files; do not make it.** `~/.claude/CLAUDE.md` and the files under `~/.claude/rules/` load in every session, so the user must be able to vouch for every sentence in them.
+  When agent-behaviour guidance confirmed in two or more projects belongs there, write nothing to those files.
+  Report the exact sentence to add or change, the file and place for it, and the projects that support it; the user makes the edit.
 - Keep accounts and contexts separate: work written for one account's store never lands in another's.
 - Classify scope out loud (project vs global vs cross-project store) for each fact.
   Make the decision at save time, and say it, because a decision that is not said is the one that gets skipped.
