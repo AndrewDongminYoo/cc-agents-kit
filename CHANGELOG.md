@@ -5,6 +5,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `context-handoff` 0.3.1: `log-it` no longer writes to the global instruction files (`~/.claude/CLAUDE.md` and the files under `~/.claude/rules/`). When guidance confirmed in two or more projects belongs there, it reports the exact sentence to add or change, the file and place for it, and the projects that support it, and the user makes the edit.
+
 ## [0.13.1] — 2026-11-18
 
 `fix-osv-vulnerabilities` now retires security overrides and ignore entries only against the advisory ranges (#109), and covers withdrawn advisories and one advisory swept across many repositories (#110).
