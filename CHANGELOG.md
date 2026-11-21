@@ -5,9 +5,14 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-11-22
+
+`log-it` now proposes a change to the global instruction files and leaves the edit to the user (#112).
+`context-handoff` goes to 0.3.1; `context-meter` (0.1.0), `guard-hooks` (0.6.1), `quick-look` (0.1.0), `reply-language` (0.3.0) and `repo-gate` (0.2.14) are unchanged.
+
 ### Changed
 
-- `context-handoff` 0.3.1: `log-it` no longer writes to the global instruction files (`~/.claude/CLAUDE.md` and the files under `~/.claude/rules/`). When guidance confirmed in two or more projects belongs there, it reports the exact sentence to add or change, the file and place for it, and the projects that support it, and the user makes the edit.
+- `context-handoff` 0.3.1: `log-it` no longer writes to the global instruction files (`~/.claude/CLAUDE.md` and the files under `~/.claude/rules/`). When guidance confirmed in two or more projects belongs there, it reports the exact sentence to add or change, the file and place for it, and the projects that support it, and the user makes the edit (#112).
 
 ## [0.13.1] — 2026-11-18
 
