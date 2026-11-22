@@ -59,6 +59,7 @@ Run literal and encoded detection controls outside that path, and stop each one-
 plugins/<plugin>/
   .claude-plugin/plugin.json      # each plugin carries its own manifest
   .claude-plugin/icon.png         # listing icon, rendered from docs/icons/<plugin>.svg
+  README.md                       # what the plugin does and runs; an installer receives only this folder
   hooks/hooks.json                # auto-discovered; commands reference ${CLAUDE_PLUGIN_ROOT}
   hooks/*.sh
   hooks/*.test.py                 # beside its hook, never in a tests/ directory

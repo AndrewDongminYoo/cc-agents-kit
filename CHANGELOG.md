@@ -8,6 +8,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 ### Added
 
 - Every plugin carries an icon at `.claude-plugin/icon.png` (1024 px square PNG), for listings that show one. The six icons share one mark, a slab-serif C on a rust tile, and differ in the glyph inside it. The SVG sources are in `docs/icons/`. The icon changes no behaviour; each plugin moves a patch version so that installs receive the file: `context-handoff` 0.3.3, `context-meter` 0.1.1, `guard-hooks` 0.6.2, `quick-look` 0.1.1, `reply-language` 0.3.1 and `repo-gate` 0.2.16.
+- Every plugin folder has its own `README.md`: what the plugin does, what it runs, what it needs, and how to turn its hooks off. A person who installs one plugin receives only that folder, so the repository README did not reach them.
 
 ### Changed
 
