@@ -1,7 +1,7 @@
 ---
 name: semantic-commit
 description: Use when staged/unstaged changes mix multiple unrelated concerns and need splitting into clean conventional commits, or when asked for "semantic commits", "logical commits", or "커밋 분리". Works in any language or ecosystem.
-allowed-tools: Bash, Read, Glob
+allowed-tools: Bash(git add:*), Bash(git apply:*), Bash(git commit:*), Bash(git diff:*), Bash(git ls-files:*), Bash(git stash:*), Bash(git status:*), Bash(git worktree:*), Bash(git write-tree:*), Read, Glob
 metadata:
   category: commits-ci-release
 ---
