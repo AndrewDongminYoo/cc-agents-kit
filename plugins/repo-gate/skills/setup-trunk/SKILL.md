@@ -63,6 +63,44 @@ In a repository scaffolded this session, that commit is a precondition of the se
 Pair it with the explicit `trunk check enable` and `trunk actions enable` calls below, or the run leaves an empty gate that still reports success.
 (Both behaviors measured with trunk 1.25.0 on 2026-10-25.)
 
+**Pin the plugin source to a commit, not to a tag.**
+`trunk init` writes the plugin source as a Git tag, for example `ref: v1.11.0`.
+A tag can move to a different commit.
+Then the linters and the git-hook actions that the plugin defines run different code on every developer machine, and the repository shows no diff.
+A security scan of a repository with this setup reported it as a medium finding (2026-11-22).
+
+`trunk init` cannot write a commit.
+Trunk 1.29.0 rejects `--sha` with `The following argument was not expected: --sha`.
+`trunk init --lock` adds `cli.sha256` values for the Trunk CLI download only, and it keeps the plugin `ref` as a tag.
+Use `--lock` for the CLI, and pin the plugin source by hand:
+
+1. Resolve the tag to its commit:
+
+   ```bash
+   git ls-remote https://github.com/trunk-io/plugins 'refs/tags/v1.11.0' 'refs/tags/v1.11.0^{}'
+   ```
+
+   If a `^{}` line is printed, the tag is annotated, and that line holds the commit. Otherwise use the tag line. (`v1.11.0` is a lightweight tag on `d1e3af5752059371e206fe8f242b15d7f4205555`.)
+
+2. Write the full 40-character SHA into `ref`, with no comment after it:
+
+   ```yaml
+   plugins:
+     sources:
+       - id: trunk
+         ref: d1e3af5752059371e206fe8f242b15d7f4205555
+         uri: https://github.com/trunk-io/plugins
+   ```
+
+3. Run `trunk print-config`. It must exit 0. The plugin cache under `~/.cache/trunk/plugins/` then has an entry whose name starts with that SHA.
+
+**`trunk upgrade` puts the tag back.**
+`trunk upgrade plugins -y` replaced a pinned `ref: f39f279…` (`v1.10.2`) with `ref: v1.11.0`.
+It kept a trailing comment unchanged, which gave `ref: v1.11.0 # v1.10.2`, so a tag comment beside the SHA becomes false after the next upgrade.
+After each upgrade, resolve the new tag and pin the SHA again.
+Record the tag in the commit message, not in a comment.
+(trunk 1.29.0, plugins v1.10.2 and v1.11.0, 2026-11-22.)
+
 ### 3. Review built-in actions
 
 After `trunk init`, review which built-in actions are active and compare them with existing CI and repository hooks:
@@ -598,6 +636,7 @@ When `trunk check` reports a dependency vulnerability (e.g., from `osv-scanner`)
 | Trusting a clean `osv-scanner` run in a uv project            | Add a `uv.lock` file type; trunk's `lockfile` type omits it          |
 | Exempting a pinact floating ref with `lint.ignore`            | Use a `rules` entry in `.github/pinact.yml`                          |
 | Prettier plugin "Cannot find package" under a subdirectory    | Add the plugin to the prettier tool's `extra_packages`               |
+| Leaving the plugin source on a tag such as `ref: v1.11.0`     | Pin `ref` to the tag's commit SHA, and pin it again after upgrades   |
 
 ## Linter configuration references
 
@@ -626,7 +665,8 @@ Before inventing a config, look at one you already wrote. `find-trunk-repos` is 
 ```bash
 find-trunk-repos                    # your repos that already have a trunk config
 
-trunk init                          # Initialize trunk in repo
+trunk init --lock                   # Initialize trunk in repo, with sha256 values for the CLI
+git ls-remote https://github.com/trunk-io/plugins 'refs/tags/<tag>' 'refs/tags/<tag>^{}'  # commit to pin in plugins.sources[].ref
 seed=$(mktemp) && gh gist view d34ab86436fc18aa750f21818c1abe48 -f .markdownlint.yaml --raw > "$seed" && mv "$seed" .trunk/configs/.markdownlint.yaml  # seed the markdownlint baseline (after init)
 trunk config hide                   # Keep .trunk/ local (not committed)
 trunk config share                  # Commit .trunk/ config to repo
