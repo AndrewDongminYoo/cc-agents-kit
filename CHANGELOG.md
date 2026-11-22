@@ -5,6 +5,12 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-22
+
+Every plugin now stands by itself: each folder carries an icon and its own README (#116, #117), and three skills pre-approve only the commands they run (#117).
+The handoff template and the compaction brief gain a Decisions section (#115), and `setup-trunk` pins the trunk plugin source to a commit (#114).
+`context-handoff` goes to 0.3.4, `context-meter` to 0.1.1, `guard-hooks` to 0.6.2, `quick-look` to 0.1.1, `reply-language` to 0.3.1 and `repo-gate` to 0.2.17.
+
 ### Added
 
 - Every plugin carries an icon at `.claude-plugin/icon.png` (1024 px square PNG), for listings that show one. The six icons share one mark, a slab-serif C on a rust tile, and differ in the glyph inside it. The SVG sources are in `docs/icons/`. The icon changes no behaviour; each plugin moves a patch version so that installs receive the file: `context-handoff` 0.3.3, `context-meter` 0.1.1, `guard-hooks` 0.6.2, `quick-look` 0.1.1, `reply-language` 0.3.1 and `repo-gate` 0.2.16.
