@@ -1,6 +1,6 @@
 {
   "name": "context-meter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reads each model request's own usage, shows the real context fill above the prompt, vetoes an auto-compact the advisor's double-counted usage would fire, and sends the handoff nudge once at 80%.",
   "author": {
     "name": "Dongmin Yu"
