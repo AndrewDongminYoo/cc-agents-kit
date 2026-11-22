@@ -1,7 +1,7 @@
 ---
 name: handoff
 description: Use when a session's context is getting long or degrading and you need a detailed, self-contained summary to manually paste into a fresh session (or hand to another machine/tool/teammate). For a short durable fact instead, write it to the persistent memory directory (auto-loaded via MEMORY.md).
-allowed-tools: Bash, Read
+allowed-tools: Bash(git diff:*), Bash(git status:*), Read
 metadata:
   category: claude-config
 ---

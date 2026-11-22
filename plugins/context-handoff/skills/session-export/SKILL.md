@@ -1,7 +1,7 @@
 ---
 name: session-export
 description: Export a Claude Code session as Markdown, HTML, or JSON. Use when the user wants to save, archive, share, or re-read a transcript. For a continuation summary, use /handoff instead.
-allowed-tools: Bash, Read
+allowed-tools: Bash(session-to-md:*), Read
 metadata:
   category: claude-config
 ---
