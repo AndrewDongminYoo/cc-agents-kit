@@ -1,6 +1,6 @@
 {
   "name": "reply-language",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Temporary workaround for anthropics/claude-code#99704, to be removed once it is fixed: keeps user-facing text in the language set by `language` (Korean, Japanese, Chinese and other non-Latin scripts) by restating the rule after tool results, refusing an AskUserQuestion dialog written in English, and asking for a restatement when a turn drifted into English.",
   "author": {
     "name": "Dongmin Yu"

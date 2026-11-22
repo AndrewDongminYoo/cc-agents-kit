@@ -1,6 +1,6 @@
 {
   "name": "quick-look",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Collects the files the agent reads, writes or names in its answer, and opens them in macOS Quick Look from a /ql command or a pane, in any terminal including Warp.",
   "author": {
     "name": "Dongmin Yu"
