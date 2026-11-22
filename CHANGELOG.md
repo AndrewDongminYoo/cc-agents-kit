@@ -7,6 +7,7 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ### Changed
 
+- `context-handoff` 0.3.2: the handoff template and the compaction brief gain a Decisions section. It records each choice the remaining work depends on, the reason for it, and any alternative rejected and why. The `handoff` skill already told the writer to extract decisions, but the template had no section for them, and Dead ends covers only approaches that were tried and failed. The section is an addition to the list taken from arXiv 2611.05306, Appendix G.
 - `repo-gate` 0.2.15: `setup-trunk` pins the plugin source to a commit. `trunk init` writes `plugins.sources[].ref` as a movable Git tag and has no option to write a commit (trunk 1.29.0 rejects `--sha`, and `--lock` pins only the CLI download), so the skill resolves the tag with `git ls-remote` and writes the full SHA into `ref`. It also records that `trunk upgrade plugins` puts the tag back and keeps a trailing comment unchanged, so the SHA must be pinned again after each upgrade.
 
 ## [0.13.2] — 2026-11-22

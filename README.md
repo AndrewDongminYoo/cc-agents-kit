@@ -350,6 +350,7 @@ Six skills for work that outlives one session, and for the config that work drag
 
 Two hooks give a compaction the same shape as a handoff, so the summary that survives an auto-compact is a brief for the work still to be done rather than a narrative of the work so far.
 The section list is the compaction prompt from "You don't need long context" (arXiv 2611.05306, Appendix G): the task and acceptance criteria verbatim, then established facts, applied changes, verification, dead ends, the remaining plan, and the commands that re-fetch what the summary dropped.
+One section is added to that list: decisions, each with its reason and the alternative it replaced.
 Neither hook blocks or delays a compaction; `context-meter` owns the veto.
 
 | Hook                        | Event · matcher             | Does                                                                                                                   | Opt-out                                     |

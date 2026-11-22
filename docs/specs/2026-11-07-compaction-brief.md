@@ -41,6 +41,8 @@ RECAP (written fresh on every compaction or handoff from the current state)
                     observations separated from unverified ideas
   Applied changes   each changed or created file, what changed, and whether it was verified
   Verification      exact checks run, outcomes, failures, obstacles, workarounds
+  Decisions         each choice the remaining work depends on, the reason for it,
+                    and any alternative rejected and why (added 2026-11-22, see the amendment)
   Dead ends         failed approaches not to repeat, each with its evidence
   Remaining plan    outstanding subgoals in execution order, the immediate next command or edit,
                     and the condition for completion
@@ -115,3 +117,14 @@ Adding `hooks/hooks.json` makes the plugin auto-discover hooks; `plugin.json` ke
 
 Push and PR creation wait for explicit approval.
 The PR follows `opening-and-merging-prs`; the version bump rides the feature commit and the release commit stays CHANGELOG-only (CONTRIBUTING §Releasing).
+
+## Amendment 2026-11-22: a Decisions section
+
+The RECAP gains one section, Decisions, between Verification and Dead ends, in both the hook and the `handoff` template (`context-handoff` 0.3.2).
+The `handoff` skill's Steps already told the writer to extract decisions, and the template had no section to put them in.
+Dead ends holds approaches that were tried and failed, so an option rejected without a trial, and the reason a choice was made, had no place and were lost at every compaction.
+The skill's own gate names that reason as the part that does not come back from reading the diff.
+
+This section is not in the Appendix G prompt.
+The paper's results are evidence for the original list only; they do not cover this addition, and it has not been measured.
+The count of RECAP sections is now ten.

@@ -23,6 +23,7 @@ HEADINGS = (
     "- Established facts:",
     "- Applied changes:",
     "- Verification:",
+    "- Decisions:",
     "- Dead ends:",
     "- Remaining plan:",
     "- Retrieval:",
@@ -69,7 +70,7 @@ def brief_ok(out):
 # --- the case the hook exists for: an auto-compact gets the brief ---
 code, out, err = run(event("auto", transcript_path=TRANSCRIPT))
 check("auto: exit 0", code == 0, f"exit={code} err={err!r}")
-check("auto: all twelve headings and the closing line", brief_ok(out), out)
+check("auto: all thirteen headings and the closing line", brief_ok(out), out)
 check("auto: transcript path named", TRANSCRIPT in out, out)
 check(
     "auto: FIXED is append-only, not frozen",

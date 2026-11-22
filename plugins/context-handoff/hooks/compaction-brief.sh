@@ -12,6 +12,8 @@
 # the work still to be done, not a narrative of the work so far. The design is
 # docs/specs/2026-11-07-compaction-brief.md. The handoff skill's template uses
 # the same sections, so a compaction is the thin version of a handoff.
+# "Decisions" is the one section that is not in the paper's prompt; the spec's
+# 2026-11-22 amendment gives the reason.
 #
 # Fail open: empty, malformed or key-less input still prints the brief, because
 # printing nothing silently falls back to the default summary, which is the
@@ -56,6 +58,7 @@ $TRANSCRIPT_LINE
 - Established facts: exact paths, symbols, commands, observed values and the important errors or output, with observations separated from unverified ideas.
 - Applied changes: each changed or created file, what changed, and whether it was verified.
 - Verification: the exact checks run, their outcomes, failures, obstacles and workarounds.
+- Decisions: each choice the remaining work depends on, with the reason for it and any alternative that was rejected and why; a choice the user made is marked as the user's.
 - Dead ends: approaches that failed and must not be repeated, each with the evidence that it failed.
 - Remaining plan: the outstanding subgoals in execution order, the immediate next command or edit, and the condition for completion.
 - Retrieval: narrow commands to re-fetch anything this summary had to truncate or drop, such as a grep or sed -n over the transcript path above, or a file with a line range.

@@ -115,6 +115,11 @@ VERIFICATION
 ------------
 - [Exact checks run, outcomes, failures, obstacles, workarounds]
 
+DECISIONS
+---------
+- [A choice the remaining work depends on] - [the reason for it] - [any alternative rejected, and why]
+- [Who made it, when it was the user]
+
 DEAD ENDS
 ---------
 - [An approach that failed and must not be retried] - [the evidence that it failed]
@@ -146,6 +151,7 @@ The last line of EXTERNAL STATUS is fixed text: keep it in every handoff, becaus
 - Never include secrets (API keys, credentials, tokens).
 - At most 10 files across ESTABLISHED FACTS and APPLIED CHANGES, prioritized by importance. OBJECTIVE is one line.
 - Every DEAD ENDS entry carries its evidence; a failure with no evidence in hand is marked unverified rather than asserted.
+- DECISIONS holds choices and the reasons for them; DEAD ENDS holds approaches that were tried and failed. An option rejected without a trial goes in DECISIONS.
 
 ## Continuation Instructions
 
