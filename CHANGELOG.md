@@ -5,6 +5,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `repo-gate` 0.2.15: `setup-trunk` pins the plugin source to a commit. `trunk init` writes `plugins.sources[].ref` as a movable Git tag and has no option to write a commit (trunk 1.29.0 rejects `--sha`, and `--lock` pins only the CLI download), so the skill resolves the tag with `git ls-remote` and writes the full SHA into `ref`. It also records that `trunk upgrade plugins` puts the tag back and keeps a trailing comment unchanged, so the SHA must be pinned again after each upgrade.
+
 ## [0.13.2] — 2026-11-22
 
 `log-it` now proposes a change to the global instruction files and leaves the edit to the user (#112).
