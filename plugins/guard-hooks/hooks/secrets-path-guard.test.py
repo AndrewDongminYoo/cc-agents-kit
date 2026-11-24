@@ -1185,6 +1185,22 @@ print(
     f"{'ok  ' if ok else 'FAIL'} exit={proc.returncode} (want 2)  recursive refusal names both exclusion forms"
 )
 
+# The refusal offers plain rg first, before the grep exclusion, and that offer
+# passes: a model that follows the first fix is not refused again.
+rg_offer = proc.stderr.find("Use plain rg PATTERN PATH")
+ok = 0 <= rg_offer < proc.stderr.find("--exclude='.env*'")
+rerun = subprocess.run(
+    ["/bin/bash", HOOK],
+    input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "rg -n KEY ."}}),
+    capture_output=True,
+    text=True,
+)
+ok = ok and rerun.returncode == 0
+fails += not ok
+print(
+    f"{'ok  ' if ok else 'FAIL'} exit={rerun.returncode} (want 0)  recursive refusal offers plain rg first, and it passes"
+)
+
 DOTENV_MSG = "Blocked: dotenv path"
 
 # The refusal of an unquoted .env* exclusion, two-word or attached (#56), names
