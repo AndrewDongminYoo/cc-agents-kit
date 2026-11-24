@@ -5,6 +5,11 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-11-24
+
+The recursive-search refusal in `secrets-path-guard` now offers plain `rg` as its first fix (#119).
+`guard-hooks` goes to 0.6.3; `context-handoff` (0.3.4), `context-meter` (0.1.1), `quick-look` (0.1.1), `reply-language` (0.3.1) and `repo-gate` (0.2.17) are unchanged.
+
 ### Changed
 
 - `guard-hooks` 0.6.3: the `secrets-path-guard` refusal of a recursive search now offers plain `rg PATTERN PATH` first, because rg skips hidden files such as `.env` and the hook lets it run. The `grep -r --exclude='.env*'` fix and the `rg -g '!.env*'` rule follow it. What the hook blocks does not change. In the 14 days before this change, a quarter of the retries after this refusal were refused again by the same rule, and 173 of the 193 refused commands passed when written as `rg`.
