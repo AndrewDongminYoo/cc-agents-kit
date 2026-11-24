@@ -5,6 +5,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `guard-hooks` 0.6.3: the `secrets-path-guard` refusal of a recursive search now offers plain `rg PATTERN PATH` first, because rg skips hidden files such as `.env` and the hook lets it run. The `grep -r --exclude='.env*'` fix and the `rg -g '!.env*'` rule follow it. What the hook blocks does not change. In the 14 days before this change, a quarter of the retries after this refusal were refused again by the same rule, and 173 of the 193 refused commands passed when written as `rg`.
+
 ## [0.14.0] — 2026-11-22
 
 Every plugin now stands by itself: each folder carries an icon and its own README (#116, #117), and three skills pre-approve only the commands they run (#117).

@@ -195,7 +195,7 @@ done
 
 # Stage 2: a recursive grep, or an rg that reads hidden files, prints dotenv contents
 # without naming a .env token. Block it unless it excludes dotenv files.
-RECURSIVE_MSG="Blocked: a recursive search can print dotenv contents. Exclude dotenv files: grep -r ... --exclude='.env*' (or limit every --include to *.<ext>), and rg with --hidden, -. or -uu, or with a glob or type that can match a dotenv name (-g '*', -t sh) ... -g '!.env*'. An exclusion counts only when its * is quoted, because the shell expands an unquoted one against file names. Do not request secret values in chat or copy them to another file."
+RECURSIVE_MSG="Blocked: a recursive search can print dotenv contents. Use plain rg PATTERN PATH: it skips hidden files, .env included, so this hook lets it run. To keep grep -r, add --exclude='.env*' (or limit every --include to *.<ext>). An rg with --hidden, -. or -uu, or with a glob or type that can match a dotenv name (-g '*', -t sh), needs -g '!.env*' as its last glob. An exclusion counts only when its * is quoted, because the shell expands an unquoted one against file names. Do not request secret values in chat or copy them to another file."
 IGNORE_FILE_MSG="Blocked: an rg --ignore-file can whitelist dotenv files (!.env), and this hook does not read it. Add -g '!.env*' as the last glob. Do not request secret values in chat or copy them to another file."
 SPLIT_MSG="Blocked: env -S (--split-string) builds the command it runs from a string, so this hook cannot check a grep or rg after it for a recursive search that prints dotenv contents. Run grep or rg without env -S. Do not request secret values in chat or copy them to another file."
 # Dotenv suffixes that an --include='*.<ext>' glob would match (.env.local etc.).
