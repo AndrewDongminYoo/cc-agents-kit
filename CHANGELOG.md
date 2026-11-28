@@ -5,6 +5,10 @@ Entries are grouped by release; the topmost section collects work that has not y
 
 ## [Unreleased]
 
+### Changed
+
+- `repo-gate` 0.2.18: `setup-trunk` matches trunk 1.29.0. It no longer says that `trunk init -n` enables no linters: `-n` answers no to the git-hook and sample-check prompts, and init still enables the linters it detects, so the skill says to read `lint.enabled` after init. The plugin cache path names the URL directory that holds the SHA entry. The evidence table adds GDScript, and the skill shows the pinned `quality-configs` plugin source that defines `gdformat` and `gdlint`, which trunk-io/plugins does not have.
+
 ## [0.14.1] — 2026-11-24
 
 The recursive-search refusal in `secrets-path-guard` now offers plain `rg` as its first fix (#119).
