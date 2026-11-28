@@ -58,10 +58,13 @@ Detection reads committed files, so on a repository with no commit `trunk init` 
 Commit the initial files first.
 In a repository scaffolded this session, that commit is a precondition of the setup, not a separate request.
 
-**`-n` is not a safe way to make init non-interactive.**
-`trunk init -n` answers no to every prompt, so it enables 0 linters, disables `trunk-announce`, `trunk-check-pre-push` and `trunk-fmt-pre-commit`, and installs no git hooks.
-Pair it with the explicit `trunk check enable` and `trunk actions enable` calls below, or the run leaves an empty gate that still reports success.
-(Both behaviors measured with trunk 1.25.0 on 2026-10-25.)
+**`-n` declines the git hooks.**
+`trunk init -n` (`--no-to-all`, also `--nocheck-sample`) answers no to the init prompts: the git-hook setup and the sample check.
+It still enables the linters that it detects.
+It disables `trunk-announce`, `trunk-check-pre-push` and `trunk-fmt-pre-commit`, and installs no git hooks.
+Pair it with the explicit `trunk actions enable` calls below, or nothing runs the gate on commit or push.
+Read `lint.enabled` after init, and remove the detected linters that the evidence table below does not support.
+(Measured with trunk 1.29.0 on 2026-11-28.)
 
 **Pin the plugin source to a commit, not to a tag.**
 `trunk init` writes the plugin source as a Git tag, for example `ref: v1.11.0`.
@@ -92,7 +95,7 @@ Use `--lock` for the CLI, and pin the plugin source by hand:
          uri: https://github.com/trunk-io/plugins
    ```
 
-3. Run `trunk print-config`. It must exit 0. The plugin cache under `~/.cache/trunk/plugins/` then has an entry whose name starts with that SHA.
+3. Run `trunk print-config`. It must exit 0. The plugin cache then has an entry `~/.cache/trunk/plugins/<url-slug>/<sha>-<hash>`, for example `https---github-com-trunk-io-plugins/d1e3af57…-4ebadccd80b22638`.
 
 **`trunk upgrade` puts the tag back.**
 `trunk upgrade plugins -y` replaced a pinned `ref: f39f279…` (`v1.10.2`) with `ref: v1.11.0`.
@@ -214,6 +217,27 @@ Choose from the following candidates only when the inspection step finds matchin
 | Dependency lockfiles supported by the scanner          | `osv-scanner` after verifying the lockfile targets it can interpret        |
 | Terraform, Kubernetes, or other IaC files              | `checkov`                                                                  |
 | A repository requirement for committed-secret scanning | `trufflehog`                                                               |
+| GDScript files                                         | `gdformat@4.5.0`, `gdlint@4.5.0` from a second plugin source (below)       |
+
+`gdformat` and `gdlint` are not in trunk-io/plugins.
+They are proposed in [trunk-io/plugins#1178](https://github.com/trunk-io/plugins/pull/1178), which was open on 2026-11-28.
+If that PR is merged, check whether the trunk source at the pinned commit defines them before you add the second source.
+Without a source that defines them, `trunk check enable gdformat` exits 1 with `gdformat is not a defined linter`, and a hand-written `gdformat@4.5.0` in `lint.enabled` makes `trunk check` report `'gdformat' is not a supported linter` (`trunk/config-error`).
+The public `quality-configs` repository defines both in `linters/gdtoolkit/plugin.yaml` and enables neither by default.
+Add it as a second source, pinned to a commit in the same way as the trunk source, and then run `trunk check enable gdformat@4.5.0 gdlint@4.5.0`:
+
+```yaml
+plugins:
+  sources:
+    - id: trunk
+      ref: d1e3af5752059371e206fe8f242b15d7f4205555
+      uri: https://github.com/trunk-io/plugins
+    - id: quality-configs
+      ref: 2a768fded7d665743bc3d2c978f6a2b6323b3567
+      uri: https://github.com/AndrewDongminYoo/quality-configs
+```
+
+(`2a768fd…` is the commit of the annotated tag `v0.13.0`, read with `git ls-remote` on 2026-11-28. All three behaviors measured with trunk 1.29.0 on the same day.)
 
 The stack examples below are reference fragments, not bundles to copy wholesale.
 Remove every entry unsupported by the inspected repository and preserve tools already pinned by the project.
